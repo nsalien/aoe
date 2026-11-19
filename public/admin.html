@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spelleider · Rijken van de Vallei</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body { overflow: auto; background: #2a2015; }
+    .wrap { max-width: 760px; margin: 24px auto; padding: 0 16px 40px; }
+    .box { background: linear-gradient(170deg, #fbf3df, #ecdcb6); border: 2px solid #8b6a3a; border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+    h1 { color: #f2c95a; font-family: 'Cinzel', serif; }
+    h2 { margin: 0 0 10px; color: #4a2f12; font-size: 18px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+    label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: #6b5535; }
+    pre { white-space: pre-wrap; font-size: 12px; background: rgba(0,0,0,.06); padding: 10px; border-radius: 8px; max-height: 320px; overflow: auto; }
+    .note { font-size: 13px; color: #6b5535; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>♜ Spelleider</h1>
+  <div class="box">
+    <h2>Beheerderssleutel</h2>
+    <p class="note">Dit is de waarde van <code>ADMIN_KEY</code> die je in Cloudflare (of in <code>.dev.vars</code>) instelde. Ze wordt enkel in dit tabblad bewaard.</p>
+    <div class="row"><input id="key" class="field grow" type="password" placeholder="ADMIN_KEY"><button class="btn primary" id="btnStatus">Status ophalen</button></div>
+  </div>
+
+  <div class="box">
+    <h2>Status</h2>
+    <div id="status" class="note">Nog niet opgehaald.</div>
+  </div>
+
+  <div class="box">
+    <h2>Nieuw seizoen starten</h2>
+    <p class="note"><b>Let op:</b> dit wist alle spelers, steden en berichten en maakt een nieuwe wereld.</p>
+    <div class="grid">
+      <label>Startmoment<input id="r-start" class="field" type="datetime-local"></label>
+      <label>Vredestijd (dagen)<input id="r-prep" class="field" type="number" step="0.01" value="21"></label>
+      <label>Oorlog (dagen)<input id="r-war" class="field" type="number" step="0.01" value="7"></label>
+      <label>Spelsnelheid<input id="r-speed" class="field" type="number" step="0.1" value="1"></label>
+      <label>Spelers per team<input id="r-team" class="field" type="number" min="1" max="8" value="2"></label>
+      <label>Deelnamecode (optioneel)<input id="r-code" class="field" placeholder="bv. vrienden2026"></label>
+      <label>Seed (optioneel)<input id="r-seed" class="field" type="number" placeholder="willekeurig"></label>
+    </div>
+    <p class="note">Snelheid 1 = normaal (bouwtijden van minuten tot uren). Om te testen kan je bv. snelheid 50 met 0,05 dagen vrede gebruiken.</p>
+    <div class="actions"><button class="btn danger" id="btnReset">Wereld (opnieuw) aanmaken</button></div>
+  </div>
+
+  <div class="box">
+    <h2>Lopend seizoen aanpassen</h2>
+    <p class="note">Laat velden leeg om ze niet te wijzigen.</p>
+    <div class="grid">
+      <label>Startmoment<input id="u-start" class="field" type="datetime-local"></label>
+      <label>Vredestijd (dagen)<input id="u-prep" class="field" type="number" step="0.01"></label>
+      <label>Oorlog (dagen)<input id="u-war" class="field" type="number" step="0.01"></label>
+      <label>Spelsnelheid<input id="u-speed" class="field" type="number" step="0.1"></label>
+      <label>Spelers per team<input id="u-team" class="field" type="number" min="1" max="8"></label>
+      <label>Deelnamecode<input id="u-code" class="field" placeholder="leeg = ongewijzigd"></label>
+    </div>
+    <div class="actions"><button class="btn primary" id="btnUpdate">Aanpassen</button></div>
+  </div>
+
+  <div class="box">
+    <h2>Bericht aan alle spelers</h2>
+    <div class="row"><input id="msg" class="field grow" maxlength="300" placeholder="bv. De oorlog begint morgen om 20u!"><button class="btn" id="btnMsg">Versturen</button></div>
+  </div>
+  <p class="note" style="color:#cdb88f">← <a href="/" style="color:#f2c95a">Terug naar het spel</a></p>
+</div>
+<script type="module">
+const $ = (s) => document.querySelector(s);
+try { $('#key').value = sessionStorage.getItem('rvs-admin') || ''; } catch {}
+const call = async (method, path, body) => {
+  const key = $('#key').value.trim();
+  try { sessionStorage.setItem('rvs-admin', key); } catch {}
+  const r = await fetch('/api' + path, { method, headers: { 'x-admin-key': key, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({ error: 'Ongeldig antwoord' }));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+};
+const toLocal = (ms) => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+$('#r-start').value = toLocal(Date.now());
+const f = (t) => new Date(t).toLocaleString('nl-BE');
+async function status() {
+  try {
+    const s = await call('GET', '/admin/status');
+    if (!s.world) { $('#status').textContent = 'Er is nog geen wereld. Maak er hieronder een aan.'; return; }
+    const w = s.world;
+    $('#status').innerHTML = `<p><b>Fase:</b> ${w.phase} · <b>snelheid</b> ${w.speed} · <b>teams van</b> ${w.team_size} · <b>code</b> ${w.join_code || '—'} · <b>seed</b> ${w.seed}</p>
+      <p>Start: ${f(w.startAt)}<br>Oorlog vanaf: ${f(w.prepEnd)}<br>Einde: ${f(w.warEnd)}</p>
+      <p><b>${s.players.length} spelers</b>, ${s.marches} legers onderweg</p>
+      <pre>${s.players.map((p) => `${p.team || '?'} — ${p.name.replace(/[<>&]/g, '')} (laatst gezien ${p.last_seen ? f(p.last_seen) : 'nooit'}, ${p.kill_pts} gevechtspunten)`).join('\n') || 'Nog geen spelers.'}</pre>`;
+    $('#u-start').value = toLocal(w.startAt);
+  } catch (e) { $('#status').textContent = 'Fout: ' + e.message; }
+}
+$('#btnStatus').onclick = status;
+$('#btnReset').onclick = async () => {
+  if (!confirm('Alles wissen en een nieuw seizoen starten?')) return;
+  try {
+    const body = { startAt: new Date($('#r-start').value).getTime(), prepDays: $('#r-prep').value, warDays: $('#r-war').value, speed: $('#r-speed').value, teamSize: $('#r-team').value, joinCode: $('#r-code').value, seed: $('#r-seed').value };
+    const r = await call('POST', '/admin/reset', body);
+    alert(`Nieuwe wereld aangemaakt (seed ${r.seed}, ${r.camps} roverskampen).`);
+    status();
+  } catch (e) { alert('Fout: ' + e.message); }
+};
+$('#btnUpdate').onclick = async () => {
+  try {
+    const body = {};
+    if ($('#u-start').value) body.startAt = new Date($('#u-start').value).getTime();
+    for (const [id, k] of [['u-prep', 'prepDays'], ['u-war', 'warDays'], ['u-speed', 'speed'], ['u-team', 'teamSize']]) if ($('#' + id).value) body[k] = $('#' + id).value;
+    if ($('#u-code').value) body.joinCode = $('#u-code').value;
+    await call('POST', '/admin/update', body);
+    alert('Aangepast.');
+    status();
+  } catch (e) { alert('Fout: ' + e.message); }
+};
+$('#btnMsg').onclick = async () => {
+  try { await call('POST', '/admin/message', { text: $('#msg').value }); $('#msg').value = ''; alert('Verstuurd.'); } catch (e) { alert('Fout: ' + e.message); }
+};
+if ($('#key').value) status();
+</script>
+</body>
+</html>

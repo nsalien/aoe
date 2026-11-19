@@ -1,0 +1,428 @@
+// Isometrische wereldkaart met terrein, steden, roverskampen en legers onderweg.
+import * as A from './art.js';
+import { Camera, isoFns, hashInt } from './iso.js';
+import { generateTerrain, T } from '../shared/worldgen.js';
+
+export const WTW = 40;
+export const WTH = 20;
+const { toWorld } = isoFns(WTW, WTH);
+const TOP = 70; // ruimte bovenaan het gebakken terrein voor bergen
+
+function heightOf(t, e) {
+  switch (t) {
+    case T.DEEP: return -7;
+    case T.SHALLOW: return -4;
+    case T.SAND: return 0;
+    case T.GRASS: case T.FOREST: return Math.round(2 + Math.max(0, e - 0.41) * 18);
+    case T.HILL: return Math.round(9 + (e - 0.73) * 70);
+    default: return Math.round(15 + (e - 0.82) * 90);
+  }
+}
+
+function topColor(t, n, e) {
+  switch (t) {
+    case T.DEEP: return A.mix('#2c6aa3', '#3779b4', n);
+    case T.SHALLOW: return A.mix('#4e97c9', '#62a8d6', n);
+    case T.SAND: return A.mix('#dcc888', '#e8d69d', n);
+    case T.GRASS: return A.mix('#76ac46', '#93c25a', n);
+    case T.FOREST: return A.mix('#5a8f3d', '#68a046', n);
+    case T.HILL: return A.mix('#8ea657', '#a5b768', n);
+    default: return e > 0.9 ? '#b9b5ad' : A.mix('#8d887e', '#a19c92', n);
+  }
+}
+
+export class WorldView {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.cam = new Camera(canvas, { zoom: 1.2, minZoom: 0.35, maxZoom: 3 });
+    this.towns = [];
+    this.camps = [];
+    this.teams = new Map();
+    this.marches = [];
+    this.myTownId = null;
+    this.myTeamId = null;
+    this.selected = null;
+    this.hover = null;
+    this.onSelect = null;
+    this.bakedKey = null;
+    this.cam.onClick = (sx, sy) => {
+      const hit = this.pick(sx, sy);
+      this.selected = hit;
+      if (this.onSelect) this.onSelect(hit);
+    };
+    this.cam.onHover = (sx, sy) => {
+      this.hover = sx < 0 ? null : this.pick(sx, sy);
+      this.canvas.style.cursor = this.hover ? 'pointer' : 'grab';
+    };
+  }
+
+  setWorld(seed, size) {
+    if (this.seed === seed && this.size === size) return;
+    this.seed = seed; this.size = size;
+    this.terrain = generateTerrain(seed, size);
+    const { tiles, elev } = this.terrain;
+    this.heights = new Int16Array(size * size);
+    for (let i = 0; i < size * size; i++) this.heights[i] = heightOf(tiles[i], elev[i]);
+    const l = toWorld(0, size); const r = toWorld(size, 0); const b = toWorld(size, size);
+    this.cam.bounds = { x0: l.x + 100, x1: r.x - 100, y0: 60, y1: b.y - 60 };
+    this.water = [];
+    for (let k = 0; k < 4000 && this.water.length < 260; k++) {
+      const x = Math.floor(hashInt(k, 1, seed) * size); const y = Math.floor(hashInt(k, 2, seed) * size);
+      if (tiles[y * size + x] <= T.SHALLOW) this.water.push({ x: x + hashInt(k, 3, seed), y: y + hashInt(k, 4, seed), p: hashInt(k, 5, seed) * 6.28 });
+    }
+    this.bakedKey = null;
+  }
+
+  h(x, y) {
+    const s = this.size;
+    if (x < 0 || y < 0 || x >= s || y >= s) return -12;
+    return this.heights[y * s + x];
+  }
+
+  hAt(gx, gy) {
+    return Math.max(0, this.h(Math.floor(gx), Math.floor(gy)));
+  }
+
+  setData(data, myTownId, myTeamId) {
+    this.towns = data.towns;
+    this.camps = data.camps;
+    this.teams = new Map(data.teams.map((t) => [t.id, t]));
+    this.myTownId = myTownId;
+    this.myTeamId = myTeamId;
+    const key = [...data.towns.map((t) => `${t.x},${t.y}`), ...data.camps.map((c) => `${c.x},${c.y}`)].join('|');
+    if (key !== this.bakedKey) { this.bakedKey = key; this.bake(); }
+    if (this.selected) {
+      const s = this.selected;
+      const list = s.kind === 'town' ? this.towns : this.camps;
+      const found = list.find((x) => x.id === s.obj.id);
+      if (found) this.selected = { kind: s.kind, obj: found };
+    }
+  }
+
+  setMarches(marches) { this.marches = marches || []; }
+
+  bake() {
+    const size = this.size;
+    const { tiles, elev } = this.terrain;
+    const W = size * WTW; const H = size * WTH + TOP + 30;
+    const scale = window.innerWidth < 800 ? 1 : 1.5;
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
+    const g = cv.getContext('2d');
+    g.scale(scale, scale);
+    g.translate(W / 2, TOP);
+    this.bakeInfo = { cv, W, H, ox: -W / 2, oy: -TOP };
+    const clear = [...this.towns, ...this.camps].map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }));
+    const nearObj = (x, y, r) => clear.some((p) => Math.hypot(p.x - x, p.y - y) < r);
+    const P = (gx, gy, z) => { const w = toWorld(gx, gy); return [w.x, w.y - z]; };
+    for (let d = 0; d <= 2 * (size - 1); d++) {
+      for (let gx = Math.max(0, d - size + 1); gx <= Math.min(d, size - 1); gx++) {
+        const gy = d - gx;
+        const i = gy * size + gx;
+        const t = tiles[i];
+        const e = elev[i];
+        const h = this.heights[i];
+        const n = hashInt(Math.floor(gx / 2), Math.floor(gy / 2), this.seed) * 0.5 + hashInt(gx, gy, this.seed + 1) * 0.5;
+        let col = topColor(t, n, e);
+        const back = (this.h(gx - 1, gy) + this.h(gx, gy - 1)) / 2;
+        if (t > T.SHALLOW) {
+          const slope = Math.max(-0.12, Math.min(0.12, (h - back) * 0.012));
+          col = A.shade(col.startsWith('#') ? col : rgbToHex(col), slope);
+        }
+        // zijvlakken
+        const hl = Math.max(this.h(gx, gy + 1), -12);
+        const hr = Math.max(this.h(gx + 1, gy), -12);
+        const sideBase = rgbToHex(topColor(t === T.FOREST || t === T.GRASS ? T.SAND : t, 0.3, e));
+        const dirt = t >= T.HILL ? '#7f786c' : t >= T.GRASS ? '#a07a4a' : sideBase;
+        if (h > hl) A.poly(g, [P(gx, gy + 1, h), P(gx + 1, gy + 1, h), P(gx + 1, gy + 1, hl), P(gx, gy + 1, hl)], A.shade(dirt, -0.12));
+        if (h > hr) A.poly(g, [P(gx + 1, gy, h), P(gx + 1, gy + 1, h), P(gx + 1, gy + 1, hr), P(gx + 1, gy, hr)], A.shade(dirt, -0.32));
+        A.poly(g, [P(gx, gy, h), P(gx + 1, gy, h), P(gx + 1, gy + 1, h), P(gx, gy + 1, h)], col);
+        // graskant boven klifjes
+        if (t >= T.GRASS && t <= T.FOREST && (h > hl + 1 || h > hr + 1)) {
+          g.strokeStyle = 'rgba(40,70,20,0.35)'; g.lineWidth = 1;
+          g.beginPath(); g.moveTo(...P(gx, gy + 1, h)); g.lineTo(...P(gx + 1, gy + 1, h)); g.lineTo(...P(gx + 1, gy, h)); g.stroke();
+        }
+        // schuim langs de kust
+        if (t === T.SHALLOW && (tiles[i - 1] >= T.SAND || tiles[i - size] >= T.SAND)) {
+          g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1.2;
+          g.beginPath(); g.moveTo(...P(gx, gy + 1, h)); g.lineTo(...P(gx, gy, h)); g.lineTo(...P(gx + 1, gy, h)); g.stroke();
+        }
+        const [cx, cy] = P(gx + 0.5, gy + 0.5, h);
+        // decoratie
+        if (t === T.FOREST && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
+          const k = 2 + Math.floor(hashInt(gx, gy, this.seed + 3) * 2);
+          const pts = [[-0.22, -0.2], [0.2, -0.15], [-0.05, 0.18], [0.25, 0.25]];
+          for (let j = 0; j < k; j++) {
+            const [ox, oy] = pts[j];
+            const [tx, ty] = P(gx + 0.5 + ox, gy + 0.5 + oy, h);
+            const conif = hashInt(gx + j, gy, this.seed + 4) < 0.5;
+            if (conif) A.conifer(g, tx, ty, 0.55, hashInt(gx, gy + j, 5)); else A.broadleaf(g, tx, ty, 0.5, hashInt(gx, gy + j, 6));
+          }
+        } else if (t === T.GRASS && hashInt(gx, gy, this.seed + 7) < 0.07 && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
+          A.broadleaf(g, cx + 4, cy + 2, 0.5, 0.3);
+        } else if (t === T.HILL && hashInt(gx, gy, this.seed + 8) < 0.25 && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
+          if (hashInt(gx, gy, 9) < 0.5) A.conifer(g, cx, cy + 2, 0.5, 0.6); else A.rock(g, cx, cy + 2, 0.7);
+        } else if (t === T.MOUNTAIN) {
+          const ph = 14 + (e - 0.82) * 120 + hashInt(gx, gy, 10) * 8;
+          const w = 13 + hashInt(gx, gy, 11) * 5;
+          g.fillStyle = '#7d776c';
+          g.beginPath(); g.moveTo(cx - w, cy + 3); g.lineTo(cx - 2, cy - ph); g.lineTo(cx + w, cy + 3); g.closePath(); g.fill();
+          g.fillStyle = '#a29d92';
+          g.beginPath(); g.moveTo(cx - w, cy + 3); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - 1, cy + 4); g.closePath(); g.fill();
+          if (e > 0.86) {
+            g.fillStyle = '#f4f6f8';
+            g.beginPath(); g.moveTo(cx - 2 - w * 0.32, cy - ph * 0.62); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - 2 + w * 0.32, cy - ph * 0.62);
+            g.lineTo(cx, cy - ph * 0.68); g.lineTo(cx - 3, cy - ph * 0.58); g.closePath(); g.fill();
+          }
+        } else if (t === T.SAND && hashInt(gx, gy, 12) < 0.04) {
+          A.rock(g, cx, cy, 0.5);
+        }
+      }
+    }
+  }
+
+  townPos(t) {
+    const w = toWorld(t.x + 0.5, t.y + 0.5);
+    return { x: w.x, y: w.y - this.hAt(t.x, t.y) };
+  }
+
+  pick(sx, sy) {
+    let best = null; let bd = 26;
+    for (const t of this.towns) {
+      const p = this.townPos(t); const s = this.cam.worldToScreen(p.x, p.y - 10);
+      const d = Math.hypot(s.x - sx, s.y - sy) / Math.max(0.6, this.cam.zoom);
+      if (d < bd) { bd = d; best = { kind: 'town', obj: t }; }
+    }
+    for (const c of this.camps) {
+      const p = this.townPos(c); const s = this.cam.worldToScreen(p.x, p.y - 6);
+      const d = Math.hypot(s.x - sx, s.y - sy) / Math.max(0.6, this.cam.zoom);
+      if (d < bd) { bd = d; best = { kind: 'camp', obj: c }; }
+    }
+    return best;
+  }
+
+  centerOnTile(x, y) {
+    const w = toWorld(x + 0.5, y + 0.5);
+    this.cam.x = w.x; this.cam.y = w.y;
+  }
+
+  teamColor(id) {
+    const t = this.teams.get(id);
+    return t ? t.color : '#888';
+  }
+
+  draw(t, dt, now) {
+    const ctx = this.ctx;
+    const cam = this.cam;
+    cam.resize();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#2a649c';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    if (!this.bakeInfo) return;
+    cam.apply(ctx);
+    const bk = this.bakeInfo;
+    ctx.drawImage(bk.cv, bk.ox, bk.oy, bk.W, bk.H);
+
+    // golfjes
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+    for (const w of this.water) {
+      const a = Math.sin(t * 0.0018 + w.p);
+      if (a < 0.4) continue;
+      const p = toWorld(w.x, w.y);
+      ctx.globalAlpha = (a - 0.4) * 1.2;
+      ctx.beginPath(); ctx.moveTo(p.x - 4, p.y - 4); ctx.quadraticCurveTo(p.x, p.y - 7, p.x + 4, p.y - 4); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // gebieden van teams
+    for (const tw of this.towns) {
+      const p = this.townPos(tw);
+      const col = this.teamColor(tw.teamId);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.transform(WTW / 2, WTH / 2, -WTW / 2, WTH / 2, 0, 0);
+      ctx.beginPath(); ctx.arc(0, 0, 1.9, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.globalAlpha = 0.16; ctx.fill();
+      ctx.globalAlpha = 0.65; ctx.lineWidth = 0.06; ctx.setLineDash([0.25, 0.15]); ctx.strokeStyle = col; ctx.stroke();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    // marsroutes
+    for (const m of this.marches) this.drawRoute(ctx, m, t);
+
+    const items = [];
+    for (const tw of this.towns) items.push({ d: tw.x + tw.y, kind: 'town', o: tw });
+    for (const c of this.camps) items.push({ d: c.x + c.y, kind: 'camp', o: c });
+    for (const m of this.marches) {
+      const pos = this.marchPos(m, now);
+      if (pos) items.push({ d: pos.gx + pos.gy, kind: 'march', o: m, pos });
+    }
+    items.sort((a, b) => a.d - b.d);
+    for (const it of items) {
+      if (it.kind === 'town') this.drawTown(ctx, it.o, t);
+      else if (it.kind === 'camp') this.drawCamp(ctx, it.o, t, now);
+      else this.drawMarch(ctx, it.o, it.pos, t);
+    }
+
+    // labels in schermruimte
+    ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);
+    for (const tw of this.towns) this.drawTownLabel(ctx, tw);
+    if (cam.zoom > 0.75) for (const c of this.camps) this.drawCampLabel(ctx, c, now);
+  }
+
+  drawRoute(ctx, m, t) {
+    const from = toWorld(m.from.x + 0.5, m.from.y + 0.5);
+    const to = toWorld(m.to.x + 0.5, m.to.y + 0.5);
+    const fh = this.hAt(m.from.x, m.from.y); const th = this.hAt(m.to.x, m.to.y);
+    const hostile = !m.ally;
+    ctx.save();
+    ctx.strokeStyle = hostile ? '#ff3b30' : (m.own ? '#ffe28a' : this.teamColor(m.teamId));
+    ctx.globalAlpha = hostile ? 0.6 + Math.sin(t * 0.008) * 0.3 : 0.75;
+    ctx.lineWidth = hostile ? 2.4 : 1.8;
+    ctx.setLineDash([6, 5]);
+    ctx.lineDashOffset = -t * 0.02 * (m.status === 'back' ? -1 : 1);
+    ctx.beginPath(); ctx.moveTo(from.x, from.y - fh); ctx.lineTo(to.x, to.y - th); ctx.stroke();
+    ctx.restore();
+  }
+
+  marchPos(m, now) {
+    const p = Math.min(1, Math.max(0, (now - m.departAt) / Math.max(1, m.arriveAt - m.departAt)));
+    const a = m.status === 'back' ? m.to : m.from;
+    const b = m.status === 'back' ? m.from : m.to;
+    const gx = a.x + 0.5 + (b.x - a.x) * p; const gy = a.y + 0.5 + (b.y - a.y) * p;
+    return { gx, gy, dir: b.x - a.x - (b.y - a.y) >= 0 ? 1 : -1 };
+  }
+
+  drawMarch(ctx, m, pos, t) {
+    const w = toWorld(pos.gx, pos.gy);
+    const y = w.y - this.hAt(pos.gx, pos.gy);
+    const col = m.ally ? this.teamColor(m.teamId) : '#d63a2f';
+    const ph = t * 0.012;
+    ctx.save();
+    ctx.translate(w.x, y);
+    if (pos.dir < 0) ctx.scale(-1, 1);
+    if (m.kind === 'trade') {
+      ctx.fillStyle = '#7a5129'; ctx.fillRect(-6, -9, 12, 6);
+      ctx.fillStyle = '#e6c45a'; ctx.beginPath(); ctx.ellipse(0, -9, 5, 2.5, 0, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = '#3a2716'; ctx.beginPath(); ctx.arc(-4, -2.5, 2.4, 0, 7); ctx.arc(4, -2.5, 2.4, 0, 7); ctx.fill();
+      A.horseman(ctx, 11, 0, { s: 0.5, walking: true, phase: ph, body: '#8b6a43', hat: '#d8ae52' });
+    } else if (m.kind === 'scout') {
+      A.horseman(ctx, 0, 0, { s: 0.6, walking: true, phase: ph, team: col, body: '#8a6a43', hat: '#6b4a2b' });
+    } else {
+      const units = m.units || {};
+      const cav = (units.rider || 0) + (units.knight || 0);
+      if (units.ram) A.ram(ctx, -12, 2, 0.55);
+      A.person(ctx, -6, 1, { s: 0.65, walking: true, phase: ph + 1, team: col, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' });
+      if (cav) A.horseman(ctx, 5, 3, { s: 0.6, walking: true, phase: ph, team: col, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' });
+      else A.person(ctx, 5, 3, { s: 0.65, walking: true, phase: ph + 2, team: col, body: '#5b6b85', helmet: '#aab1bb', weapon: 'sword' });
+      A.flag(ctx, 0, -2, 22, col, t, 0.7);
+    }
+    ctx.restore();
+  }
+
+  drawTown(ctx, tw, t) {
+    const p = this.townPos(tw);
+    const col = this.teamColor(tw.teamId);
+    const sel = this.selected && this.selected.kind === 'town' && this.selected.obj.id === tw.id;
+    const mine = tw.id === this.myTownId;
+    if (sel || mine) {
+      const pulse = 0.5 + Math.sin(t * 0.005) * 0.3;
+      ctx.save(); ctx.translate(p.x, p.y);
+      ctx.transform(WTW / 2, WTH / 2, -WTW / 2, WTH / 2, 0, 0);
+      ctx.beginPath(); ctx.arc(0, 0, 1.15, 0, Math.PI * 2);
+      ctx.strokeStyle = sel ? `rgba(255,230,120,${pulse + 0.2})` : 'rgba(255,240,180,0.55)';
+      ctx.lineWidth = 0.09; ctx.stroke();
+      ctx.restore();
+    }
+    // stadsmuur
+    if (tw.wall > 0) {
+      ctx.save(); ctx.translate(p.x, p.y);
+      ctx.transform(WTW / 2, WTH / 2, -WTW / 2, WTH / 2, 0, 0);
+      ctx.strokeStyle = tw.wall >= 3 ? '#b9b1a1' : '#8b5a2b';
+      ctx.lineWidth = 0.12;
+      ctx.strokeRect(-0.85, -0.85, 1.7, 1.7);
+      ctx.restore();
+    }
+    const houses = Math.min(7, Math.floor(tw.buildings / 2));
+    const spots = [[-0.55, -0.15], [0.05, -0.62], [-0.6, 0.45], [0.55, -0.4], [0.5, 0.45], [-0.1, 0.62], [0.65, 0.05]];
+    const parts = [{ ox: 0, oy: 0, kind: 'tc' }];
+    for (let i = 0; i < houses; i++) parts.push({ ox: spots[i][0], oy: spots[i][1], kind: 'house' });
+    if (tw.monument) parts.push({ ox: 0.75, oy: 0.75, kind: 'monument' });
+    parts.sort((a, b) => a.ox + a.oy - (b.ox + b.oy));
+    for (const part of parts) {
+      const q = toWorld(part.ox, part.oy);
+      const x = p.x + q.x; const y = p.y + q.y;
+      if (part.kind === 'tc') A.drawSprite(ctx, A.buildingSprite('tc', tw.age, col), x, y, 0.42);
+      else if (part.kind === 'house') A.drawSprite(ctx, A.buildingSprite('house', Math.min(3, tw.age), col), x, y, 0.4);
+      else A.drawSprite(ctx, A.buildingSprite('monument', tw.monument, col), x, y, 0.3);
+    }
+    const fz = [0, 21, 33, 39, 41][tw.age] || 24;
+    A.flag(ctx, p.x, p.y - fz, 13, col, t + tw.id * 500, 0.8);
+  }
+
+  drawCamp(ctx, c, t, now) {
+    const p = this.townPos(c);
+    const sel = this.selected && this.selected.kind === 'camp' && this.selected.obj.id === c.id;
+    if (sel) {
+      ctx.save(); ctx.translate(p.x, p.y);
+      ctx.transform(WTW / 2, WTH / 2, -WTW / 2, WTH / 2, 0, 0);
+      ctx.beginPath(); ctx.arc(0, 0, 0.9, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,230,120,0.8)'; ctx.lineWidth = 0.08; ctx.stroke();
+      ctx.restore();
+    }
+    const dead = c.plundered;
+    const col = dead ? '#8a8378' : ['#8a3324', '#8a3324', '#7a2d4f', '#5b3a6e', '#3d3d3d', '#2a2a2a'][c.level];
+    A.tent(ctx, p.x - 8, p.y - 3, 0.62, col);
+    A.tent(ctx, p.x + 7, p.y - 4, 0.55, col);
+    if (c.level >= 3) A.tent(ctx, p.x, p.y + 4, 0.7, A.mix(col, '#000000', 0.15));
+    if (dead) A.smoke(ctx, p.x, p.y, t, c.id, 0.6);
+    else A.fire(ctx, p.x + 1, p.y + 1, 0.6, t + c.id * 300);
+    // schedelvlag
+    ctx.strokeStyle = '#3b2a18'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(p.x - 12, p.y - 2); ctx.lineTo(p.x - 12, p.y - 22); ctx.stroke();
+    ctx.fillStyle = dead ? '#777' : '#1c1c1c'; ctx.fillRect(p.x - 12, p.y - 22, 9, 6);
+    ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(p.x - 7.5, p.y - 19.5, 1.5, 0, 7); ctx.fill();
+  }
+
+  label(ctx, x, y, text, sub, color, strong) {
+    ctx.font = `${strong ? 700 : 600} 12px "Inter", system-ui, sans-serif`;
+    const w = Math.max(ctx.measureText(text).width, sub ? ctx.measureText(sub).width * 0.85 : 0) + 14;
+    const h = sub ? 30 : 18;
+    ctx.fillStyle = 'rgba(28,22,14,0.78)';
+    ctx.beginPath(); ctx.roundRect(x - w / 2, y - h, w, h, 6); ctx.fill();
+    ctx.fillStyle = color; ctx.fillRect(x - w / 2 + 4, y - h + 4, 3, h - 8);
+    ctx.fillStyle = '#fff6e0'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(text, x + 3, y - h + 13);
+    if (sub) { ctx.font = '500 10.5px "Inter", system-ui, sans-serif'; ctx.fillStyle = '#e4d6b4'; ctx.fillText(sub, x + 3, y - 6); }
+  }
+
+  drawTownLabel(ctx, tw) {
+    const p = this.townPos(tw);
+    const s = this.cam.worldToScreen(p.x, p.y - 44);
+    const col = this.teamColor(tw.teamId);
+    const mine = tw.id === this.myTownId;
+    const sel = this.selected && this.selected.kind === 'town' && this.selected.obj.id === tw.id;
+    if (this.cam.zoom < 0.6 && !mine && !sel) return;
+    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player} · ${tw.score} ptn${tw.online ? ' · ●' : ''}` : null;
+    this.label(ctx, s.x, s.y, tw.name, sub, col, mine);
+  }
+
+  drawCampLabel(ctx, c, now) {
+    const p = this.townPos(c);
+    const s = this.cam.worldToScreen(p.x, p.y - 26);
+    const txt = c.plundered ? `Verlaten kamp` : `Rovers · niv. ${c.level}`;
+    ctx.font = '600 10.5px "Inter", system-ui, sans-serif';
+    const w = ctx.measureText(txt).width + 10;
+    ctx.fillStyle = c.plundered ? 'rgba(60,60,60,0.65)' : 'rgba(70,20,15,0.72)';
+    ctx.beginPath(); ctx.roundRect(s.x - w / 2, s.y - 14, w, 15, 5); ctx.fill();
+    ctx.fillStyle = '#f6e7d0'; ctx.textAlign = 'center'; ctx.fillText(txt, s.x, s.y - 3);
+  }
+}
+
+function rgbToHex(c) {
+  if (c.startsWith('#')) return c;
+  const m = c.match(/\d+/g).map(Number);
+  return '#' + m.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('');
+}

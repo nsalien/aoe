@@ -1,0 +1,10 @@
+# Configuratie voor Cloudflare Pages + D1.
+# Vervang database_id door de id die je krijgt met: npx wrangler d1 create rijken-db
+name = "rijken-van-de-vallei"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rijken-db"
+database_id = "00000000-0000-0000-0000-000000000000"
