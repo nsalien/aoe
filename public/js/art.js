@@ -36,6 +36,7 @@ const C = {
   dirt: '#a98a55', soil: '#7d5b34', wheat: '#e6c45a', leaf: '#5f9e3e', gold: '#f2c230', iron: '#7c8692',
   window: '#3b3226', glass: '#f6d77a',
 };
+const BASE_C = { ...C }; // basispalet (de volkeren vervangen tijdelijk enkele kleuren)
 
 // ---------- basisvormen ----------
 export function poly(ctx, pts, fill, stroke) {
@@ -53,6 +54,37 @@ const EDGE = 'rgba(40,25,10,0.35)';
 const STONES = new Set(['#bdb5a6', '#8f887c', '#b9b1a1', '#d3cbb8', '#e6dfcf', '#6f675c', '#a39a89']);
 const WOODS = new Set(['#a8743f', '#7a5129', '#9c6b3c', '#9a6a38']);
 const PLASTERS = new Set(['#efe2c0', '#efe6cf']);
+// ---------- bouwstijlen per volk ----------
+// Elk volk vervangt de kleuren van het basispalet en het daktype; alle gebouwen volgen automatisch.
+export const STYLES = {
+  egypt: {
+    roof: 'flat', trim: '#2f6fb5', trim2: '#c0392b', accent: '#d4a017', side: 'palm',
+    palette: { plaster: '#e6cf9a', timber: '#b08850', stone: '#d8c08c', stoneDark: '#bca06a', wood: '#c39563', woodDark: '#8a6238', thatch: '#d8c08c', roof: '#d8c08c', roofDark: '#bca06a', slate: '#d8c08c' },
+  },
+  greek: {
+    roof: 'greek', trim: '#2e5fa8', trim2: '#b5523a', accent: '#c9a23a', side: 'amphora',
+    palette: { plaster: '#f3efe5', timber: '#ddd5c3', stone: '#ebe5d6', stoneDark: '#cfc7b4', wood: '#d6c8a8', woodDark: '#8a6238', thatch: '#bb5a3c', roof: '#bb5a3c', roofDark: '#a24a32', slate: '#bb5a3c' },
+  },
+  yamato: {
+    roof: 'pagoda', trim: '#b8322a', trim2: '#2e2018', accent: '#d4a017', side: 'lantern',
+    palette: { plaster: '#f2ede1', timber: '#3a2a20', stone: '#a29d93', stoneDark: '#7f7a71', wood: '#6a4630', woodDark: '#2e2018', thatch: '#41464f', roof: '#41464f', roofDark: '#33373e', slate: '#41464f' },
+  },
+  babylon: {
+    roof: 'crenel', trim: '#2c5fae', trim2: '#e0b23a', accent: '#e0b23a', side: 'palm',
+    palette: { plaster: '#cfae78', timber: '#2c5fae', stone: '#c9a068', stoneDark: '#a98252', wood: '#b48c5c', woodDark: '#7a5a38', thatch: '#c9a068', roof: '#2c5fae', roofDark: '#244e8f', slate: '#2c5fae' },
+  },
+  persia: {
+    roof: 'dome', trim: '#1f9a9a', trim2: '#d4a017', accent: '#d4a017', side: 'cypress',
+    palette: { plaster: '#f0e6ce', timber: '#1f9a9a', stone: '#e2d4b6', stoneDark: '#c7b48f', wood: '#c9a77a', woodDark: '#7a5a38', thatch: '#29a9a9', roof: '#29a9a9', roofDark: '#1f8787', slate: '#29a9a9' },
+  },
+};
+let STYLE = null;
+for (const st of Object.values(STYLES)) {
+  STONES.add(st.palette.stone); STONES.add(st.palette.stoneDark);
+  WOODS.add(st.palette.wood); WOODS.add(st.palette.woodDark);
+  PLASTERS.add(st.palette.plaster);
+}
+
 function materialOf(color) {
   if (typeof color !== 'string') return null;
   if (STONES.has(color)) return 'stone';
@@ -203,7 +235,122 @@ function slopeTex(ctx, eA, eB, rA, rB, color) {
   ctx.beginPath(); ctx.moveTo(...eA); ctx.lineTo(...eB); ctx.stroke();
 }
 
+// plat dak met een kroonlijst (Egypte), kantelen (Babylon) of een koepel (Perzië)
+function flatRoof(ctx, x0, y0, x1, y1, z, color) {
+  const st = STYLE;
+  const oh = 0.035;
+  box(ctx, x0 - oh, y0 - oh, x1 + oh, y1 + oh, z, z + 3.2, C.stoneDark, EDGE, 'none');
+  // gekleurde band onder de dakrand
+  const band = (y, a, b) => { for (let u = a; u < b - 0.001; u += 0.08) quadL(ctx, y + 0.002, u, Math.min(b, u + 0.04), z - 2.6, z, st.trim); };
+  const bandR = (x, a, b) => { for (let u = a; u < b - 0.001; u += 0.08) quadR(ctx, x + 0.002, u, Math.min(b, u + 0.04), z - 2.6, z, shade(st.trim, -0.2)); };
+  band(y1, x0, x1); bandR(x1, y0, y1);
+  quadL(ctx, y1 + 0.003, x0, x1, z - 3.4, z - 2.6, st.trim2);
+  quadR(ctx, x1 + 0.003, y0, y1, z - 3.4, z - 2.6, shade(st.trim2, -0.2));
+  if (st.roof === 'crenel') {
+    const n = Math.max(2, Math.round((x1 - x0) / 0.14));
+    crenels(ctx, x0 - oh, y0 - oh, x1 + oh, y1 + oh, z + 3.2, C.plaster, n, 4);
+  } else if (st.roof === 'dome') {
+    dome(ctx, (x0 + x1) / 2, (y0 + y1) / 2, z + 3.2, Math.min(x1 - x0, y1 - y0) * 0.36, st.palette.roof);
+  } else {
+    // kavetto-kroonlijst
+    quadL(ctx, y1 + oh + 0.002, x0 - oh, x1 + oh, z + 3.2, z + 5, shade(C.stone, 0.15));
+    quadR(ctx, x1 + oh + 0.002, y0 - oh, y1 + oh, z + 3.2, z + 5, shade(C.stone, -0.1));
+  }
+}
+
+// koepel met tamboer, ribben en gouden pinakel
+export function dome(ctx, gx, gy, z, r, color, onion = false) {
+  const [cx, cy] = P(gx, gy, z);
+  const rx = r * TW * 0.72; const ry = rx * 0.5;
+  const drum = Math.max(3, rx * 0.35);
+  ctx.fillStyle = shade(C.plaster, -0.08);
+  ctx.fillRect(cx - rx, cy - drum, rx * 2, drum);
+  ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI); ctx.fill();
+  ctx.fillStyle = shade(C.plaster, -0.25); ctx.fillRect(cx, cy - drum, rx, drum);
+  const top = cy - drum;
+  const hgt = rx * (onion ? 1.7 : 1.15);
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - rx, top);
+    if (onion) { ctx.bezierCurveTo(cx - rx * 1.25, top - hgt * 0.45, cx - rx * 0.2, top - hgt * 0.7, cx, top - hgt); ctx.bezierCurveTo(cx + rx * 0.2, top - hgt * 0.7, cx + rx * 1.25, top - hgt * 0.45, cx + rx, top); }
+    else { ctx.bezierCurveTo(cx - rx, top - hgt * 0.75, cx - rx * 0.45, top - hgt, cx, top - hgt); ctx.bezierCurveTo(cx + rx * 0.45, top - hgt, cx + rx, top - hgt * 0.75, cx + rx, top); }
+    ctx.ellipse(cx, top, rx, ry, 0, 0, Math.PI);
+    ctx.closePath();
+  };
+  path();
+  const g = ctx.createLinearGradient(cx - rx, top - hgt, cx + rx, top);
+  g.addColorStop(0, shade(color, 0.35)); g.addColorStop(0.45, color); g.addColorStop(1, shade(color, -0.35));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.save(); path(); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 0.6;
+  for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(cx + i * rx * 0.42, top + ry * Math.cos(i * 0.5) * 0.9); ctx.quadraticCurveTo(cx + i * rx * 0.3, top - hgt * 0.6, cx, top - hgt); ctx.stroke(); }
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(40,30,20,0.4)'; ctx.lineWidth = 0.6; path(); ctx.stroke();
+  ctx.fillStyle = C.gold; ctx.fillRect(cx - 0.6, top - hgt - 6, 1.2, 6);
+  ctx.beginPath(); ctx.arc(cx, top - hgt - 6.5, 1.6, 0, Math.PI * 2); ctx.fill();
+}
+
+// laag Grieks zadeldak met fronton (driehoekig gevelveld met lijst)
+function greekGable(ctx, x0, y0, x1, y1, z, h, color, alongX) {
+  const hh = Math.max(6, h * 0.5);
+  if (alongX) {
+    const ym = (y0 + y1) / 2; const a = x0 - 0.05; const b = x1 + 0.05; const c0 = y0 - 0.05; const c1 = y1 + 0.05;
+    poly(ctx, [P(a, c0, z), P(b, c0, z), P(b, ym, z + hh), P(a, ym, z + hh)], shade(color, -0.15), EDGE);
+    poly(ctx, [P(a, c1, z), P(b, c1, z), P(b, ym, z + hh), P(a, ym, z + hh)], color, EDGE);
+    slopeTex(ctx, P(a, c1, z), P(b, c1, z), P(a, ym, z + hh), P(b, ym, z + hh), color);
+    poly(ctx, [P(b, c0, z), P(b, c1, z), P(b, ym, z + hh)], C.plaster, 'rgba(90,80,60,0.6)');
+    poly(ctx, [P(b, y0 + 0.05, z + 1.2), P(b, y1 - 0.05, z + 1.2), P(b, ym, z + hh - 1.5)], shade(STYLE.trim, -0.1));
+  } else {
+    const xm = (x0 + x1) / 2; const a = y0 - 0.05; const b = y1 + 0.05; const c0 = x0 - 0.05; const c1 = x1 + 0.05;
+    poly(ctx, [P(c0, a, z), P(c0, b, z), P(xm, b, z + hh), P(xm, a, z + hh)], shade(color, -0.05), EDGE);
+    poly(ctx, [P(c1, a, z), P(c1, b, z), P(xm, b, z + hh), P(xm, a, z + hh)], shade(color, -0.22), EDGE);
+    slopeTex(ctx, P(c1, a, z), P(c1, b, z), P(xm, a, z + hh), P(xm, b, z + hh), color);
+    poly(ctx, [P(c0, b, z), P(c1, b, z), P(xm, b, z + hh)], C.plaster, 'rgba(90,80,60,0.6)');
+    poly(ctx, [P(x0 + 0.05, b, z + 1.2), P(x1 - 0.05, b, z + 1.2), P(xm, b, z + hh - 1.5)], STYLE.trim);
+  }
+  // kroonlijst onder het dak
+  quadL(ctx, y1 + 0.004, x0, x1, z - 2, z, C.plaster);
+  quadR(ctx, x1 + 0.004, y0, y1, z - 2, z, shade(C.plaster, -0.15));
+}
+
+// pagodedak: brede overstek, opgekrulde hoeken, donkere pannen
+function pagoda(ctx, x0, y0, x1, y1, z, h, color) {
+  const oh = 0.13;
+  const a = x0 - oh; const b = x1 + oh; const c = y0 - oh; const d = y1 + oh;
+  const xm = (x0 + x1) / 2; const ym = (y0 + y1) / 2;
+  const hh = Math.max(8, h * 0.8);
+  const rx = (x1 - x0) * 0.18; const ry = (y1 - y0) * 0.18;
+  const r0 = P(xm - rx, ym, z + hh); const r1 = P(xm + rx, ym, z + hh);
+  const lift = 3.5;
+  const corner = (x, y) => P(x, y, z + lift);
+  const mid = (x, y) => P(x, y, z);
+  // achterkant en zijkanten
+  poly(ctx, [corner(a, c), corner(b, c), r1, r0], shade(color, -0.18), EDGE);
+  poly(ctx, [corner(a, c), corner(a, d), r0], shade(color, 0.06), EDGE);
+  // voorkant (links) met doorbuiging
+  const front = () => { ctx.beginPath(); ctx.moveTo(...corner(a, d)); ctx.quadraticCurveTo(...mid((a + b) / 2, d), ...corner(b, d)); ctx.lineTo(...r1); ctx.lineTo(...r0); ctx.closePath(); };
+  front(); ctx.fillStyle = shade(color, 0); ctx.fill();
+  slopeTex(ctx, corner(a, d), corner(b, d), r0, r1, color);
+  const side = () => { ctx.beginPath(); ctx.moveTo(...corner(b, c)); ctx.quadraticCurveTo(...mid(b, (c + d) / 2), ...corner(b, d)); ctx.lineTo(...r1); ctx.closePath(); };
+  side(); ctx.fillStyle = shade(color, -0.25); ctx.fill();
+  // nok met eindstukken
+  ctx.strokeStyle = shade(color, -0.45); ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(...r0); ctx.lineTo(...r1); ctx.stroke();
+  for (const p of [r0, r1]) { ctx.fillStyle = shade(color, -0.4); ctx.beginPath(); ctx.arc(p[0], p[1] - 1, 1.6, 0, Math.PI * 2); ctx.fill(); }
+  // dakrand
+  ctx.strokeStyle = shade(color, 0.25); ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(...corner(a, d)); ctx.quadraticCurveTo(...mid((a + b) / 2, d), ...corner(b, d)); ctx.quadraticCurveTo(...mid(b, (c + d) / 2), ...corner(b, c)); ctx.stroke();
+}
+
+function styledRoof(ctx, x0, y0, x1, y1, z, h, color, alongX) {
+  const r = STYLE.roof;
+  if (r === 'greek') greekGable(ctx, x0, y0, x1, y1, z, h, color, alongX);
+  else if (r === 'pagoda') pagoda(ctx, x0, y0, x1, y1, z, h, color);
+  else flatRoof(ctx, x0, y0, x1, y1, z, color);
+}
+
 function gableX(ctx, x0, y0, x1, y1, z, h, color, wall, oh = 0.06) {
+  if (STYLE) { styledRoof(ctx, x0, y0, x1, y1, z, h, color, true); return; }
   const ym = (y0 + y1) / 2;
   const a = x0 - oh; const b = x1 + oh; const c0 = y0 - oh; const c1 = y1 + oh;
   poly(ctx, [P(a, c0, z), P(b, c0, z), P(b, ym, z + h), P(a, ym, z + h)], shade(color, -0.15), EDGE);
@@ -217,6 +364,7 @@ function gableX(ctx, x0, y0, x1, y1, z, h, color, wall, oh = 0.06) {
 }
 
 function gableY(ctx, x0, y0, x1, y1, z, h, color, wall, oh = 0.06) {
+  if (STYLE) { styledRoof(ctx, x0, y0, x1, y1, z, h, color, false); return; }
   const xm = (x0 + x1) / 2;
   const a = y0 - oh; const b = y1 + oh; const c0 = x0 - oh; const c1 = x1 + oh;
   poly(ctx, [P(c0, a, z), P(c0, b, z), P(xm, b, z + h), P(xm, a, z + h)], shade(color, -0.1), EDGE);
@@ -228,6 +376,19 @@ function gableY(ctx, x0, y0, x1, y1, z, h, color, wall, oh = 0.06) {
 }
 
 function hipRoof(ctx, x0, y0, x1, y1, z, h, color, oh = 0.06) {
+  if (STYLE && !STYLE.plainHip) {
+    const r = STYLE.roof;
+    if (r === 'pagoda') { pagoda(ctx, x0, y0, x1, y1, z, h, color); return; }
+    if (r === 'greek') { greekGable(ctx, x0, y0, x1, y1, z, h, color, true); return; }
+    if (r === 'dome') { box(ctx, x0 - 0.02, y0 - 0.02, x1 + 0.02, y1 + 0.02, z, z + 2.5, C.stoneDark, EDGE, 'none'); dome(ctx, (x0 + x1) / 2, (y0 + y1) / 2, z + 2.5, Math.min(x1 - x0, y1 - y0) * 0.42, STYLE.palette.roof, x1 - x0 < 0.35); return; }
+    if (r === 'flat') { // Egyptische piramidevorm met gouden top
+      STYLE.plainHip = true; hipRoof(ctx, x0, y0, x1, y1, z, h * 0.9, C.stone, 0.02); STYLE.plainHip = false;
+      const [tx, ty] = P((x0 + x1) / 2, (y0 + y1) / 2, z + h * 0.9);
+      ctx.fillStyle = C.gold; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx - 3.5, ty + 4); ctx.lineTo(tx + 3.5, ty + 4); ctx.closePath(); ctx.fill();
+      return;
+    }
+    flatRoof(ctx, x0, y0, x1, y1, z, color); return;
+  }
   const xm = (x0 + x1) / 2; const ym = (y0 + y1) / 2;
   const a = x0 - oh; const b = x1 + oh; const c = y0 - oh; const d = y1 + oh;
   const apex = P(xm, ym, z + h);
@@ -363,6 +524,90 @@ const PROPS = {
   workshop: [[0.44, 0.3, propLogs]],
   tc: [[1.02, 0.4, propCrates], [0.5, 1.03, propBarrel], [-0.3, 1.04, propSacks], [1.03, -0.4, propHay]],
 };
+
+// ---------- versiering per volk ----------
+
+function palm(ctx, gx, gy, s = 1) {
+  const [x, y] = P(gx, gy);
+  ctx.fillStyle = 'rgba(20,30,10,0.25)'; ctx.beginPath(); ctx.ellipse(x + 6 * s, y + 1, 9 * s, 2.5 * s, 0, 0, Math.PI * 2); ctx.fill();
+  // geschubde stam, licht gebogen
+  for (let i = 0; i < 9; i++) {
+    const t = i / 9; const px = x + Math.sin(t * 1.4) * 4 * s; const py = y - t * 30 * s;
+    ctx.fillStyle = i % 2 ? '#8a6a42' : '#a07d50';
+    ctx.beginPath(); ctx.ellipse(px, py, 2.1 * s, 2 * s, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  const tx = x + Math.sin(1.4) * 4 * s; const ty = y - 30 * s;
+  for (const [a, len, col] of [[-2.7, 15, '#2f6b2a'], [-2.2, 16, '#3f8a34'], [-1.6, 13, '#4f9a3c'], [-0.9, 15, '#3f8a34'], [-0.35, 16, '#2f6b2a'], [0.3, 12, '#4f9a3c'], [2.8, 11, '#2f6b2a']]) {
+    const ex = tx + Math.cos(a) * len * s; const ey = ty + Math.sin(a) * len * 0.55 * s + 6 * s;
+    ctx.strokeStyle = col; ctx.lineWidth = 2.4 * s;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.quadraticCurveTo(tx + Math.cos(a) * len * 0.5 * s, ty + Math.sin(a) * len * 0.3 * s - 4 * s, ex, ey); ctx.stroke();
+  }
+  ctx.fillStyle = '#6b3d1e'; for (const d of [-1.5, 1.5]) { ctx.beginPath(); ctx.arc(tx + d, ty + 2.5, 1.4, 0, Math.PI * 2); ctx.fill(); }
+}
+
+function cypress(ctx, gx, gy, s = 1) {
+  const [x, y] = P(gx, gy);
+  ctx.fillStyle = 'rgba(20,30,10,0.25)'; ctx.beginPath(); ctx.ellipse(x + 5 * s, y + 1, 8 * s, 2.2 * s, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#5a3a1e'; ctx.fillRect(x - 1, y - 4 * s, 2, 4 * s);
+  const shape = (dx, w, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x + dx, y - 40 * s); ctx.bezierCurveTo(x + dx + w * s, y - 30 * s, x + dx + w * s, y - 8 * s, x + dx, y - 3 * s); ctx.bezierCurveTo(x + dx - w * s, y - 8 * s, x + dx - w * s, y - 30 * s, x + dx, y - 40 * s); ctx.fill(); };
+  shape(0.6, 6, '#1d4a2a'); shape(0, 5.4, '#2a6236');
+  ctx.fillStyle = 'rgba(160,210,120,0.35)'; ctx.beginPath(); ctx.ellipse(x - 1.8 * s, y - 24 * s, 1.6 * s, 9 * s, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function lantern(ctx, gx, gy) {
+  const [x, y] = P(gx, gy);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(x + 1, y + 0.5, 5, 2, 0, 0, Math.PI * 2); ctx.fill();
+  const stone = '#9a958c';
+  ctx.fillStyle = shade(stone, -0.15); ctx.fillRect(x - 3.5, y - 2.5, 7, 2.5);
+  ctx.fillStyle = stone; ctx.fillRect(x - 1.3, y - 10, 2.6, 7.5);
+  ctx.fillStyle = shade(stone, 0.1); ctx.fillRect(x - 3.6, y - 11.5, 7.2, 1.6);
+  ctx.fillStyle = '#f6d77a'; ctx.fillRect(x - 2.2, y - 15.5, 4.4, 4);
+  ctx.fillStyle = stone; ctx.fillRect(x - 2.6, y - 15.5, 1, 4); ctx.fillRect(x + 1.6, y - 15.5, 1, 4);
+  ctx.fillStyle = shade(stone, -0.1); ctx.beginPath(); ctx.moveTo(x - 5, y - 15.5); ctx.lineTo(x, y - 20); ctx.lineTo(x + 5, y - 15.5); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y - 20.5, 1, 0, Math.PI * 2); ctx.fill();
+  addLight([x, y - 13.5], 0.8);
+}
+
+function amphora(ctx, gx, gy) {
+  for (const [dx, sc] of [[0, 1], [0.07, 0.8]]) {
+    const [x, y] = P(gx + dx, gy);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(x + 1, y, 3.5 * sc, 1.4 * sc, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#b5603a';
+    ctx.beginPath(); ctx.moveTo(x - 1 * sc, y); ctx.bezierCurveTo(x - 5 * sc, y - 4 * sc, x - 4 * sc, y - 9 * sc, x - 1.2 * sc, y - 11 * sc);
+    ctx.lineTo(x - 1.2 * sc, y - 13 * sc); ctx.lineTo(x + 1.2 * sc, y - 13 * sc); ctx.lineTo(x + 1.2 * sc, y - 11 * sc);
+    ctx.bezierCurveTo(x + 4 * sc, y - 9 * sc, x + 5 * sc, y - 4 * sc, x + 1 * sc, y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#2a1a10'; ctx.fillRect(x - 3.4 * sc, y - 7 * sc, 6.8 * sc, 1.2 * sc);
+    ctx.fillStyle = 'rgba(255,230,190,0.3)'; ctx.fillRect(x - 2.6 * sc, y - 9 * sc, 1 * sc, 5 * sc);
+  }
+}
+
+function obelisk(ctx, gx, gy, hgt = 34) {
+  const s = 0.045;
+  box(ctx, gx - s * 1.6, gy - s * 1.6, gx + s * 1.6, gy + s * 1.6, 0, 3, C.stoneDark);
+  box(ctx, gx - s, gy - s, gx + s, gy + s, 3, hgt, '#e2cc96', EDGE, 'none');
+  for (let z = 8; z < hgt - 4; z += 4) { quadL(ctx, gy + s + 0.002, gx - s * 0.5, gx + s * 0.5, z, z + 1.4, 'rgba(90,60,30,0.45)'); }
+  poly(ctx, [P(gx - s, gy + s, hgt), P(gx + s, gy + s, hgt), P(gx, gy, hgt + 7)], C.gold, EDGE);
+  poly(ctx, [P(gx + s, gy - s, hgt), P(gx + s, gy + s, hgt), P(gx, gy, hgt + 7)], shade(C.gold, -0.25), EDGE);
+}
+
+function lionStatue(ctx, gx, gy) {
+  box(ctx, gx - 0.07, gy - 0.05, gx + 0.07, gy + 0.05, 0, 5, '#2c5fae');
+  const [x, y] = P(gx, gy, 5);
+  ctx.fillStyle = '#e0b23a';
+  ctx.beginPath(); ctx.ellipse(x, y - 3, 5, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 4, y - 6, 2.8, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#b88a20'; ctx.beginPath(); ctx.arc(x + 3.6, y - 6, 3.3, Math.PI * 0.5, Math.PI * 1.6); ctx.fill();
+  ctx.fillRect(x - 4, y - 2, 1.4, 2.6); ctx.fillRect(x + 2.4, y - 2, 1.4, 2.6);
+}
+
+function torii(ctx, gx, gy) {
+  const red = '#c0392b';
+  for (const dy of [-0.14, 0.14]) box(ctx, gx - 0.02, gy + dy - 0.02, gx + 0.02, gy + dy + 0.02, 0, 26, red, 'rgba(60,10,5,0.5)', 'none');
+  box(ctx, gx - 0.035, gy - 0.22, gx + 0.035, gy + 0.22, 26, 29, '#2e2018', null, 'none');
+  box(ctx, gx - 0.025, gy - 0.18, gx + 0.025, gy + 0.18, 21, 23, red, null, 'none');
+}
+
+const SIDE = { palm, cypress, lantern, amphora };
 
 // lichtpunten (vensters, deuren) van de sprite die nu getekend wordt
 let LIGHTS = null;
@@ -820,6 +1065,178 @@ function tc(ctx, L, team) {
   }
 }
 
+// ---------- kastelen (stadscentrum vanaf het IJzertijdperk) per volk ----------
+
+// afgeknotte piramide: schuine muren zoals Egyptische pylonen en ziggurats
+function taper(ctx, x0, y0, x1, y1, z0, z1, k, color, bands = 0, bandCol = null) {
+  const t = [x0 + k, y0 + k, x1 - k, y1 - k];
+  poly(ctx, [P(x0, y1, z0), P(x1, y1, z0), P(t[2], t[3], z1), P(t[0], t[3], z1)], shade(color, -0.04), EDGE);
+  poly(ctx, [P(x1, y0, z0), P(x1, y1, z0), P(t[2], t[3], z1), P(t[2], t[1], z1)], shade(color, -0.26), EDGE);
+  poly(ctx, [P(t[0], t[1], z1), P(t[2], t[1], z1), P(t[2], t[3], z1), P(t[0], t[3], z1)], shade(color, 0.12), EDGE);
+  // baksteenlagen
+  ctx.strokeStyle = 'rgba(70,45,20,0.28)'; ctx.lineWidth = 0.5;
+  for (let z = z0 + 3; z < z1; z += 3) {
+    const f = (z - z0) / (z1 - z0); const kk = k * f;
+    ctx.beginPath(); ctx.moveTo(...P(x0 + kk, y1 - kk, z)); ctx.lineTo(...P(x1 - kk, y1 - kk, z)); ctx.lineTo(...P(x1 - kk, y0 + kk, z)); ctx.stroke();
+  }
+  if (bands && bandCol) {
+    const z = z1 - 3;
+    const kk = k * ((z - z0) / (z1 - z0));
+    poly(ctx, [P(x0 + kk, y1 - kk, z - 2), P(x1 - kk, y1 - kk, z - 2), P(x1 - k, y1 - k, z1), P(x0 + k, y1 - k, z1)], bandCol);
+    poly(ctx, [P(x1 - kk, y0 + kk, z - 2), P(x1 - kk, y1 - kk, z - 2), P(x1 - k, y1 - k, z1), P(x1 - k, y0 + k, z1)], shade(bandCol, -0.25));
+  }
+}
+
+// zuil met voet, groeven en kapiteel
+function column(ctx, gx, gy, z0, z1, col = C.plaster, w = 2.6, cap = null) {
+  const [x, y0] = P(gx, gy, z0); const [, y1] = P(gx, gy, z1);
+  ctx.fillStyle = shade(col, -0.1); ctx.fillRect(x - w - 0.8, y0 - 1.6, w * 2 + 1.6, 1.6);
+  const g = ctx.createLinearGradient(x - w, 0, x + w, 0);
+  g.addColorStop(0, shade(col, 0.12)); g.addColorStop(0.45, col); g.addColorStop(1, shade(col, -0.3));
+  ctx.fillStyle = g; ctx.fillRect(x - w, y1, w * 2, y0 - y1 - 1.6);
+  ctx.strokeStyle = 'rgba(80,70,55,0.3)'; ctx.lineWidth = 0.35;
+  for (const dx of [-w * 0.4, 0, w * 0.4]) { ctx.beginPath(); ctx.moveTo(x + dx, y1 + 1); ctx.lineTo(x + dx, y0 - 2); ctx.stroke(); }
+  ctx.fillStyle = cap || shade(col, -0.05); ctx.fillRect(x - w - 1, y1 - 1.8, w * 2 + 2, 1.8);
+}
+
+function tcEgypt(ctx, L, team) {
+  ground(ctx, -0.95, -0.95, 0.95, 0.95, '#d9c48e', 'rgba(110,80,40,0.35)');
+  // zuilenhal achteraan
+  box(ctx, -0.85, -0.85, 0.6, 0.15, 0, 32, C.stone);
+  flatRoof(ctx, -0.85, -0.85, 0.6, 0.15, 32, C.stone);
+  for (let x = -0.75; x <= 0.5; x += 0.25) column(ctx, x, 0.24, 0, 30, '#e8d6a6', 2.6, '#3f7f3a');
+  // pyloon: twee schuine torens met een poort ertussen
+  for (const [a, b] of [[-0.85, -0.18], [0.18, 0.85]]) {
+    taper(ctx, a, 0.45, b, 0.8, 0, 48 + L * 4, 0.06, C.stone, 1, STYLE.trim);
+    const [hx, hy] = P((a + b) / 2, 0.79, 26);
+    ctx.fillStyle = 'rgba(120,70,30,0.45)'; for (let i = 0; i < 3; i++) ctx.fillRect(hx - 9 + i * 7, hy - 6, 4, 10);
+  }
+  box(ctx, -0.18, 0.5, 0.18, 0.76, 0, 34, C.stoneDark);
+  quadL(ctx, 0.761, -0.1, 0.1, 0, 22, '#3d2a1a', EDGE);
+  quadL(ctx, 0.762, -0.18, 0.18, 30, 34, STYLE.trim);
+  // vlaggenmasten met teamkleur
+  for (const x of [-0.5, 0.5]) { const [fx, fy] = P(x, 0.84, 0); ctx.strokeStyle = '#6b4523'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 70 - L * 4); ctx.stroke(); ctx.fillStyle = team; ctx.beginPath(); ctx.moveTo(fx, fy - 70 - L * 4); ctx.lineTo(fx + 9, fy - 66 - L * 4); ctx.lineTo(fx, fy - 62 - L * 4); ctx.fill(); }
+  obelisk(ctx, 0.92, 0.35, 40 + L * 3);
+  obelisk(ctx, -0.35, 0.92, 40 + L * 3);
+  if (L >= 4) { // gouden sfinx op het voorplein
+    const [sx, sy] = P(0.75, 0.9);
+    ctx.fillStyle = '#e0b23a'; ctx.beginPath(); ctx.ellipse(sx, sy - 4, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(sx + 3, sy - 12, 4, 8); ctx.fillStyle = STYLE.trim; ctx.fillRect(sx + 2, sy - 13, 6, 2);
+  }
+}
+
+function tcGreek(ctx, L, team) {
+  ground(ctx, -0.95, -0.95, 0.95, 0.95, '#ddd5c2', 'rgba(110,100,80,0.35)');
+  for (let i = 0; i < 3; i++) box(ctx, -0.88 + i * 0.05, -0.78 + i * 0.05, 0.88 - i * 0.05, 0.78 - i * 0.05, i * 3, i * 3 + 3, C.stone);
+  const z0 = 9; const zc = 44 + (L - 3) * 6;
+  box(ctx, -0.6, -0.5, 0.6, 0.5, z0, zc, C.plaster);
+  quadL(ctx, 0.501, -0.12, 0.12, z0, z0 + 22, '#5a4632', EDGE);
+  for (let x = -0.68; x <= 0.69; x += 0.17) column(ctx, x, 0.66, z0, zc, '#f4f1e8', 2.4);
+  for (let y = -0.55; y <= 0.5; y += 0.17) column(ctx, 0.76, y, z0, zc, '#e9e5da', 2.4);
+  box(ctx, -0.78, -0.68, 0.78, 0.68, zc, zc + 6, C.plaster);
+  // fries met trigliefen in de teamkleur
+  for (let x = -0.74; x < 0.74; x += 0.1) quadL(ctx, 0.681, x, x + 0.04, zc + 1, zc + 5, x * 10 % 2 < 1 ? STYLE.trim : team);
+  for (let y = -0.64; y < 0.64; y += 0.1) quadR(ctx, 0.781, y, y + 0.04, zc + 1, zc + 5, shade(STYLE.trim, -0.2));
+  greekGable(ctx, -0.78, -0.68, 0.78, 0.68, zc + 6, 34, C.roof, false);
+  const [tx, ty] = P(0, 0.72, zc + 6 + 17);
+  ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(tx, ty - 2, L >= 4 ? 3 : 2, 0, Math.PI * 2); ctx.fill();
+  amphora(ctx, 0.92, 0.6);
+  if (L >= 4) { // gouden standbeeld voor de tempel
+    box(ctx, -0.42, 0.82, -0.28, 0.94, 0, 8, C.stone);
+    const [sx, sy] = P(-0.35, 0.88, 8);
+    ctx.fillStyle = '#e0b23a'; ctx.fillRect(sx - 1.8, sy - 16, 3.6, 16); ctx.beginPath(); ctx.arc(sx, sy - 18, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#e0b23a'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx + 2, sy - 14); ctx.lineTo(sx + 5, sy - 24); ctx.stroke();
+  }
+}
+
+function tcYamato(ctx, L, team) {
+  ground(ctx, -0.95, -0.95, 0.95, 0.95, '#c9c1ad', 'rgba(90,80,60,0.35)');
+  taper(ctx, -0.85, -0.85, 0.85, 0.85, 0, 18, 0.1, C.stone);
+  const tiers = L >= 4 ? 4 : 3;
+  let z = 18; let s = 0.6;
+  for (let i = 0; i < tiers; i++) {
+    const h = i === 0 ? 18 : 13;
+    box(ctx, -s, -s, s, s, z, z + h, C.plaster);
+    for (const x of [-s, -s / 3, s / 3, s - 0.03]) quadL(ctx, s + 0.001, x, x + 0.03, z, z + h, C.timber);
+    for (const y of [-s, 0, s - 0.03]) quadR(ctx, s + 0.001, y, y + 0.03, z, z + h, C.timber);
+    quadL(ctx, s + 0.002, -s, s, z, z + 2, C.timber);
+    windowL(ctx, s, -s * 0.5, z + h * 0.35, 0.06, 4); windowL(ctx, s, s * 0.35, z + h * 0.35, 0.06, 4);
+    windowR(ctx, s, -s * 0.1, z + h * 0.35, 0.06, 4);
+    pagoda(ctx, -s, -s, s, s, z + h, 14 - i * 1.5, C.roof);
+    z += h + 7; s *= 0.74;
+  }
+  // gouden shachihoko op de nok
+  const [ax, ay] = P(-s * 0.6, 0, z - 2); const [bx, by] = P(s * 0.6, 0, z - 2);
+  ctx.fillStyle = C.gold; for (const [x, y] of [[ax, ay], [bx, by]]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x - 2, y - 6, x + 1.5, y - 7); ctx.lineTo(x + 1, y); ctx.fill(); }
+  torii(ctx, 0.92, 0.55);
+  lantern(ctx, -0.55, 0.95);
+  lantern(ctx, 0.95, -0.45);
+  banner(ctx, -0.65, 0.86, 30, team, 12);
+}
+
+function tcBabylon(ctx, L, team) {
+  ground(ctx, -0.95, -0.95, 0.95, 0.95, '#cdb07c', 'rgba(110,80,40,0.35)');
+  const tiers = L >= 4 ? 4 : 3;
+  let z = 0; let s = 0.9;
+  for (let i = 0; i < tiers; i++) {
+    const h = 15 - i;
+    taper(ctx, -s, -s, s, s, z, z + h, 0.04, C.stone, 1, STYLE.trim);
+    z += h; s -= 0.22;
+  }
+  // heiligdom bovenop: blauw geglazuurd met gouden kantelen
+  const r = Math.max(0.16, s + 0.05);
+  box(ctx, -r, -r, r, r, z, z + 14, STYLE.trim, EDGE, 'none');
+  for (let x = -r + 0.03; x < r - 0.04; x += 0.09) quadL(ctx, r + 0.002, x, x + 0.04, z + 4, z + 9, STYLE.trim2);
+  quadL(ctx, r + 0.003, -0.05, 0.05, z, z + 8, '#2a1d12');
+  crenels(ctx, -r, -r, r, r, z + 14, STYLE.trim2, 3, 3);
+  // grote trap aan de voorkant
+  const st = [P(-0.16, 0.95, 0), P(0.16, 0.95, 0), P(0.12, 0.25, z - 2), P(-0.12, 0.25, z - 2)];
+  poly(ctx, st, shade(C.stone, 0.08), EDGE);
+  ctx.strokeStyle = 'rgba(70,45,20,0.45)'; ctx.lineWidth = 0.5;
+  for (let i = 1; i < 14; i++) { const f = i / 14; ctx.beginPath(); ctx.moveTo(...P(-0.16 + 0.04 * f, 0.95 - 0.7 * f, (z - 2) * f)); ctx.lineTo(...P(0.16 - 0.04 * f, 0.95 - 0.7 * f, (z - 2) * f)); ctx.stroke(); }
+  lionStatue(ctx, -0.32, 0.92);
+  lionStatue(ctx, 0.92, -0.3);
+  banner(ctx, 0.3, 0.9, 22, team, 14);
+  palm(ctx, 0.95, 0.5, 0.9);
+}
+
+function tcPersia(ctx, L, team) {
+  ground(ctx, -0.95, -0.95, 0.95, 0.95, '#e0d2b2', 'rgba(110,90,60,0.35)');
+  box(ctx, -0.9, -0.9, 0.9, 0.9, 0, 6, C.stone);
+  const minaret = (x, y) => {
+    box(ctx, x, y, x + 0.12, y + 0.12, 0, 58, C.plaster);
+    quadL(ctx, y + 0.121, x, x + 0.12, 40, 43, STYLE.trim); quadR(ctx, x + 0.121, y, y + 0.12, 40, 43, shade(STYLE.trim, -0.2));
+    box(ctx, x - 0.02, y - 0.02, x + 0.14, y + 0.14, 58, 61, C.stoneDark);
+    dome(ctx, x + 0.06, y + 0.06, 61, 0.09, STYLE.palette.roof, true);
+  };
+  if (L >= 4) minaret(0.72, -0.86); // achteraan
+  box(ctx, -0.72, -0.72, 0.6, 0.55, 6, 38, C.plaster);
+  for (const z of [16, 30]) { quadL(ctx, 0.551, -0.72, 0.6, z, z + 2, STYLE.trim); quadR(ctx, 0.601, -0.72, 0.55, z, z + 2, shade(STYLE.trim, -0.2)); }
+  windowR(ctx, 0.6, -0.4, 20, 0.1, 8); windowR(ctx, 0.6, 0.1, 20, 0.1, 8);
+  // iwan: hoge poort met een spitsboog in turquoise tegels
+  box(ctx, -0.32, 0.5, 0.2, 0.62, 6, 54, C.plaster);
+  const y = 0.622;
+  const arch = (x0, x1, zb, zs, zt) => {
+    const xm = (x0 + x1) / 2;
+    ctx.beginPath();
+    ctx.moveTo(...P(x0, y, zb)); ctx.lineTo(...P(x0, y, zs));
+    ctx.quadraticCurveTo(...P(x0, y, zt - 4), ...P(xm, y, zt));
+    ctx.quadraticCurveTo(...P(x1, y, zt - 4), ...P(x1, y, zs));
+    ctx.lineTo(...P(x1, y, zb)); ctx.closePath();
+  };
+  arch(-0.27, 0.15, 6, 32, 50); ctx.fillStyle = STYLE.trim; ctx.fill();
+  arch(-0.21, 0.09, 6, 30, 45); ctx.fillStyle = '#2a2018'; ctx.fill();
+  arch(-0.21, 0.09, 6, 30, 45); ctx.save(); ctx.clip(); ctx.fillStyle = 'rgba(255,200,120,0.18)'; ctx.fillRect(...P(-0.21, y, 30), 40, 30); ctx.restore();
+  const [ga, gb] = P(-0.06, y, 47); ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(ga, gb - 2, 1.6, 0, Math.PI * 2); ctx.fill();
+  dome(ctx, -0.1, -0.12, 38, L >= 4 ? 0.5 : 0.42, STYLE.palette.roof);
+  minaret(0.72, 0.68);
+  minaret(-0.86, 0.68);
+  banner(ctx, 0.36, 0.62, 30, team, 12);
+  cypress(ctx, 0.97, 0.2, 0.9);
+}
+
+const TC_CIV = { egypt: tcEgypt, greek: tcGreek, yamato: tcYamato, babylon: tcBabylon, persia: tcPersia };
+
 // ---------- mensen, dieren en machines (in schermruimte) ----------
 
 export function ram(ctx, x, y, s = 1) {
@@ -854,6 +1271,29 @@ export function ram(ctx, x, y, s = 1) {
 
 // mensen en ruiters staan in figures.js (rijker getekend en per animatiebeeld gecachet)
 export { person, horseman } from './figures.js';
+
+// stenenwerper: houten werparm met een kei, op wielen
+export function stoneThrower(ctx, x, y, s = 1, t = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.beginPath(); ctx.ellipse(1, 0, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#6b4826'; ctx.fillRect(-11, -7, 22, 3.6);
+  ctx.strokeStyle = '#4a3220'; ctx.lineWidth = 0.6; ctx.strokeRect(-11, -7, 22, 3.6);
+  ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-4, -7); ctx.lineTo(-1, -17); ctx.lineTo(2, -7); ctx.moveTo(3, -7); ctx.lineTo(0, -17); ctx.stroke();
+  const ang = -0.9 + Math.sin(t * 0.002) * 0.08;
+  ctx.save(); ctx.translate(-0.5, -16); ctx.rotate(ang);
+  ctx.fillStyle = '#8a6238'; ctx.fillRect(-1, -14, 2, 20);
+  ctx.fillStyle = '#5a3a1e'; ctx.beginPath(); ctx.arc(0, -14, 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#9a958c'; ctx.beginPath(); ctx.arc(0, -15.2, 2.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#5a5048'; ctx.fillRect(-2.6, 4, 5.2, 4);
+  ctx.restore();
+  ctx.fillStyle = '#2c5fae'; ctx.fillRect(-10, -6.4, 4, 2.4); ctx.fillStyle = '#e0b23a'; ctx.fillRect(-10, -5.6, 4, 0.7);
+  for (const wx of [-8, 7]) {
+    ctx.fillStyle = '#4a3220'; ctx.beginPath(); ctx.arc(wx, -2.6, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#8a6238'; ctx.beginPath(); ctx.arc(wx, -2.6, 1, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
 
 // ---------- natuur ----------
 
@@ -998,8 +1438,9 @@ const SIZES = { tc: 2, monument: 2 };
 
 const cache = new Map();
 
-export function buildingSprite(type, level, team = '#c0392b') {
-  const key = `${type}:${level}:${team}`;
+export function buildingSprite(type, level, team = '#c0392b', civ = null) {
+  const st = STYLES[civ] || null;
+  const key = `${type}:${level}:${team}:${st ? civ : ''}`;
   let spr = cache.get(key);
   if (spr) return spr;
   const size = SIZES[type] || 1;
@@ -1014,9 +1455,22 @@ export function buildingSprite(type, level, team = '#c0392b') {
   ctx.translate(ax, ay);
   LIGHTS = [];
   rs = 12345;
-  apron(ctx, size, type);
-  (DRAW[type] || house)(ctx, Math.max(1, level), team);
-  for (const [px, py, fn] of PROPS[type] || []) if (type !== 'house' || fn !== propPots || level >= 2) fn(ctx, px, py, team);
+  if (st) { Object.assign(C, st.palette); STYLE = st; }
+  try {
+    apron(ctx, size, type);
+    const L = Math.max(1, level);
+    if (st && type === 'tc' && L >= 3) TC_CIV[civ](ctx, L, team);
+    else (DRAW[type] || house)(ctx, L, team);
+    const landmark = st && type === 'tc' && L >= 3;
+    if (!landmark) for (const [px, py, fn] of PROPS[type] || []) if (type !== 'house' || fn !== propPots || level >= 2) fn(ctx, px, py, team);
+    // versiering van het volk naast het gebouw
+    if (st && !['farm', 'market', 'quarry', 'goldmine', 'monument'].includes(type) && !(type === 'tc' && L >= 3)) {
+      const side = SIDE[st.side];
+      if (type === 'tc') { side(ctx, -0.98, 0.98); side(ctx, 0.98, -0.98); } else side(ctx, -0.46, 0.46);
+    }
+  } finally {
+    Object.assign(C, BASE_C); STYLE = null;
+  }
   addGrain(cv);
   spr = { cv, w, h, ax, ay, lights: LIGHTS };
   LIGHTS = null;
