@@ -308,16 +308,21 @@ route('POST', '/harvest', { auth: true, active: true }, async (ctx) => {
 });
 
 // eenheden in je eigen gebied besturen (verkennen, aanvallen, verzamelen, bos kappen, naar huis)
+const FIELD_AT_WINDOW = 4000;
+
 route('POST', '/field', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   const to = body.to && { x: Number(body.to.x), y: Number(body.to.y) };
   const target = body.target && typeof body.target === 'object' ? body.target : null;
+  // De browser voert de opdracht meteen zelf uit en geeft het tijdstip mee, zodat de server exact hetzelfde
+  // pad berekent. Enkel een tijdstip van de laatste paar seconden telt (geen voordeel mogelijk).
+  const at = Math.min(ctx.now, Math.max(ctx.now - FIELD_AT_WINDOW, Math.floor(Number(body.at)) || ctx.now));
   return townAction(ctx, (s) => {
     if (body.action === 'send') {
       const from = body.from && { x: Number(body.from.x), y: Number(body.from.y) };
-      return doFieldSend(s, body.spec || {}, from, to, target, ctx.now);
+      return doFieldSend(s, body.spec || {}, from, to, target, at);
     }
-    return doFieldOrder(s, int(body.id), to, target, ctx.now);
+    return doFieldOrder(s, int(body.id), to, target, at);
   });
 });
 
