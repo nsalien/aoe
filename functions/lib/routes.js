@@ -14,7 +14,7 @@ import {
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import {
-  RES, UNITS, ARMY_UNITS, MARKET, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA,
+  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA,
 } from '../../public/shared/rules.js';
 
 const routes = [];
@@ -131,7 +131,9 @@ route('POST', '/register', { process: false }, async ({ request, db, world, now 
   const p = await db.prepare('INSERT INTO players (name, pass_hash, salt, team_id, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)')
     .bind(name, hash, salt, team.id, now, now).run();
   const pid = p.meta.last_row_id;
-  const state = newTownState(Math.max(now, world.start_at));
+  // het gekozen volk (of een willekeurig als er niets gekozen is)
+  const civ = CIVS[body.civ] ? body.civ : CIV_IDS[Math.floor(Math.random() * CIV_IDS.length)];
+  const state = newTownState(Math.max(now, world.start_at), civ);
   await db.prepare('INSERT INTO towns (player_id, name, x, y, state) VALUES (?, ?, ?, ?, ?)')
     .bind(pid, townName, spot.x, spot.y, JSON.stringify(state)).run();
   const sess = await createSession(db, pid, now);
@@ -212,7 +214,7 @@ route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
     ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     return {
-      id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id,
+      id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id, civ: s.civ,
       online: now - r.last_seen < 5 * 60000, ...publicSummary(s),
     };
   });

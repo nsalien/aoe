@@ -3,7 +3,7 @@
 // dezelfde code om grondstoffen en timers vloeiend te laten doortellen.
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
-  TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS,
+  TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
 import {
@@ -15,9 +15,10 @@ export class GameError extends Error {
   constructor(msg, status = 400) { super(msg); this.status = status; }
 }
 
-export function newTownState(t) {
+export function newTownState(t, civ = null) {
   return {
     t,
+    civ: CIVS[civ] ? civ : null,
     res: { ...START.res },
     villagers: { ...START.villagers },
     rally: 'auto',
@@ -299,6 +300,8 @@ export function advance(s, t, speed = 1) {
 
 // De server roept dit op met het stadsnummer als zaad (de browser krijgt de state al zo).
 export function ensureTerritory(s, seed) {
+  // steden van voor de volkeren krijgen een willekeurig (maar vast) volk
+  if (!CIVS[s.civ]) s.civ = CIV_IDS[(Math.imul(seed | 0, 2654435761) >>> 0) % CIV_IDS.length];
   if (!s.field) s.field = [];
   if (s.terr) return;
   s.terr = { seed, ex: '', rv: -1, cl: [], dep: {}, boar: {}, camp: { down: 0, raids: 0, loss: 0, next: null }, log: [], lid: 0 };
@@ -817,12 +820,14 @@ export function doUpgrade(s, bid, now, speed) {
 export function checkTrain(s, unit, n, awayPop = 0) {
   const u = UNITS[unit];
   if (!u || u.wild || !u.building) return 'Onbekende eenheid.';
+  if (u.civ && u.civ !== s.civ) return 'Dit is een eenheid van een ander volk.';
   if (!Number.isInteger(n) || n < 1 || n > 500) return 'Ongeldig aantal.';
+  if (u.queue === 'castle' && bLevel(s, 'tc') < u.bl) return `Vereist een kasteel: breng je stadscentrum naar het ${AGES[CASTLE_LEVEL].name}.`;
   if (age(s) < u.age) return 'Vereist een later tijdperk.';
   const lvl = bLevel(s, u.building);
   if (lvl < u.bl) return `Vereist ${BUILDINGS[u.building].name} niveau ${u.bl}.`;
   if (unit === 'villager' && s.builds.some((j) => j.bid === 1)) return 'Het stadscentrum wordt verbeterd.';
-  if ((s.queues[u.building] || []).length >= 8) return 'De wachtrij is vol.';
+  if ((s.queues[u.queue || u.building] || []).length >= 8) return 'De wachtrij is vol.';
   if (homePop(s) + awayPop + n * u.pop > popCap(s)) return 'Niet genoeg bevolkingsruimte. Bouw huizen!';
   if (!canAfford(s.res, u.cost, n)) return 'Niet genoeg grondstoffen.';
   return null;
@@ -833,10 +838,11 @@ export function doTrain(s, unit, n, now, speed, awayPop = 0) {
   if (err) throw new GameError(err);
   const u = UNITS[unit];
   pay(s.res, u.cost, n);
-  const key = u.building;
+  const key = u.queue || u.building; // eenheden van je volk hebben een eigen wachtrij in het kasteel
   if (!s.queues[key]) s.queues[key] = [];
   const q = s.queues[key];
-  const dur = unitTime(unit, bLevel(s, key), speed);
+  const lvl = u.queue === 'castle' ? bLevel(s, 'tc') - CASTLE_LEVEL + 1 : bLevel(s, u.building);
+  const dur = unitTime(unit, lvl, speed);
   q.push({ unit, n, done: 0, dur, start: q.length ? null : now });
 }
 
