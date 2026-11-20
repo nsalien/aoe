@@ -1,7 +1,8 @@
 // HTML-sjablonen voor panelen, vensters en de bovenbalk.
 import * as A from './art.js';
+import * as FIG from './figures.js';
 import {
-  RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, levelCost, levelTime,
+  RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
@@ -37,11 +38,42 @@ export const resImg = (r, cls = 'ico') => `<img class="${cls}" src="${ICON[r]}" 
 
 // ---------- miniatuurafbeeldingen (één keer gerenderd) ----------
 const thumbs = new Map();
-export function buildingThumb(type, level = 1, team = '#c0392b') {
-  const key = `${type}:${level}:${team}`;
+// ---------- volkeren ----------
+const EMBLEM = {
+  egypt: '<circle cx="12" cy="12" r="10.5" fill="#2f5fa8" stroke="#d4a017" stroke-width="1.6"/><path d="M12 13v7M8.5 13.2h7" stroke="#f2c230" stroke-width="2.2" stroke-linecap="round"/><ellipse cx="12" cy="8.6" rx="2.6" ry="3.4" fill="none" stroke="#f2c230" stroke-width="2"/>',
+  greek: '<circle cx="12" cy="12" r="10.5" fill="#2e5fa8" stroke="#f3efe5" stroke-width="1.6"/><path d="M6 8.2h12l-6-3.4z" fill="#f3efe5"/><path d="M7.4 9.6h1.8v7.4H7.4zM11.1 9.6h1.8v7.4h-1.8zM14.8 9.6h1.8v7.4h-1.8z" fill="#f3efe5"/><path d="M6 17.6h12v1.6H6z" fill="#f3efe5"/>',
+  yamato: '<circle cx="12" cy="12" r="10.5" fill="#f6f1e6" stroke="#2e2018" stroke-width="1.6"/><circle cx="12" cy="12" r="5" fill="#c0392b"/>',
+  babylon: '<circle cx="12" cy="12" r="10.5" fill="#244e8f" stroke="#e0b23a" stroke-width="1.6"/><path d="M12 4.5l1.6 4.6 4.8-1.6-3 4 3 4-4.8-1.6L12 19.5l-1.6-4.6-4.8 1.6 3-4-3-4 4.8 1.6z" fill="#e0b23a"/>',
+  persia: '<circle cx="12" cy="12" r="10.5" fill="#f0e6ce" stroke="#1f9a9a" stroke-width="1.6"/><path d="M6 17.5h12v-3H6z" fill="#e2d4b6" stroke="#8a6a3a" stroke-width=".8"/><path d="M7.5 14.5c0-4 2-6.6 4.5-6.6s4.5 2.6 4.5 6.6z" fill="#29a9a9"/><path d="M12 4.6v3.3" stroke="#d4a017" stroke-width="1.4"/><circle cx="12" cy="4.4" r="1" fill="#d4a017"/>',
+};
+export function civEmblem(civ, size = 18) {
+  const e = EMBLEM[civ];
+  return e ? `<svg class="civ-emblem" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true">${e}</svg>` : '';
+}
+export const civName = (civ) => (CIVS[civ] ? CIVS[civ].name : '');
+
+// keuze van een volk bij het stichten van een rijk
+export function civPickerHtml() {
+  return CIV_IDS.map((c, i) => {
+    const v = CIVS[c];
+    return `<label class="civ-card"><input type="radio" name="civ" value="${c}" ${i === 0 ? 'checked' : ''}>
+      <img src="${buildingThumb('tc', CASTLE_LEVEL, v.color, c)}" alt="">
+      <span class="civ-name">${civEmblem(c, 16)} ${v.name}</span>
+      <span class="civ-desc">${v.desc}</span>
+      <span class="civ-units">${v.units.map((k) => `<img src="${unitThumb(k, v.color)}" alt="" title="${esc(UNITS[k].name)}">`).join('')}${v.units.map((k) => UNITS[k].name).join(' · ')}</span>
+    </label>`;
+  }).join('');
+}
+
+// volk van de eigen stad (bepaalt de bouwstijl van de afbeeldingen in de panelen)
+let myCiv = null;
+export function setCiv(civ) { myCiv = civ; }
+
+export function buildingThumb(type, level = 1, team = '#c0392b', civ = myCiv) {
+  const key = `${type}:${level}:${team}:${civ || ''}`;
   if (thumbs.has(key)) return thumbs.get(key);
   const t = type === 'wall' ? 'tower' : type;
-  const spr = A.buildingSprite(t, Math.max(1, level), team);
+  const spr = A.buildingSprite(t, Math.max(1, level), team, civ);
   const big = BUILDINGS[t]?.size === 2;
   const sc = big ? 1.05 : t === 'tower' ? 1.15 : 1.85;
   const cv = document.createElement('canvas');
@@ -61,6 +93,10 @@ export function unitThumb(unit, team = '#3f7fd9') {
   const ctx = cv.getContext('2d');
   ctx.scale(2, 2);
   const o = { s: 2.1, team };
+  const big = { elephant: 1.0, chariot: 1.4, camel: 1.12, yabusame: 1.24 };
+  if (FIG.uniqueUnit(ctx, unit, 22, 42, { s: big[unit] || 2.1, team })) {
+    const url = cv.toDataURL(); thumbs.set(key, url); return url;
+  }
   switch (unit) {
     case 'villager': A.person(ctx, 22, 40, { ...o, team: null, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe' }); break;
     case 'spear': A.person(ctx, 20, 40, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
@@ -70,6 +106,7 @@ export function unitThumb(unit, team = '#3f7fd9') {
     case 'rider': A.horseman(ctx, 20, 40, { s: 1.6, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' }); break;
     case 'knight': A.horseman(ctx, 20, 40, { s: 1.6, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530' }); break;
     case 'ram': A.ram(ctx, 21, 34, 1.5); break;
+    case 'stonethrower': A.stoneThrower(ctx, 22, 38, 1.5); break;
     default:
   }
   const url = cv.toDataURL();
@@ -148,7 +185,7 @@ export function townOverviewHtml(app, live) {
   const wall = live.buildings.find((b) => b.type === 'wall');
 
   let html = `<div class="ph"><img class="thumb" src="${buildingThumb('tc', a, d.team.color)}" alt="">
-    <div><h2>${esc(d.town.name)}</h2><div class="lvl">${AGES[a].name}</div>
+    <div><h2>${esc(d.town.name)}</h2><div class="lvl">${AGES[a].name}${live.civ ? ` · <span class="civ-tag">${civEmblem(live.civ, 14)} ${civName(live.civ)}</span>` : ''}</div>
     <div class="small muted">Positie (${d.town.x}, ${d.town.y}) · <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></div></div></div>`;
 
   html += bonusCardHtml(app, live);
@@ -320,7 +357,7 @@ function trainQueueHtml(app, queues) {
       const startNext = i === 0 ? it.start + it.done * it.dur : t;
       const end = startNext + (it.n - it.done) * it.dur;
       html += `<div class="qitem"><img src="${unitThumb(it.unit, app.data.team.color)}" alt="">
-        <div><div class="nm">${it.n - it.done}× ${UNITS[it.unit].name} <span class="muted small">(${BUILDINGS[key].name})</span></div>
+        <div><div class="nm">${it.n - it.done}× ${UNITS[it.unit].name} <span class="muted small">(${key === 'castle' ? 'Kasteel' : BUILDINGS[key].name})</span></div>
         ${i === 0 ? `<div class="small muted">volgende over ${timer(it.start + (it.done + 1) * it.dur)}</div>` : '<div class="small muted">wacht in de rij</div>'}</div>
         ${timer(end)}</div>`;
       t = end;
@@ -351,7 +388,7 @@ export function buildingPanelHtml(app, live, b) {
     const title = b.type === 'tc' ? `Naar het ${AGES[to].name}` : (lvl === 0 ? 'Bouwen' : `Verbeteren naar niveau ${to}`);
     html += `<div class="card"><h3>${icon('up')} ${title}</h3>${costHtml(cost, live.res)}
       <div class="small muted" style="margin-top:4px">${icon('clock')} ${fmtDuration(levelTime(b.type, to, d.world.speed))}</div>`;
-    if (b.type === 'tc') html += unlocksHtml(to);
+    if (b.type === 'tc') html += unlocksHtml(to, live.civ);
     if (err && err !== 'Niet genoeg grondstoffen.') html += `<p class="req">${err}</p>`;
     html += `<div class="actions"><button class="btn primary" data-action="upgrade" data-id="${b.id}" ${!canAct || err ? 'disabled' : ''}>${b.type === 'tc' ? 'Nieuw tijdperk' : (lvl === 0 ? 'Bouwen' : 'Verbeteren')}</button></div></div>`;
   } else if (lvl >= def.maxLevel) {
@@ -361,9 +398,24 @@ export function buildingPanelHtml(app, live, b) {
   return html;
 }
 
-function unlocksHtml(a) {
+// eigen eenheden van het volk, getraind in het kasteel (stadscentrum vanaf niveau 3)
+function castleHtml(app, live, b) {
+  const civ = CIVS[live.civ];
+  if (!civ) return '';
+  const castle = b.level >= CASTLE_LEVEL;
+  const head = `${civEmblem(live.civ, 18)} ${castle ? 'Kasteel' : 'Eenheden van je volk'} <span class="right">${civ.name}</span>`;
+  if (!castle) {
+    return `<div class="card castle-card"><h3>${head}</h3>
+      <p class="small muted" style="margin:0 0 6px">Zodra je stadscentrum een kasteel wordt (${AGES[CASTLE_LEVEL].name}), train je hier de elite van je volk:</p>
+      ${civ.units.map((k) => `<div class="row small castle-preview"><img src="${unitThumb(k, app.data.team.color)}" alt=""><span class="grow"><b>${UNITS[k].name}</b><br><span class="muted">${UNITS[k].desc}</span></span></div>`).join('')}</div>`;
+  }
+  return trainHtml(app, live, b, civ.units, head, 'castle-card');
+}
+
+function unlocksHtml(a, civ) {
   const bs = BUILD_ORDER.filter((t) => BUILDINGS[t].age === a).map((t) => BUILDINGS[t].name);
-  const us = Object.keys(UNITS).filter((k) => UNITS[k].age === a).map((k) => UNITS[k].name);
+  const us = Object.keys(UNITS).filter((k) => UNITS[k].age === a && UNITS[k].building && (!UNITS[k].civ || UNITS[k].civ === civ)).map((k) => UNITS[k].name);
+  if (a === CASTLE_LEVEL && CIVS[civ]) us.push('het kasteel');
   const more = a >= 3 ? ['een derde bouwer'] : [];
   const all = [...bs, ...us, ...more, 'hogere gebouwniveaus', '+10% productie'];
   return `<p class="small" style="margin:6px 0 0"><b>Ontgrendelt:</b> ${all.join(', ')}.</p>`;
@@ -373,7 +425,7 @@ function buildingInfo(app, live, b) {
   const d = app.data;
   const L = b.level;
   switch (b.type) {
-    case 'tc': return trainHtml(app, live, b, ['villager']);
+    case 'tc': return trainHtml(app, live, b, ['villager']) + castleHtml(app, live, b);
     case 'barracks': case 'range': case 'stable': case 'workshop':
       return trainHtml(app, live, b, Object.keys(UNITS).filter((k) => UNITS[k].building === b.type));
     case 'house': return `<div class="card"><dl class="kv"><dt>Bevolking door dit huis</dt><dd>+${5 * L}</dd><dt>Totale ruimte</dt><dd>${popCap(live)}</dd></dl></div>`;
@@ -403,18 +455,19 @@ export function maxTrain(live, unit, away) {
   return Math.max(0, n);
 }
 
-function trainHtml(app, live, b, units) {
+function trainHtml(app, live, b, units, title = null, cls = '') {
   const d = app.data;
   const canAct = app.canAct;
-  let html = `<div class="card"><h3>${icon('target')} Trainen</h3>`;
+  let html = `<div class="card ${cls}"><h3>${title || `${icon('target')} Trainen`}</h3>`;
   for (const k of units) {
     const u = UNITS[k];
     const err = checkTrain(live, k, 1, d.awayPop);
     const locked = age(live) < u.age || bLevel(live, u.building) < u.bl;
     const max = maxTrain(live, k, d.awayPop);
-    const t = Math.round((u.time * Math.pow(0.85, Math.max(0, b.level - 1))) / d.world.speed);
+    const lvl = u.queue === 'castle' ? b.level - CASTLE_LEVEL + 1 : b.level;
+    const t = Math.round((u.time * Math.pow(0.85, Math.max(0, lvl - 1))) / d.world.speed);
     html += `<div class="urow"><img src="${unitThumb(k, d.team.color)}" alt="">
-      <div><div class="nm">${u.name}</div>
+      <div><div class="nm">${u.name}${u.unique ? ` <span class="elite-tag">${icon('star')} elite</span>` : ''}</div>
       ${u.atk !== undefined && ARMY_UNITS.includes(k) ? `<div class="stats"><span title="Aanval">${icon('swords')} ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">${icon('shield')} ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">${icon('horse')} ${u.speed}</span><span title="Draagvermogen">${icon('cart')} ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">${icon('people')} ${u.pop}</span>` : ''}</div>` : ''}
       ${u.desc ? `<div class="small muted">${u.desc}</div>` : ''}
       <div class="row small" style="margin-top:3px">${costHtml(u.cost, live.res)}<span class="muted">${icon('clock')} ${fmtDuration(t * 1000)}</span></div>
@@ -471,8 +524,9 @@ export function worldPanelHtml(app, sel) {
   const mine = t.id === me.id;
   const ally = t.teamId === d.me.teamId;
   const dist = Math.hypot(t.x - me.x, t.y - me.y);
-  let html = `<div class="ph"><img class="thumb" src="${buildingThumb('tc', t.age, team ? team.color : '#888')}" alt="">
+  let html = `<div class="ph"><img class="thumb" src="${buildingThumb('tc', t.age, team ? team.color : '#888', t.civ)}" alt="">
     <div><h2>${esc(t.name)}</h2><div class="lvl">${esc(t.player)} ${t.online ? '· <span style="color:#3f8f3c">● online</span>' : ''}</div>
+    ${t.civ ? `<div class="small">${civEmblem(t.civ, 14)} ${civName(t.civ)}</div>` : ''}
     ${team ? `<span class="pill" style="background:${team.color}">${esc(team.name)}</span>` : ''}</div></div>
     <div class="card"><dl class="kv"><dt>Tijdperk</dt><dd>${AGES[t.age].short}</dd><dt>Punten</dt><dd>${fmt(t.score)}</dd>
     <dt>Gebouwen</dt><dd>${t.buildings}</dd><dt>Muur</dt><dd>${t.wall ? `niveau ${t.wall}` : 'geen'}</dd>
@@ -692,6 +746,10 @@ export function helpHtml(w) {
     <li>Bouw <b>huizen</b> voor meer bevolking en een <b>opslagplaats</b> zodat je niets verspilt.</li>
     <li>Breng je stadscentrum naar een nieuw <b>tijdperk</b> om nieuwe gebouwen en troepen te ontgrendelen.
     Elk tijdperk wordt je <b>bouwgrond</b> groter (de stippellijn rond je stad).</li></ul>
+    <h3>Volkeren</h3>
+    <p>Elk rijk hoort bij een volk met een eigen bouwstijl. Zodra je stadscentrum een <b>kasteel</b> wordt (${AGES[CASTLE_LEVEL].name}),
+    train je daar twee elite-eenheden die enkel jouw volk heeft:</p>
+    <ul>${CIV_IDS.map((c) => `<li>${civEmblem(c, 15)} <b>${CIVS[c].name}</b>: ${CIVS[c].units.map((k) => `<b>${UNITS[k].name}</b> (${UNITS[k].desc.charAt(0).toLowerCase()}${UNITS[k].desc.slice(1).replace(/\.$/, '')})`).join(' en ')}.</li>`).join('')}</ul>
     <h3>Je eigen gebied verkennen</h3>
     <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Tik op een <b>dorpeling of soldaat</b> en daarna op de grond:
     hij loopt er meteen naartoe en de mist verdwijnt waar hij komt. Een groep die je gekozen hebt, krijgt een gouden ring; tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>

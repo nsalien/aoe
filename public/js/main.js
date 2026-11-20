@@ -173,6 +173,7 @@ function applyState(data, first = false) {
   const prevPhase = app.data && app.data.world.phase;
   app.data = data;
   app.serverState = data.town.state;
+  UI.setCiv(data.town.state.civ);
   if (fieldQueue.length) setBaseState(data.town.state);
   const off = data.now - Date.now();
   if (first || Math.abs(off - app.offset) > 1500) app.offset = off;
@@ -783,6 +784,7 @@ const actions = {
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t === el);
     $('#loginForm').hidden = el.dataset.tab !== 'login';
     $('#registerForm').hidden = el.dataset.tab !== 'register';
+    if (!$('#registerForm').hidden && !$('#civPicker').children.length) $('#civPicker').innerHTML = UI.civPickerHtml();
     $('#authError').textContent = '';
   },
   view(el) { closeModal(); openPanelMobile(false); switchView(el.dataset.view); },
@@ -1001,7 +1003,7 @@ $('#registerForm').addEventListener('submit', async (e) => {
   const btn = e.target.querySelector('button[type=submit]');
   btn.disabled = true;
   try {
-    await post('/register', { name: f.get('name'), password: f.get('password'), townName: f.get('townName'), joinCode: f.get('joinCode') });
+    await post('/register', { name: f.get('name'), password: f.get('password'), townName: f.get('townName'), joinCode: f.get('joinCode'), civ: f.get('civ') });
     startGame(await get('/state'));
   } catch (err) { $('#authError').textContent = err.message; } finally { btn.disabled = false; }
 });
