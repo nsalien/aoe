@@ -1,5 +1,6 @@
--- Databaseschema voor Cloudflare D1 (SQLite).
--- Uitvoeren met: npm run db:init:remote   (of db:init:local voor lokaal testen)
+-- Eerste databaseschema voor Cloudflare D1 (SQLite).
+-- Wijzig dit bestand nooit meer: maak voor elke schemawijziging een nieuw bestand (0002_....sql).
+-- De GitHub-actie voert nieuwe migraties automatisch uit bij elke deploy.
 
 CREATE TABLE IF NOT EXISTS world (
   id INTEGER PRIMARY KEY CHECK (id = 1),

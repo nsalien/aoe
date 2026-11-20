@@ -1,0 +1,108 @@
+# Automatisch testen, naar main overnemen en online zetten.
+#
+#   push naar een Claude-branch (claude/..., ccr-...)   ->  testen -> cherry-pick naar main -> deploy
+#   push naar main                                      ->  testen -> deploy
+#   handmatig ("Run workflow" in het tabblad Actions)   ->  idem
+#
+# Nodig (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   token met "Cloudflare Pages: Edit" en "D1: Edit"
+#   CLOUDFLARE_ACCOUNT_ID  je Cloudflare account-id
+#   ADMIN_KEY              (optioneel) wachtwoord voor /admin.html
+#   GH_PUSH_TOKEN          (optioneel) enkel nodig als je de workflow zelf wil laten aanpassen via Claude
+name: Testen en online zetten
+
+on:
+  push:
+    branches: ['main', 'claude/**', 'ccr-**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# nooit twee keer tegelijk naar main schrijven of deployen
+concurrency:
+  group: promote-and-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  promote:
+    name: Overnemen op main
+    needs: test
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.pick.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PUSH_TOKEN || github.token }}
+      - name: Cherry-pick naar main
+        id: pick
+        run: bash scripts/promote.sh "$GITHUB_SHA"
+
+  deploy:
+    name: Online zetten (Cloudflare)
+    needs: [test, promote]
+    # main zelf, of een branch waarvan net iets op main is gezet.
+    # Pushes die promote.sh zelf naar main deed (herkenbaar aan "cherry picked from commit") zijn al gedeployed.
+    if: >-
+      always() && needs.test.result == 'success' && (
+        (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'cherry picked from commit'))) ||
+        (needs.promote.result == 'success' && (needs.promote.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'))
+      )
+    runs-on: ubuntu-latest
+    environment:
+      name: productie
+      url: https://rijken-van-de-vallei.pages.dev
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+    steps:
+      - name: Geheimen controleren
+        id: check
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⚠️ Nog niet online gezet"
+              echo "De geheimen \`CLOUDFLARE_API_TOKEN\` en \`CLOUDFLARE_ACCOUNT_ID\` ontbreken."
+              echo "Zie de README, onderdeel *Automatisch online zetten*."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.check.outputs.ok == 'true'
+        run: npm ci
+      - name: Deploy naar Cloudflare Pages
+        if: steps.check.outputs.ok == 'true'
+        run: |
+          export COMMIT_MSG="$(git log -1 --format=%s | cut -c1-200)"
+          bash scripts/deploy.sh
+          {
+            echo "### ✅ Online"
+            echo "Het spel staat op https://rijken-van-de-vallei.pages.dev"
+            echo "Versie: \`$(git log -1 --format='%h %s')\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -46,11 +46,93 @@ export function poly(ctx, pts, fill, stroke) {
 
 const EDGE = 'rgba(40,25,10,0.35)';
 
-export function box(ctx, x0, y0, x1, y1, z0, z1, color, edge = EDGE) {
+// materiaal afleiden uit de kleur, zodat bestaande tekeningen automatisch textuur krijgen
+const STONES = new Set(['#bdb5a6', '#8f887c', '#b9b1a1', '#d3cbb8', '#e6dfcf', '#6f675c', '#a39a89']);
+const WOODS = new Set(['#a8743f', '#7a5129', '#9c6b3c', '#9a6a38']);
+const PLASTERS = new Set(['#efe2c0', '#efe6cf']);
+function materialOf(color) {
+  if (typeof color !== 'string') return null;
+  if (STONES.has(color)) return 'stone';
+  if (WOODS.has(color)) return 'wood';
+  if (PLASTERS.has(color)) return 'plaster';
+  return null;
+}
+
+let rs = 1;
+const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
+
+// textuur op een zijvlak; map(u, z) geeft het schermpunt voor positie u (tegels) en hoogte z
+function texFace(ctx, map, u0, u1, z0, z1, kind, ao) {
+  const h = z1 - z0; const w = u1 - u0;
+  if (h < 5 || w < 0.1) return;
+  ctx.save();
+  ctx.beginPath();
+  const pts = [map(u0, z0), map(u1, z0), map(u1, z1), map(u0, z1)];
+  ctx.moveTo(...pts[0]); for (const p of pts.slice(1)) ctx.lineTo(...p); ctx.closePath();
+  ctx.clip();
+  ctx.lineWidth = 0.55;
+  if (kind === 'stone') {
+    const rh = 5.2; const bw = 0.13;
+    let r = 0;
+    for (let z = z0; z < z1; z += rh, r++) {
+      const off = (r % 2) * bw * 0.5;
+      for (let u = u0 - off; u < u1; u += bw) {
+        const v = rnd();
+        if (v < 0.35) {
+          ctx.fillStyle = v < 0.17 ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+          ctx.beginPath(); const a = map(u, z); const b = map(u + bw, z); const c = map(u + bw, z + rh); const d = map(u, z + rh);
+          ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.lineTo(...d); ctx.fill();
+        }
+        ctx.strokeStyle = 'rgba(55,45,35,0.28)';
+        ctx.beginPath(); ctx.moveTo(...map(u, z)); ctx.lineTo(...map(u, z + rh)); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(55,45,35,0.32)';
+      ctx.beginPath(); ctx.moveTo(...map(u0, z)); ctx.lineTo(...map(u1, z)); ctx.stroke();
+    }
+  } else if (kind === 'wood') {
+    for (let z = z0 + 3.4; z < z1; z += 3.4) {
+      ctx.strokeStyle = 'rgba(60,35,15,0.3)';
+      ctx.beginPath(); ctx.moveTo(...map(u0, z)); ctx.lineTo(...map(u1, z)); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,230,190,0.12)';
+      ctx.beginPath(); ctx.moveTo(...map(u0, z + 0.8)); ctx.lineTo(...map(u1, z + 0.8)); ctx.stroke();
+    }
+    for (let u = u0 + 0.21; u < u1; u += 0.27 + rnd() * 0.1) {
+      ctx.strokeStyle = 'rgba(60,35,15,0.18)';
+      ctx.beginPath(); ctx.moveTo(...map(u, z0)); ctx.lineTo(...map(u, z1)); ctx.stroke();
+    }
+  } else if (kind === 'plaster') {
+    for (let i = 0; i < w * 40; i++) {
+      const [x, y] = map(u0 + rnd() * w, z0 + rnd() * h);
+      ctx.fillStyle = rnd() < 0.5 ? 'rgba(120,95,60,0.12)' : 'rgba(255,255,255,0.18)';
+      ctx.fillRect(x, y, 1.1, 1.1);
+    }
+  }
+  if (ao) {
+    const [ax, ay] = map((u0 + u1) / 2, z0);
+    const [, by] = map((u0 + u1) / 2, z0 + Math.min(11, h * 0.45));
+    const g = ctx.createLinearGradient(ax, ay, ax, by);
+    g.addColorStop(0, 'rgba(25,15,5,0.34)'); g.addColorStop(1, 'rgba(25,15,5,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(Math.min(...pts.map((p) => p[0])) - 2, Math.min(...pts.map((p) => p[1])) - 2, 400, 400);
+  }
+  ctx.restore();
+}
+
+export function box(ctx, x0, y0, x1, y1, z0, z1, color, edge = EDGE, tex = 'auto') {
   const c = typeof color === 'string' ? mat(color) : color;
+  const kind = tex === 'auto' ? materialOf(color) : tex;
+  const ao = z0 === 0 && z1 > 8 && tex !== 'none';
+  rs = (Math.abs(Math.floor((x0 * 997 + y0 * 131 + z1 * 7 + 5) * 1000)) % 2147483646) + 1;
   poly(ctx, [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)], c.left, edge);
+  if (kind || ao) texFace(ctx, (u, z) => P(u, y1, z), x0, x1, z0, z1, kind, ao);
   poly(ctx, [P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1)], c.right, edge);
+  if (kind || ao) texFace(ctx, (u, z) => P(x1, u, z), y0, y1, z0, z1, kind, ao);
   poly(ctx, [P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)], c.top, edge);
+  if (z1 - z0 > 6 && x1 - x0 > 0.12) {
+    // randlicht aan de bovenrand (zon van linksboven)
+    ctx.strokeStyle = 'rgba(255,250,235,0.35)'; ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.moveTo(...P(x0, y1, z1)); ctx.lineTo(...P(x0, y0, z1)); ctx.lineTo(...P(x1, y0, z1)); ctx.stroke();
+  }
 }
 
 // vlak op de linkervoorkant (y = vast) of rechtervoorkant (x = vast)
@@ -64,12 +146,62 @@ function ground(ctx, x0, y0, x1, y1, fill, stroke) {
   poly(ctx, [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)], fill, stroke);
 }
 
+const lerp2 = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+
+// dakpannen, leien of riet op een dakvlak (eA-eB = dakgoot, rA-rB = nok)
+function slopeTex(ctx, eA, eB, rA, rB, color) {
+  const thatch = color === C.thatch;
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(...eA); ctx.lineTo(...eB); ctx.lineTo(...rB); ctx.lineTo(...rA); ctx.closePath();
+  ctx.clip();
+  const len = Math.hypot(eB[0] - eA[0], eB[1] - eA[1]);
+  const rows = thatch ? 5 : 6;
+  if (thatch) {
+    for (let i = 0; i < len * 2.2; i++) {
+      const s = Math.random(); const t = Math.random();
+      const p = lerp2(lerp2(eA, eB, s), lerp2(rA, rB, s), t);
+      const q = lerp2(lerp2(eA, eB, s), lerp2(rA, rB, s), Math.max(0, t - 0.12));
+      ctx.strokeStyle = Math.random() < 0.5 ? 'rgba(120,80,20,0.35)' : 'rgba(255,240,180,0.35)';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke();
+    }
+  }
+  for (let i = 1; i < rows; i++) {
+    const t = i / rows;
+    const a = lerp2(eA, rA, t); const b = lerp2(eB, rB, t);
+    ctx.strokeStyle = thatch ? 'rgba(110,70,15,0.35)' : 'rgba(30,10,5,0.32)';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+    if (!thatch) {
+      const t2 = (i - 1) / rows;
+      const a2 = lerp2(eA, rA, t2); const b2 = lerp2(eB, rB, t2);
+      const n = Math.max(3, Math.round(len / 4.5));
+      ctx.strokeStyle = 'rgba(30,10,5,0.18)'; ctx.lineWidth = 0.5;
+      for (let k = 0; k < n; k++) {
+        const u = (k + (i % 2) * 0.5) / n;
+        ctx.beginPath(); ctx.moveTo(...lerp2(a2, b2, u)); ctx.lineTo(...lerp2(a, b, u)); ctx.stroke();
+      }
+    }
+  }
+  // licht naar de nok toe
+  const g = ctx.createLinearGradient(...lerp2(eA, eB, 0.5), ...lerp2(rA, rB, 0.5));
+  g.addColorStop(0, 'rgba(0,0,0,0.12)'); g.addColorStop(1, 'rgba(255,245,220,0.12)');
+  ctx.fillStyle = g;
+  ctx.fillRect(Math.min(eA[0], eB[0], rA[0], rB[0]) - 2, Math.min(eA[1], eB[1], rA[1], rB[1]) - 2, len + 60, 200);
+  ctx.restore();
+  // dikte van de dakrand
+  ctx.strokeStyle = shade(color, -0.42); ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(...eA); ctx.lineTo(...eB); ctx.stroke();
+}
+
 function gableX(ctx, x0, y0, x1, y1, z, h, color, wall, oh = 0.06) {
   const ym = (y0 + y1) / 2;
   const a = x0 - oh; const b = x1 + oh; const c0 = y0 - oh; const c1 = y1 + oh;
   poly(ctx, [P(a, c0, z), P(b, c0, z), P(b, ym, z + h), P(a, ym, z + h)], shade(color, -0.15), EDGE);
   poly(ctx, [P(x1, y0, z), P(x1, y1, z), P(x1, ym, z + h)], shade(wall || color, -0.24), EDGE);
+  if (materialOf(wall)) { rs = 77; ctx.save(); ctx.beginPath(); ctx.moveTo(...P(x1, y0, z)); ctx.lineTo(...P(x1, y1, z)); ctx.lineTo(...P(x1, ym, z + h)); ctx.closePath(); ctx.clip(); texFace(ctx, (u, zz) => P(x1, u, zz), y0, y1, z, z + h, materialOf(wall), false); ctx.restore(); }
   poly(ctx, [P(a, c1, z), P(b, c1, z), P(b, ym, z + h), P(a, ym, z + h)], shade(color, 0), EDGE);
+  slopeTex(ctx, P(a, c1, z), P(b, c1, z), P(a, ym, z + h), P(b, ym, z + h), color);
   // nok
   ctx.strokeStyle = shade(color, -0.35); ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(...P(a, ym, z + h)); ctx.lineTo(...P(b, ym, z + h)); ctx.stroke();
@@ -81,6 +213,7 @@ function gableY(ctx, x0, y0, x1, y1, z, h, color, wall, oh = 0.06) {
   poly(ctx, [P(c0, a, z), P(c0, b, z), P(xm, b, z + h), P(xm, a, z + h)], shade(color, -0.1), EDGE);
   poly(ctx, [P(x0, y1, z), P(x1, y1, z), P(xm, y1, z + h)], shade(wall || color, -0.06), EDGE);
   poly(ctx, [P(c1, a, z), P(c1, b, z), P(xm, b, z + h), P(xm, a, z + h)], shade(color, -0.22), EDGE);
+  slopeTex(ctx, P(c1, a, z), P(c1, b, z), P(xm, a, z + h), P(xm, b, z + h), color);
   ctx.strokeStyle = shade(color, -0.4); ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(...P(xm, a, z + h)); ctx.lineTo(...P(xm, b, z + h)); ctx.stroke();
 }
@@ -92,7 +225,9 @@ function hipRoof(ctx, x0, y0, x1, y1, z, h, color, oh = 0.06) {
   poly(ctx, [P(a, c, z), P(b, c, z), apex], shade(color, -0.12), EDGE);
   poly(ctx, [P(a, c, z), P(a, d, z), apex], shade(color, 0.05), EDGE);
   poly(ctx, [P(a, d, z), P(b, d, z), apex], shade(color, -0.02), EDGE);
+  if (b - a > 0.3) slopeTex(ctx, P(a, d, z), P(b, d, z), apex, apex, color);
   poly(ctx, [P(b, c, z), P(b, d, z), apex], shade(color, -0.22), EDGE);
+  if (b - a > 0.3) slopeTex(ctx, P(b, d, z), P(b, c, z), apex, apex, color);
 }
 
 function crenels(ctx, x0, y0, x1, y1, z, color, n = 4, hgt = 4) {
@@ -104,14 +239,54 @@ function crenels(ctx, x0, y0, x1, y1, z, color, n = 4, hgt = 4) {
   for (let i = 0; i < n; i++) box(ctx, x0 + i * 2 * w, y1 - 0.06, x0 + i * 2 * w + w, y1, z, z + hgt, color);
 }
 
-function shadow(ctx, s = 0.5) {
-  ctx.fillStyle = 'rgba(30,40,10,0.22)';
-  poly(ctx, [P(-s + 0.05, -s + 0.12), P(s + 0.18, -s + 0.12), P(s + 0.18, s + 0.12), P(-s + 0.05, s + 0.12)], 'rgba(30,40,10,0.2)');
+function shadow(ctx, s = 0.5, flowers = false) {
+  // contactschaduw onder het gebouw (de lange slagschaduw tekent de stadsweergave)
+  poly(ctx, [P(-s - 0.02, -s - 0.02), P(s + 0.06, -s - 0.02), P(s + 0.06, s + 0.06), P(-s - 0.02, s + 0.06)], 'rgba(30,40,10,0.22)');
+  tufts(ctx, s, flowers);
 }
 
-function windowL(ctx, y, x, z, w = 0.08, h = 6) { quadL(ctx, y + 0.001, x, x + w, z, z + h, C.window); quadL(ctx, y + 0.002, x + 0.01, x + w - 0.01, z + 1, z + h - 1, 'rgba(246,215,122,0.55)'); }
-function windowR(ctx, x, y, z, w = 0.08, h = 6) { quadR(ctx, x + 0.001, y, y + w, z, z + h, C.window); quadR(ctx, x + 0.002, y + 0.01, y + w - 0.01, z + 1, z + h - 1, 'rgba(246,215,122,0.4)'); }
-function doorL(ctx, y, x, w = 0.1, h = 10, col = C.woodDark) { quadL(ctx, y + 0.001, x, x + w, 0, h, col, EDGE); }
+// lichtpunten (vensters, deuren) van de sprite die nu getekend wordt
+let LIGHTS = null;
+const addLight = (pt, r = 1) => { if (LIGHTS) LIGHTS.push([pt[0], pt[1], r]); };
+
+function windowL(ctx, y, x, z, w = 0.08, h = 6) {
+  quadL(ctx, y + 0.001, x - 0.012, x + w + 0.012, z - 1, z + h + 1, '#e9dcc0');
+  quadL(ctx, y + 0.002, x, x + w, z, z + h, C.window);
+  quadL(ctx, y + 0.003, x + 0.01, x + w - 0.01, z + 1, z + h - 1, 'rgba(246,215,122,0.5)');
+  ctx.strokeStyle = 'rgba(60,40,20,0.7)'; ctx.lineWidth = 0.6;
+  ctx.beginPath(); ctx.moveTo(...P(x + w / 2, y + 0.004, z)); ctx.lineTo(...P(x + w / 2, y + 0.004, z + h));
+  ctx.moveTo(...P(x, y + 0.004, z + h / 2)); ctx.lineTo(...P(x + w, y + 0.004, z + h / 2)); ctx.stroke();
+  quadL(ctx, y + 0.004, x - 0.015, x + w + 0.015, z - 1.6, z - 0.4, '#d8c8a4');
+  addLight(P(x + w / 2, y, z + h / 2), 1);
+}
+function windowR(ctx, x, y, z, w = 0.08, h = 6) {
+  quadR(ctx, x + 0.001, y - 0.012, y + w + 0.012, z - 1, z + h + 1, '#d9cbae');
+  quadR(ctx, x + 0.002, y, y + w, z, z + h, C.window);
+  quadR(ctx, x + 0.003, y + 0.01, y + w - 0.01, z + 1, z + h - 1, 'rgba(246,215,122,0.38)');
+  ctx.strokeStyle = 'rgba(60,40,20,0.7)'; ctx.lineWidth = 0.6;
+  ctx.beginPath(); ctx.moveTo(...P(x + 0.004, y + w / 2, z)); ctx.lineTo(...P(x + 0.004, y + w / 2, z + h));
+  ctx.moveTo(...P(x + 0.004, y, z + h / 2)); ctx.lineTo(...P(x + 0.004, y + w, z + h / 2)); ctx.stroke();
+  addLight(P(x, y + w / 2, z + h / 2), 0.9);
+}
+function doorL(ctx, y, x, w = 0.1, h = 10, col = C.woodDark) {
+  quadL(ctx, y + 0.001, x - 0.015, x + w + 0.015, 0, h + 1.5, '#6b5a44', EDGE);
+  quadL(ctx, y + 0.002, x, x + w, 0, h, col, EDGE);
+  ctx.strokeStyle = 'rgba(30,15,5,0.4)'; ctx.lineWidth = 0.5;
+  for (let i = 1; i < 3; i++) { ctx.beginPath(); ctx.moveTo(...P(x + (w * i) / 3, y + 0.003, 0)); ctx.lineTo(...P(x + (w * i) / 3, y + 0.003, h)); ctx.stroke(); }
+  ctx.fillStyle = '#e2c26a'; const [kx, ky] = P(x + w * 0.8, y + 0.003, h * 0.45); ctx.fillRect(kx - 0.6, ky - 0.6, 1.2, 1.2);
+  addLight(P(x + w / 2, y, h * 0.5), 0.7);
+}
+
+// graspollen en bloemetjes rond de voet van een gebouw
+function tufts(ctx, s, flowers = false) {
+  const spots = [[-s - 0.05, s + 0.02], [s * 0.2, s + 0.08], [s + 0.06, s * 0.3], [s + 0.08, -s * 0.6], [-s * 0.6, s + 0.06]];
+  for (const [x, y] of spots) {
+    const [px, py] = P(x, y);
+    ctx.strokeStyle = 'rgba(70,120,40,0.8)'; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.moveTo(px - 2, py); ctx.lineTo(px - 3, py - 4); ctx.moveTo(px, py); ctx.lineTo(px, py - 5); ctx.moveTo(px + 2, py); ctx.lineTo(px + 3, py - 3.5); ctx.stroke();
+    if (flowers) { ctx.fillStyle = ['#e85d75', '#f4d35e', '#ffffff', '#b48cf0'][Math.abs(Math.round(x * 10)) % 4]; ctx.beginPath(); ctx.arc(px + 1, py - 4.5, 1.3, 0, Math.PI * 2); ctx.fill(); }
+  }
+}
 
 function cyl(ctx, cx, cy, r, len, color) {
   // liggende boomstam langs de x-as (in schermruimte schuin)
@@ -141,7 +316,7 @@ function crate(ctx, x, y, s = 0.09, col = '#b8874c') {
 // ---------- gebouwen ----------
 
 function house(ctx, L) {
-  shadow(ctx, 0.36);
+  shadow(ctx, 0.36, true);
   if (L <= 1) {
     box(ctx, -0.28, -0.22, 0.28, 0.22, 0, 15, C.plaster);
     quadL(ctx, 0.221, -0.28, -0.25, 0, 15, C.timber); quadL(ctx, 0.221, 0.25, 0.28, 0, 15, C.timber);
@@ -745,8 +920,11 @@ export function buildingSprite(type, level, team = '#c0392b') {
   const ax = w / 2;
   const ay = h - (size * TH) / 2 - 14;
   ctx.translate(ax, ay);
+  LIGHTS = [];
+  rs = 12345;
   (DRAW[type] || house)(ctx, Math.max(1, level), team);
-  spr = { cv, w, h, ax, ay };
+  spr = { cv, w, h, ax, ay, lights: LIGHTS };
+  LIGHTS = null;
   cache.set(key, spr);
   return spr;
 }

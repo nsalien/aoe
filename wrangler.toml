@@ -1,5 +1,6 @@
 # Configuratie voor Cloudflare Pages + D1.
-# Vervang database_id door de id die je krijgt met: npx wrangler d1 create rijken-db
+# database_id hoef je niet zelf in te vullen: scripts/deploy.sh zoekt (of maakt) de database
+# en vult de juiste id in tijdens elke deploy. Lokaal werkt de nul-id gewoon.
 name = "rijken-van-de-vallei"
 pages_build_output_dir = "public"
 compatibility_date = "2026-10-01"

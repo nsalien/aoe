@@ -3,6 +3,7 @@ import { get, post } from './api.js';
 import { TownView } from './town.js';
 import { WorldView } from './world.js';
 import * as UI from './ui.js';
+import * as FX from './fx.js';
 import { advance } from '../shared/sim.js';
 import { RES, BUILDINGS, fmtDuration } from '../shared/rules.js';
 
@@ -38,10 +39,13 @@ let world = null;
 let authWorld = null;
 
 // ---------- meldingen ----------
-function toast(msg, type = '') {
+function toast(msg, type = '', ic = null) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = msg;
+  const name = ic || (type === 'err' ? 'bell' : type === 'ok' ? 'star' : 'scroll');
+  el.innerHTML = `${UI.icon(name)}<span>${UI.esc(msg)}</span>`;
+  const box = $('#toasts');
+  while (box.children.length >= 4) box.firstElementChild.remove();
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), type === 'err' ? 4500 : 3200);
 }
@@ -67,14 +71,20 @@ async function boot() {
   }
 }
 
+function hideSplash() {
+  const s = $('#splash');
+  if (s) { s.classList.add('hide'); setTimeout(() => s.remove(), 700); }
+}
+
 function showAuth(msg) {
+  hideSplash();
   $('#auth').hidden = false;
   $('#game').hidden = true;
   const w = app.info && app.info.world;
   const f = (t) => new Date(t).toLocaleString('nl-BE', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   let html = msg || '';
   if (w && !msg) {
-    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>.`, prep: `🕊️ Vredestijd tot <b>${f(w.prepEnd)}</b>.`, war: `⚔️ Oorlog tot <b>${f(w.warEnd)}</b>!`, ended: '🏁 Het seizoen is afgelopen.' }[w.phase];
+    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>.`, prep: `${UI.icon('dove')} Vredestijd tot <b>${f(w.prepEnd)}</b>.`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>!`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
     html = `${phase}<br>${app.info.players} heerser(s) in de vallei · teams van ${w.teamSize}`;
     $('#joinCodeRow').hidden = !w.needsCode;
   }
@@ -90,7 +100,25 @@ function showAuth(msg) {
   }
 }
 
+// meldingen over afgewerkte gebouwen bundelen
+let celebrateQueue = [];
+let celebrateTimer = null;
+function flushCelebrate() {
+  const q = celebrateQueue;
+  celebrateQueue = [];
+  const tc = q.find((b) => b.type === 'tc');
+  if (tc) toast(`Je volk leeft nu in het ${UI.AGES_NAME(tc.level)}!`, 'ok', 'crown');
+  const rest = q.filter((b) => b.type !== 'tc');
+  if (rest.length === 1) {
+    const b = rest[0];
+    toast(`${BUILDINGS[b.type].name} ${b.level === 1 ? 'is klaar' : `is nu niveau ${b.level}`}`, 'ok', 'hammer');
+  } else if (rest.length > 1) {
+    toast(`${rest.length} bouwwerken zijn klaar`, 'ok', 'hammer');
+  }
+}
+
 function startGame(data) {
+  hideSplash();
   $('#auth').hidden = true;
   $('#game').hidden = false;
   if (!town) {
@@ -99,6 +127,12 @@ function startGame(data) {
     town.onSelect = (b) => { app.selBuilding = b ? b.id : null; renderPanel(); openPanelMobile(!!b); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
+    town.onCelebrate = (b) => {
+      celebrateQueue.push(b);
+      clearTimeout(celebrateTimer);
+      celebrateTimer = setTimeout(flushCelebrate, 250);
+    };
+    renderLightBtn();
     world.onSelect = () => { renderPanel(); openPanelMobile(!!world.selected); };
     app.views = { town, world };
   }
@@ -134,11 +168,11 @@ function applyState(data, first = false) {
   computeLive(true);
   world.setMarches(data.marches);
   if (prevPhase && prevPhase !== data.world.phase) {
-    if (data.world.phase === 'war') toast('⚔️ De oorlog is begonnen! Je kan nu vijandelijke steden aanvallen.', 'err');
-    if (data.world.phase === 'ended') { toast('🏁 Het seizoen is voorbij!'); openModal('leaderboard'); }
+    if (data.world.phase === 'war') toast('De oorlog is begonnen! Je kan nu vijandelijke steden aanvallen.', 'err', 'swords');
+    if (data.world.phase === 'ended') { toast('Het seizoen is voorbij!', '', 'flag'); openModal('leaderboard'); }
   }
   // nieuwe rapporten
-  if (data.unseenReports > app.seenReports) toast(`📜 ${data.unseenReports - app.seenReports} nieuw(e) rapport(en)`);
+  if (data.unseenReports > app.seenReports) toast(`${data.unseenReports - app.seenReports} nieuw(e) rapport(en)`, '', 'scroll');
   app.seenReports = data.unseenReports;
   const br = $('#badgeReports');
   br.hidden = !data.unseenReports; br.textContent = data.unseenReports;
@@ -149,7 +183,7 @@ function applyState(data, first = false) {
   for (const m of data.marches) {
     if (!m.ally && m.status === 'out' && !app.knownHostile.has(m.id)) {
       app.knownHostile.add(m.id);
-      if (!first) toast(`⚠️ ${m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err');
+      if (!first) toast(`${m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err', 'swords');
     }
   }
   renderAll();
@@ -250,7 +284,15 @@ function renderAll() {
 }
 
 function renderResBar() {
-  $('#resbar').innerHTML = UI.resBarHtml(app.live, app.data.world.speed);
+  const live = app.live;
+  const prev = app.prevRes || live.res;
+  const cap = Math.max(1, UI.capacityOf(live));
+  const now = Date.now();
+  app.bumpUntil = app.bumpUntil || {};
+  for (const r of RES) if (live.res[r] - prev[r] > cap * 0.02) app.bumpUntil[r] = now + 700;
+  app.prevRes = { ...live.res };
+  const bumps = RES.filter((r) => (app.bumpUntil[r] || 0) > now);
+  $('#resbar').innerHTML = UI.resBarHtml(live, app.data.world.speed, bumps);
 }
 
 function renderPhase() {
@@ -268,7 +310,7 @@ function renderAlert() {
   el.hidden = false;
   el.dataset.action = 'alertGo';
   el.dataset.x = m.to.x; el.dataset.y = m.to.y;
-  el.innerHTML = `⚠️ ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`;
+  el.innerHTML = `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`;
 }
 
 function renderViewTitle() {
@@ -302,7 +344,12 @@ function renderPanel() {
   } else {
     html = UI.worldPanelHtml(app, world.selected);
   }
+  const key = `${app.view}|${app.selBuilding}|${world && world.selected ? world.selected.kind + world.selected.obj.id : ''}`;
   panel.innerHTML = html;
+  if (key !== app.panelKey) {
+    app.panelKey = key;
+    panel.classList.remove('enter'); void panel.offsetWidth; panel.classList.add('enter');
+  }
   for (const [id, v] of Object.entries(vals)) { const el = document.getElementById(id); if (el && panel.contains(el)) el.value = v; }
   if (focus) { const el = document.getElementById(focus); if (el) el.focus(); }
   panel.scrollTop = scroll;
@@ -321,6 +368,14 @@ async function fillAllyList() {
   cur.innerHTML = allies.length
     ? allies.map((m) => `<div class="row"><span class="grow">${UI.esc(m.player)} — ${UI.esc(m.town)}</span><button class="btn small" data-action="sendTo" data-kind="trade" data-id="${m.townId}">Karavaan</button></div>`).join('')
     : 'Je hebt (nog) geen bondgenoot.';
+}
+
+function renderLightBtn() {
+  const b = $('#lightBtn');
+  if (!b) return;
+  const m = FX.getLightMode();
+  b.innerHTML = UI.icon(m === 'night' ? 'moon' : m === 'day' ? 'sun' : 'sunmoon');
+  b.title = { auto: 'Dag en nacht volgen je klok', day: 'Altijd dag', night: 'Altijd nacht' }[m];
 }
 
 function openPanelMobile(open) {
@@ -470,11 +525,11 @@ async function openModal(type, arg) {
     updateSendSummary();
   }
   if (type === 'leaderboard') {
-    body.innerHTML = '<h2>🏆 Ranglijst</h2><p class="empty">Laden…</p>';
+    body.innerHTML = `<h2>${UI.icon('trophy')} Ranglijst</h2><p class="empty">Laden…</p>`;
     try { body.innerHTML = UI.leaderboardHtml(app, await get('/leaderboard')); } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
   if (type === 'reports') {
-    body.innerHTML = '<h2>📜 Rapporten</h2><p class="empty">Laden…</p>';
+    body.innerHTML = `<h2>${UI.icon('scroll')} Rapporten</h2><p class="empty">Laden…</p>`;
     try {
       const { reports } = await get('/reports');
       app.reports = reports;
@@ -484,7 +539,7 @@ async function openModal(type, arg) {
     } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
   if (type === 'team') {
-    body.innerHTML = '<h2>🤝 Team</h2><p class="empty">Laden…</p>';
+    body.innerHTML = `<h2>${UI.icon('team')} Team</h2><p class="empty">Laden…</p>`;
     try {
       app.team = (await get('/team')).members;
       body.innerHTML = UI.teamHtml(app, app.team, app.chat.chan);
@@ -552,6 +607,14 @@ const actions = {
     if (!confirm('Wil je afmelden?')) return;
     await post('/logout').catch(() => {});
     location.reload();
+  },
+  lightMode() {
+    const order = ['auto', 'day', 'night'];
+    const next = order[(order.indexOf(FX.getLightMode()) + 1) % order.length];
+    FX.setLightMode(next);
+    town.lightSecond = -1; world.lightSecond = -1;
+    renderLightBtn();
+    toast({ auto: 'Licht volgt je klok (dag en nacht)', day: 'Altijd dag', night: 'Altijd nacht' }[next]);
   },
   zoom(el) {
     const cam = app.view === 'town' ? town.cam : world.cam;
@@ -733,4 +796,5 @@ document.addEventListener('submit', async (e) => {
   try { await post('/chat', { channel: app.chat.chan, text }); loadChat(); } catch (err) { toast(err.message, 'err'); }
 });
 
+for (const el of document.querySelectorAll('[data-icon]')) el.insertAdjacentHTML('afterbegin', UI.icon(el.dataset.icon));
 boot();

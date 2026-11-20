@@ -1,5 +1,6 @@
 // Isometrische wereldkaart met terrein, steden, roverskampen en legers onderweg.
 import * as A from './art.js';
+import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
 import { generateTerrain, T } from '../shared/worldgen.js';
 
@@ -67,10 +68,33 @@ export class WorldView {
     const l = toWorld(0, size); const r = toWorld(size, 0); const b = toWorld(size, size);
     this.cam.bounds = { x0: l.x + 100, x1: r.x - 100, y0: 60, y1: b.y - 60 };
     this.water = [];
-    for (let k = 0; k < 4000 && this.water.length < 260; k++) {
+    const nWaves = FX.LOW_POWER ? 260 : 520;
+    for (let k = 0; k < 8000 && this.water.length < nWaves; k++) {
       const x = Math.floor(hashInt(k, 1, seed) * size); const y = Math.floor(hashInt(k, 2, seed) * size);
       if (tiles[y * size + x] <= T.SHALLOW) this.water.push({ x: x + hashInt(k, 3, seed), y: y + hashInt(k, 4, seed), p: hashInt(k, 5, seed) * 6.28 });
     }
+    // kustlijnen voor het schuim (randen tussen water en land)
+    this.shore = [];
+    const land = (x, y) => x >= 0 && y >= 0 && x < size && y < size && tiles[y * size + x] >= T.SAND;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (tiles[y * size + x] > T.SHALLOW) continue;
+        const hw = this.heights[y * size + x];
+        const edges = [];
+        // enkel randen waar het land achter het water ligt; de andere worden door het land bedekt
+        if (land(x, y - 1)) edges.push([x, y, x + 1, y]);
+        if (land(x - 1, y)) edges.push([x, y, x, y + 1]);
+        for (const [a, b, c, d] of edges) {
+          const p = toWorld(a, b); const q = toWorld(c, d);
+          this.shore.push({ x0: p.x, y0: p.y - hw, x1: q.x, y1: q.y - hw, ph: hashInt(x, y, seed + 9) * 6.28 });
+        }
+      }
+    }
+    const wb = { x0: l.x, x1: r.x, y0: 0, y1: b.y };
+    this.particles = new FX.Particles(FX.LOW_POWER ? 150 : 300);
+    this.birds = new FX.Birds(wb);
+    this.clouds = new FX.Clouds({ x0: l.x - 300, x1: r.x, y0: -100, y1: b.y - 100 }, FX.LOW_POWER ? 6 : 11);
+    this.dustT = 0;
     this.bakedKey = null;
   }
 
@@ -217,21 +241,38 @@ export class WorldView {
     const cam = this.cam;
     cam.resize();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#2a649c';
+    ctx.fillStyle = '#245a8e';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     if (!this.bakeInfo) return;
+    dt = Math.min(dt, 100);
+    if (Math.floor(t / 1000) !== this.lightSecond) { this.lightSecond = Math.floor(t / 1000); this.light = FX.daylight(); }
+    const light = this.light || FX.daylight();
+    const night = light.dark;
+    this.particles.update(dt);
+    this.birds.update(dt);
+    this.clouds.update(dt);
     cam.apply(ctx);
     const bk = this.bakeInfo;
     ctx.drawImage(bk.cv, bk.ox, bk.oy, bk.W, bk.H);
 
+    // kustschuim dat aanspoelt
+    ctx.lineCap = 'round';
+    for (const e of this.shore) {
+      const a = 0.5 + 0.5 * Math.sin(t * 0.0016 + e.ph);
+      ctx.strokeStyle = `rgba(255,255,255,${0.15 + a * 0.4})`;
+      ctx.lineWidth = 1 + a * 1.4;
+      ctx.beginPath(); ctx.moveTo(e.x0, e.y0); ctx.lineTo(e.x1, e.y1); ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
     // golfjes
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1;
     for (const w of this.water) {
       const a = Math.sin(t * 0.0018 + w.p);
       if (a < 0.4) continue;
       const p = toWorld(w.x, w.y);
-      ctx.globalAlpha = (a - 0.4) * 1.2;
-      ctx.beginPath(); ctx.moveTo(p.x - 4, p.y - 4); ctx.quadraticCurveTo(p.x, p.y - 7, p.x + 4, p.y - 4); ctx.stroke();
+      const drift = Math.sin(t * 0.0005 + w.p) * 3;
+      ctx.globalAlpha = (a - 0.4) * 1.3;
+      ctx.beginPath(); ctx.moveTo(p.x - 4 + drift, p.y - 4); ctx.quadraticCurveTo(p.x + drift, p.y - 7, p.x + 4 + drift, p.y - 4); ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
@@ -242,22 +283,33 @@ export class WorldView {
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.transform(WTW / 2, WTH / 2, -WTW / 2, WTH / 2, 0, 0);
-      ctx.beginPath(); ctx.arc(0, 0, 1.9, 0, Math.PI * 2);
-      ctx.fillStyle = col; ctx.globalAlpha = 0.16; ctx.fill();
-      ctx.globalAlpha = 0.65; ctx.lineWidth = 0.06; ctx.setLineDash([0.25, 0.15]); ctx.strokeStyle = col; ctx.stroke();
+      const g = ctx.createRadialGradient(0, 0, 0.4, 0, 0, 2.1);
+      g.addColorStop(0, A.mix(col, '#ffffff', 0.2)); g.addColorStop(1, col);
+      ctx.beginPath(); ctx.arc(0, 0, 2.1, 0, Math.PI * 2);
+      ctx.fillStyle = g; ctx.globalAlpha = 0.18; ctx.fill();
+      ctx.globalAlpha = 0.8; ctx.lineWidth = 0.07; ctx.setLineDash([0.25, 0.15]); ctx.lineDashOffset = -t * 0.0002; ctx.strokeStyle = col; ctx.stroke();
       ctx.restore();
       ctx.globalAlpha = 1;
     }
 
     // marsroutes
     for (const m of this.marches) this.drawRoute(ctx, m, t);
+    this.clouds.drawShadows(ctx, 0.14 * (1 - night * 0.8));
 
     const items = [];
     for (const tw of this.towns) items.push({ d: tw.x + tw.y, kind: 'town', o: tw });
     for (const c of this.camps) items.push({ d: c.x + c.y, kind: 'camp', o: c });
+    this.dustT += dt;
+    const emit = this.dustT > 260;
+    if (emit) this.dustT = 0;
     for (const m of this.marches) {
       const pos = this.marchPos(m, now);
-      if (pos) items.push({ d: pos.gx + pos.gy, kind: 'march', o: m, pos });
+      if (!pos) continue;
+      items.push({ d: pos.gx + pos.gy, kind: 'march', o: m, pos });
+      if (emit && m.kind !== 'trade') {
+        const w = toWorld(pos.gx, pos.gy);
+        this.particles.dust(w.x - pos.dir * 8, w.y - this.hAt(pos.gx, pos.gy) + 1, 1);
+      }
     }
     items.sort((a, b) => a.d - b.d);
     for (const it of items) {
@@ -265,11 +317,52 @@ export class WorldView {
       else if (it.kind === 'camp') this.drawCamp(ctx, it.o, t, now);
       else this.drawMarch(ctx, it.o, it.pos, t);
     }
+    this.particles.draw(ctx);
+    this.birds.draw(ctx, t, 60);
+
+    // nacht: donker maken en dan lichtjes
+    FX.applyLight(ctx, this.canvas.width, this.canvas.height, light);
+    cam.apply(ctx);
+    if (night > 0.05) this.drawNightLights(ctx, t, now, night);
+
+    // wolken boven alles, doorzichtiger als je inzoomt
+    const cloudAlpha = Math.max(0.12, Math.min(0.85, 1.25 - cam.zoom * 0.55)) * (1 - night * 0.6);
+    this.clouds.draw(ctx, cloudAlpha);
+    FX.vignette(ctx, this.canvas.width, this.canvas.height, 0.32);
 
     // labels in schermruimte
     ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);
     for (const tw of this.towns) this.drawTownLabel(ctx, tw);
     if (cam.zoom > 0.75) for (const c of this.camps) this.drawCampLabel(ctx, c, now);
+  }
+
+  drawNightLights(ctx, t, now, night) {
+    for (const tw of this.towns) {
+      const p = this.townPos(tw);
+      FX.drawGlow(ctx, p.x, p.y - 6, 30, FX.WARM, night * 0.28);
+      for (const part of this.townParts(tw)) {
+        const lights = part.spr.lights || [];
+        for (let i = 0; i < lights.length; i += 2) {
+          const [lx, ly] = lights[i];
+          const fl = 0.75 + Math.sin(t * 0.003 + lx + tw.id) * 0.2;
+          const x = part.x + lx * part.scale; const y = part.y + ly * part.scale;
+          ctx.fillStyle = `rgba(255,214,120,${night * fl})`;
+          ctx.fillRect(x - 0.8, y - 0.8, 1.6, 1.6);
+          FX.drawGlow(ctx, x, y, 4, FX.WARM, night * fl * 0.35);
+        }
+      }
+    }
+    for (const c of this.camps) {
+      if (c.plundered) continue;
+      const p = this.townPos(c);
+      FX.drawGlow(ctx, p.x + 1, p.y - 2, 30, FX.FIRE, night * (0.8 + Math.sin(t * 0.013 + c.id) * 0.15));
+    }
+    for (const m of this.marches) {
+      const pos = this.marchPos(m, now);
+      if (!pos) continue;
+      const w = toWorld(pos.gx, pos.gy);
+      FX.drawGlow(ctx, w.x, w.y - this.hAt(pos.gx, pos.gy) - 10, 16, FX.FIRE, night * 0.8);
+    }
   }
 
   drawRoute(ctx, m, t) {
@@ -345,21 +438,32 @@ export class WorldView {
       ctx.strokeRect(-0.85, -0.85, 1.7, 1.7);
       ctx.restore();
     }
-    const houses = Math.min(7, Math.floor(tw.buildings / 2));
-    const spots = [[-0.55, -0.15], [0.05, -0.62], [-0.6, 0.45], [0.55, -0.4], [0.5, 0.45], [-0.1, 0.62], [0.65, 0.05]];
-    const parts = [{ ox: 0, oy: 0, kind: 'tc' }];
-    for (let i = 0; i < houses; i++) parts.push({ ox: spots[i][0], oy: spots[i][1], kind: 'house' });
-    if (tw.monument) parts.push({ ox: 0.75, oy: 0.75, kind: 'monument' });
+    for (const part of this.townParts(tw)) A.drawSprite(ctx, part.spr, part.x, part.y, part.scale);
+    if (tw.age >= 2) A.smoke(ctx, p.x - 6, p.y - 26, t, tw.id, 0.55);
+    const fz = [0, 21, 33, 39, 41][tw.age] || 24;
+    A.flag(ctx, p.x, p.y - fz, 13, col, t + tw.id * 500, 0.8);
+  }
+
+  // de stukjes waaruit een stad op de kaart bestaat (stadscentrum, huizen, torens, monument)
+  townParts(tw) {
+    const key = `${tw.age}|${tw.buildings}|${tw.wall}|${tw.monument}|${tw.teamId}|${tw.x},${tw.y}`;
+    if (tw._partsKey === key) return tw._parts;
+    const p = this.townPos(tw);
+    const col = this.teamColor(tw.teamId);
+    const houses = Math.min(9, Math.floor(tw.buildings / 2));
+    const spots = [[-0.55, -0.15], [0.05, -0.62], [-0.6, 0.45], [0.55, -0.4], [0.5, 0.45], [-0.1, 0.62], [0.65, 0.05], [-0.75, -0.6], [0.2, 0.85]];
+    const parts = [{ ox: 0, oy: 0, spr: A.buildingSprite('tc', tw.age, col), scale: 0.42 }];
+    for (let i = 0; i < houses; i++) parts.push({ ox: spots[i][0], oy: spots[i][1], spr: A.buildingSprite('house', Math.min(3, tw.age), col), scale: 0.4 });
+    if (tw.wall >= 2) parts.push({ ox: -0.85, oy: 0.85, spr: A.buildingSprite('tower', Math.min(3, tw.wall - 1), col), scale: 0.32 });
+    if (tw.monument) parts.push({ ox: 0.75, oy: 0.75, spr: A.buildingSprite('monument', tw.monument, col), scale: 0.3 });
     parts.sort((a, b) => a.ox + a.oy - (b.ox + b.oy));
     for (const part of parts) {
       const q = toWorld(part.ox, part.oy);
-      const x = p.x + q.x; const y = p.y + q.y;
-      if (part.kind === 'tc') A.drawSprite(ctx, A.buildingSprite('tc', tw.age, col), x, y, 0.42);
-      else if (part.kind === 'house') A.drawSprite(ctx, A.buildingSprite('house', Math.min(3, tw.age), col), x, y, 0.4);
-      else A.drawSprite(ctx, A.buildingSprite('monument', tw.monument, col), x, y, 0.3);
+      part.x = p.x + q.x; part.y = p.y + q.y;
     }
-    const fz = [0, 21, 33, 39, 41][tw.age] || 24;
-    A.flag(ctx, p.x, p.y - fz, 13, col, t + tw.id * 500, 0.8);
+    tw._partsKey = key;
+    tw._parts = parts;
+    return parts;
   }
 
   drawCamp(ctx, c, t, now) {

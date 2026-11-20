@@ -13,12 +13,14 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
+  <div id="splash" class="splash"><div class="splash-inner"><div class="splash-crest" data-icon="castle"></div><div class="splash-title">Rijken van de Vallei</div><div class="splash-bar"><i></i></div></div></div>
+
   <!-- Aanmelden -->
   <section id="auth" class="screen">
     <canvas id="authCanvas"></canvas>
     <div class="auth-card">
       <div class="logo">
-        <span class="logo-crown">♜</span>
+        <span class="logo-crest" data-icon="castle"></span>
         <h1>Rijken van de Vallei</h1>
         <p class="tagline">Drie weken bouwen. Eén week oorlog.</p>
       </div>
@@ -47,39 +49,40 @@
   <!-- Spel -->
   <section id="game" class="screen" hidden>
     <header id="topbar">
-      <div class="brand"><span class="logo-crown sm">♜</span><span class="brand-name">Rijken</span></div>
+      <div class="brand"><span class="logo-crest sm" data-icon="castle"></span><span class="brand-name">Rijken</span></div>
       <div id="resbar" class="resbar"></div>
       <div id="phase" class="phase"></div>
       <div id="alert" class="alert" hidden></div>
     </header>
     <nav id="nav">
-      <button class="navbtn active" data-action="view" data-view="town" title="Mijn stad"><span class="ni">🏰</span><span>Stad</span></button>
-      <button class="navbtn" data-action="view" data-view="world" title="Wereldkaart"><span class="ni">🗺️</span><span>Wereld</span></button>
-      <button class="navbtn" data-action="reports" title="Rapporten"><span class="ni">📜</span><span>Rapporten</span><b id="badgeReports" class="badge" hidden></b></button>
-      <button class="navbtn" data-action="team" title="Team en chat"><span class="ni">🤝</span><span>Team</span><b id="badgeChat" class="badge dot" hidden></b></button>
-      <button class="navbtn" data-action="leaderboard" title="Ranglijst"><span class="ni">🏆</span><span>Ranglijst</span></button>
-      <button class="navbtn" data-action="help" title="Hoe speel je?"><span class="ni">❔</span><span>Hulp</span></button>
-      <button class="navbtn bottom" data-action="logout" title="Afmelden"><span class="ni">🚪</span><span>Uit</span></button>
+      <button class="navbtn active" data-action="view" data-view="town" title="Mijn stad"><span class="ni" data-icon="castle"></span><span>Stad</span></button>
+      <button class="navbtn" data-action="view" data-view="world" title="Wereldkaart"><span class="ni" data-icon="map"></span><span>Wereld</span></button>
+      <button class="navbtn" data-action="reports" title="Rapporten"><span class="ni" data-icon="scroll"></span><span>Rapporten</span><b id="badgeReports" class="badge" hidden></b></button>
+      <button class="navbtn" data-action="team" title="Team en chat"><span class="ni" data-icon="team"></span><span>Team</span><b id="badgeChat" class="badge dot" hidden></b></button>
+      <button class="navbtn" data-action="leaderboard" title="Ranglijst"><span class="ni" data-icon="trophy"></span><span>Ranglijst</span></button>
+      <button class="navbtn" data-action="help" title="Hoe speel je?"><span class="ni" data-icon="book"></span><span>Hulp</span></button>
+      <button class="navbtn bottom" data-action="logout" title="Afmelden"><span class="ni" data-icon="door"></span><span>Uit</span></button>
     </nav>
     <main id="stage">
       <canvas id="townCanvas"></canvas>
       <canvas id="worldCanvas" hidden></canvas>
       <div id="viewTitle" class="view-title"></div>
       <div class="hud">
-        <button class="hudbtn" data-action="zoom" data-dir="1" title="Inzoomen">+</button>
-        <button class="hudbtn" data-action="zoom" data-dir="-1" title="Uitzoomen">−</button>
-        <button class="hudbtn" data-action="home" title="Naar mijn stad">⌂</button>
+        <button class="hudbtn" data-action="zoom" data-dir="1" title="Inzoomen" data-icon="plus"></button>
+        <button class="hudbtn" data-action="zoom" data-dir="-1" title="Uitzoomen" data-icon="minus"></button>
+        <button class="hudbtn" data-action="home" title="Naar mijn stad" data-icon="home"></button>
+        <button class="hudbtn" id="lightBtn" data-action="lightMode" title="Dag en nacht"></button>
       </div>
       <div id="placeHint" class="place-hint" hidden></div>
       <div id="buildbar" class="buildbar"></div>
-      <button id="panelToggle" class="panel-toggle" data-action="togglePanel">☰ Details</button>
+      <button id="panelToggle" class="panel-toggle" data-action="togglePanel" data-icon="menu"> Details</button>
     </main>
     <aside id="panel" class="panel"></aside>
   </section>
 
   <div id="modal" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true">
-      <button class="modal-close" data-action="closeModal" aria-label="Sluiten">×</button>
+      <button class="modal-close" data-action="closeModal" aria-label="Sluiten" data-icon="close"></button>
       <div id="modalBody"></div>
     </div>
   </div>

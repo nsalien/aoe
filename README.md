@@ -12,13 +12,18 @@ te spelen over **vier weken**:
 
 Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er is geen server die altijd moet draaien.
 
-![Stad](docs/stad.png)
-![Wereldkaart](docs/wereld.png)
+![Stad overdag](docs/stad.jpg)
+![Stad 's nachts](docs/nacht.jpg)
+![Wereldkaart](docs/wereld.jpg)
 
 ## Wat zit erin?
 
 - **Isometrische, getekende wereld** (geen tekstspel): je eigen stad met wandelende dorpelingen, rook uit de
-  schoorstenen, wapperende vlaggen, troepen die bij de kazerne staan, een palissade die een stenen muur wordt…
+  schoorstenen, wapperende vlaggen, troepen die bij de kazerne staan, een palissade die een stenen muur wordt,
+  kasseien, slagschaduwen, een vijver met eendjes, schapen, vlinders en vogels.
+- **Dag en nacht** volgens je klok: 's avonds gaan vensters en fakkels branden, 's nachts dansen er vuurvliegjes
+  (met een knop ook altijd dag of altijd nacht).
+- Feestelijke effecten als een gebouw klaar is, vuurwerk bij een nieuw tijdperk.
   Alles wordt procedureel getekend met Canvas — er zijn geen afbeeldingsbestanden nodig.
 - **Wereldkaart** met heuvels, bergen, bossen, meren en kust, de gebieden van elk team in hun kleur,
   roverskampen met kampvuren, en legers die zichtbaar over de kaart marcheren.
@@ -32,30 +37,37 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
 - Werkt op **desktop en gsm**.
 - **Spelleiderspagina** (`/admin.html`) om een seizoen te starten, te verplaatsen of berichten te sturen.
 
-## Online zetten (gratis, ±10 minuten)
+## Automatisch online zetten (gratis, eenmalig ±10 minuten — kan op je gsm)
 
-Je hebt nodig: een gratis [Cloudflare-account](https://dash.cloudflare.com/sign-up) en [Node.js](https://nodejs.org) 18 of nieuwer.
+Elke wijziging die Claude (bv. vanuit de Claude-app op je gsm) naar een sessie-branch pusht, wordt automatisch:
 
-```bash
-npm install
-npx wrangler login
+1. **getest** (`npm test`),
+2. **gecherry-pickt naar `main`** (`scripts/promote.sh`), en
+3. **online gezet op Cloudflare** (`scripts/deploy.sh`) — inclusief database, migraties en het Pages-project.
 
-# 1. maak de database aan en kopieer de "database_id" naar wrangler.toml
-npx wrangler d1 create rijken-db
+Dat regelt de GitHub-actie [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Je volgt het in het tabblad
+**Actions** van de repository. Eenmalig in te stellen:
 
-# 2. maak de tabellen aan
-npm run db:init:remote
+**1. Cloudflare-token maken** — op [dash.cloudflare.com](https://dash.cloudflare.com) (gratis account):
+- *My Profile → API Tokens → Create Token → Create Custom Token*
+- Rechten: **Account · Cloudflare Pages · Edit** en **Account · D1 · Edit** → *Continue → Create Token* → kopieer het token.
+- Je **Account ID** vind je op de startpagina van het dashboard (rechts, of in de adresbalk na `dash.cloudflare.com/`).
 
-# 3. maak het Pages-project en zet het spel online
-npx wrangler pages project create rijken-van-de-vallei --production-branch main
-npm run deploy
+**2. Geheimen in GitHub zetten** — in de repository: *Settings → Secrets and variables → Actions → New repository secret*:
 
-# 4. kies een geheime beheerderssleutel
-npx wrangler pages secret put ADMIN_KEY --project-name rijken-van-de-vallei
-npm run deploy   # opnieuw, zodat de sleutel actief wordt
-```
+| Naam | Waarde |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | het token van stap 1 |
+| `CLOUDFLARE_ACCOUNT_ID` | je account-id |
+| `ADMIN_KEY` | een zelfgekozen wachtwoord voor de spelleiderspagina |
 
-Open daarna `https://rijken-van-de-vallei.pages.dev/admin.html`, vul je `ADMIN_KEY` in en klik op
+**3. `main` als standaardbranch** — *Settings → General → Default branch* → kies **main**.
+Zo starten nieuwe Claude-sessies altijd vanaf de nieuwste versie.
+
+**4. Eerste keer starten** — *Actions → Testen en online zetten → Run workflow* (of laat Claude iets pushen).
+Na ±2 minuten staat het spel op **https://rijken-van-de-vallei.pages.dev**.
+
+**5. Seizoen aanmaken** — open `https://rijken-van-de-vallei.pages.dev/admin.html`, vul je `ADMIN_KEY` in en klik op
 **Wereld (opnieuw) aanmaken**. Kies daar:
 
 | Instelling | Standaard | Uitleg |
@@ -69,9 +81,20 @@ Open daarna `https://rijken-van-de-vallei.pages.dev/admin.html`, vul je `ADMIN_K
 
 Deel daarna de link (en de code) met je vrienden. 🎉
 
-> **Liever via GitHub?** In het Cloudflare-dashboard: *Workers & Pages → Create → Pages → Connect to Git*,
-> kies deze repository, laat het build-commando leeg en zet de output-map op `public`.
-> De D1-koppeling komt uit `wrangler.toml`; de `ADMIN_KEY` stel je in bij *Settings → Variables and Secrets*.
+### Werken vanaf je gsm
+
+Open de Claude-app → **Code** → kies deze repository en vraag wat je wil veranderen
+("maak de kazerne mooier", "voeg een nieuw soort troep toe", …). Claude volgt de afspraken in
+[`CLAUDE.md`](CLAUDE.md), test en pusht; de actie doet de rest. Mislukt de stap *Overnemen op main* door een conflict,
+vraag Claude dan om "de branch bij te werken met main en opnieuw te pushen".
+
+### Handmatig online zetten (optioneel)
+
+```bash
+npm install
+npx wrangler login
+ADMIN_KEY=kies-een-wachtwoord npm run deploy   # maakt database en project aan als ze nog niet bestaan
+```
 
 ## Lokaal spelen en testen
 
@@ -120,6 +143,8 @@ public/                 statische website (Cloudflare Pages)
   js/town.js            isometrische stad (canvas)
   js/world.js           wereldkaart (canvas)
   js/art.js             procedurele tekeningen: gebouwen, mensen, bomen…
+  js/fx.js              dag en nacht, licht, deeltjes, wolken, vogels
+  js/icons.js           eigen SVG-iconen
   js/ui.js              panelen en vensters
   shared/rules.js       ALLE spelregels en balans
   shared/sim.js         simulatie van een stad (gedeeld met de server)
@@ -128,7 +153,11 @@ public/                 statische website (Cloudflare Pages)
   admin.html            spelleiderspagina
 functions/api/[[path]].js   alle /api-routes (Pages Functions)
 functions/lib/          sessies, database, verwerking van legers en gevechten
-schema.sql              D1-databaseschema
+migrations/             D1-databaseschema (nieuwe wijzigingen = nieuw bestand)
+scripts/promote.sh      neemt commits van een Claude-branch over op main (cherry-pick)
+scripts/deploy.sh       zet alles online op Cloudflare (database, migraties, publicatie)
+.github/workflows/      de automatische test- en deploy-actie
+CLAUDE.md               afspraken voor Claude-sessies (ook vanaf je gsm)
 tests/                  tests voor de spelregels (node --test)
 ```
 

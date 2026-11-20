@@ -6,9 +6,9 @@
   "description": "Browser-strategiespel voor een kleine groep vrienden, gehost op Cloudflare Pages + D1.",
   "scripts": {
     "dev": "wrangler pages dev",
-    "db:init:local": "wrangler d1 execute rijken-db --local --file=schema.sql",
-    "db:init:remote": "wrangler d1 execute rijken-db --remote --file=schema.sql",
-    "deploy": "wrangler pages deploy",
+    "db:init:local": "wrangler d1 migrations apply rijken-db --local",
+    "db:init:remote": "wrangler d1 migrations apply rijken-db --remote",
+    "deploy": "bash scripts/deploy.sh",
     "test": "node --test tests/*.test.js"
   },
   "devDependencies": {

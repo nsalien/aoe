@@ -9,6 +9,10 @@ import {
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds,
 } from '../shared/sim.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
+import { icon } from './icons.js';
+
+export { icon };
+export const AGES_NAME = (a) => AGES[a].name;
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const fmt = (n) => Math.floor(n || 0).toLocaleString('nl-BE');
@@ -85,13 +89,15 @@ const timer = (end, start) => `<span class="timer" data-end="${end}"${start ? ` 
 const bar = (start, end) => `<div class="bar"><i data-bstart="${start}" data-bend="${end}" style="width:0"></i></div>`;
 const ageWord = (a) => ['', 'eerste', 'tweede', 'derde', 'vierde'][a];
 
-export function resBarHtml(live, speed) {
+export const capacityOf = (live) => capacity(live);
+
+export function resBarHtml(live, speed, bumps = []) {
   const cap = capacity(live);
   const r = rates(live, speed);
   const used = homePop(live) + (live._away || 0);
   const pc = popCap(live);
   return RES.map((k) => `
-    <div class="res ${live.res[k] >= cap - 0.5 ? 'full' : ''}" title="${RES_NAMES[k]}: ${fmt(live.res[k])} / ${fmt(cap)} (+${fmt(r[k])} per uur)">
+    <div class="res ${live.res[k] >= cap - 0.5 ? 'full' : ''} ${bumps.includes(k) ? 'bump' : ''}" title="${RES_NAMES[k]}: ${fmt(live.res[k])} / ${fmt(cap)} (+${fmt(r[k])} per uur)">
       ${resImg(k)}<span class="amt">${fmt(live.res[k])}</span><span class="sub"><span>/${fmt(cap)}</span><span>+${fmt(r[k])}/u</span></span>
     </div>`).join('') + `
     <div class="res ${used >= pc ? 'full' : ''}" title="Bevolking: ${used} van ${pc}">
@@ -100,10 +106,10 @@ export function resBarHtml(live, speed) {
 }
 
 export function phaseHtml(w, now) {
-  if (w.phase === 'lobby') return { cls: 'lobby', html: `⏳ Start over <span class="timer" data-end="${w.startAt}"></span>` };
-  if (w.phase === 'prep') return { cls: 'prep', html: `🕊️ Vredestijd · nog <span class="timer" data-end="${w.prepEnd}"></span>` };
-  if (w.phase === 'war') return { cls: 'war', html: `⚔️ Oorlog! · nog <span class="timer" data-end="${w.warEnd}"></span>` };
-  return { cls: 'ended', html: '🏁 Seizoen voorbij' };
+  if (w.phase === 'lobby') return { cls: 'lobby', html: `${icon('hourglass')} Start over <span class="timer" data-end="${w.startAt}"></span>` };
+  if (w.phase === 'prep') return { cls: 'prep', html: `${icon('dove')} Vredestijd · nog <span class="timer" data-end="${w.prepEnd}"></span>` };
+  if (w.phase === 'war') return { cls: 'war', html: `${icon('swords')} Oorlog! · nog <span class="timer" data-end="${w.warEnd}"></span>` };
+  return { cls: 'ended', html: `${icon('flag')} Seizoen voorbij` };
 }
 
 // ---------- bouwbalk ----------
@@ -142,7 +148,7 @@ export function townOverviewHtml(app, live) {
     <div><h2>${esc(d.town.name)}</h2><div class="lvl">${AGES[a].name}</div>
     <div class="small muted">Positie (${d.town.x}, ${d.town.y}) · <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></div></div></div>`;
 
-  html += `<div class="card"><h3>👥 Dorpelingen <span class="right">${total} totaal · ${idle} vrij</span></h3>`;
+  html += `<div class="card"><h3>${icon('people')} Dorpelingen <span class="right">${total} totaal · ${idle} vrij</span></h3>`;
   for (const k of RES) {
     html += `<div class="vrow"><img src="${ICON[k]}" alt="">
       <div class="nm">${RES_NAMES[k]}<small>${alloc[k]}/${sl[k]} plaatsen · +${fmt(r[k])}/u</small></div>
@@ -164,13 +170,13 @@ export function townOverviewHtml(app, live) {
   html += queuesHtml(app, live);
 
   const units = ARMY_UNITS.filter((k) => live.units[k]);
-  html += `<div class="card"><h3>🛡️ Leger thuis <span class="right">${units.reduce((s, k) => s + live.units[k], 0)} man</span></h3>`;
+  html += `<div class="card"><h3>${icon('shield')} Leger thuis <span class="right">${units.reduce((s, k) => s + live.units[k], 0)} man</span></h3>`;
   html += units.length ? `<div class="unitgrid">${units.map((k) => `<div class="ucell"><img src="${unitThumb(k, d.team.color)}" alt=""><b>${fmt(live.units[k])}</b>${UNITS[k].name}</div>`).join('')}</div>`
     : '<p class="empty">Nog geen soldaten. Bouw een kazerne!</p>';
   html += '</div>';
 
   if (d.supportHere.length || d.mySupport.length) {
-    html += '<div class="card"><h3>🤝 Versterkingen</h3>';
+    html += `<div class="card"><h3>${icon('team')} Versterkingen</h3>`;
     for (const s of d.supportHere) {
       html += `<div class="row small"><span class="grow">Van <b>${esc(s.player)}</b>: ${unitsText(s.units)}</span>
         <button class="btn small" data-action="recall" data-id="${s.id}" ${canAct ? '' : 'disabled'}>Terugsturen</button></div>`;
@@ -182,7 +188,7 @@ export function townOverviewHtml(app, live) {
     html += '</div>';
   }
 
-  html += `<div class="card"><h3>🏰 Verdediging</h3>
+  html += `<div class="card"><h3>${icon('castle')} Verdediging</h3>
     <dl class="kv"><dt>Stadsmuur</dt><dd>${wall.level ? `niveau ${wall.level}` : 'geen'}</dd>
     <dt>Wachttorens</dt><dd>${findType(live, 'tower').filter((b) => b.level).length}</dd>
     <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd></dl>
@@ -201,7 +207,7 @@ function queuesHtml(app, live) {
 
 function buildQueueHtml(app, live) {
   const builds = [...live.builds].sort((a, b) => a.end - b.end);
-  let html = `<div class="card"><h3>🔨 Bouwplaats <span class="right">${builds.length}/${maxBuilds(live)} bouwers bezig</span></h3>`;
+  let html = `<div class="card"><h3>${icon('hammer')} Bouwplaats <span class="right">${builds.length}/${maxBuilds(live)} bouwers bezig</span></h3>`;
   if (!builds.length) html += '<p class="empty">Je bouwers wachten op opdrachten. Kies een gebouw onderaan.</p>';
   for (const j of builds) {
     const b = live.buildings.find((x) => x.id === j.bid);
@@ -215,7 +221,7 @@ function buildQueueHtml(app, live) {
 function trainQueueHtml(app, queues) {
   const qs = Object.entries(queues || {});
   if (!qs.length) return '';
-  let html = '<div class="card"><h3>🎯 Training</h3>';
+  let html = `<div class="card"><h3>${icon('target')} Training</h3>`;
   for (const [key, q] of qs) {
     let t = q[0].start;
     for (let i = 0; i < q.length; i++) {
@@ -243,7 +249,7 @@ export function buildingPanelHtml(app, live, b) {
     <div><h2>${def.name}</h2><div class="lvl">${lvl ? `Niveau ${lvl} van ${def.maxLevel}` : 'In aanbouw'}${b.type === 'tc' ? ` · ${AGES[lvl].short}tijd` : ''}</div></div></div>
     <p class="desc">${def.desc}</p>`;
   if (job) {
-    html += `<div class="card"><h3>🔨 ${lvl ? `Verbeteren naar niveau ${job.to}` : 'In aanbouw'}</h3>${bar(job.start, job.end)}
+    html += `<div class="card"><h3>${icon('hammer')} ${lvl ? `Verbeteren naar niveau ${job.to}` : 'In aanbouw'}</h3>${bar(job.start, job.end)}
       <div class="row small" style="margin-top:6px"><span class="grow muted">Klaar over</span>${timer(job.end)}</div></div>`;
   }
   html += buildingInfo(app, live, b);
@@ -252,13 +258,13 @@ export function buildingPanelHtml(app, live, b) {
     const cost = levelCost(b.type, to);
     const err = checkUpgrade(live, b.id);
     const title = b.type === 'tc' ? `Naar het ${AGES[to].name}` : (lvl === 0 ? 'Bouwen' : `Verbeteren naar niveau ${to}`);
-    html += `<div class="card"><h3>⬆️ ${title}</h3>${costHtml(cost, live.res)}
-      <div class="small muted" style="margin-top:4px">⏱ ${fmtDuration(levelTime(b.type, to, d.world.speed))}</div>`;
+    html += `<div class="card"><h3>${icon('up')} ${title}</h3>${costHtml(cost, live.res)}
+      <div class="small muted" style="margin-top:4px">${icon('clock')} ${fmtDuration(levelTime(b.type, to, d.world.speed))}</div>`;
     if (b.type === 'tc') html += unlocksHtml(to);
     if (err && err !== 'Niet genoeg grondstoffen.') html += `<p class="req">${err}</p>`;
     html += `<div class="actions"><button class="btn primary" data-action="upgrade" data-id="${b.id}" ${!canAct || err ? 'disabled' : ''}>${b.type === 'tc' ? 'Nieuw tijdperk' : (lvl === 0 ? 'Bouwen' : 'Verbeteren')}</button></div></div>`;
   } else if (lvl >= def.maxLevel) {
-    html += '<p class="small muted">✨ Maximaal niveau bereikt.</p>';
+    html += `<p class="small muted">${icon('star')} Maximaal niveau bereikt.</p>`;
   }
   html += '<div class="actions"><button class="btn ghost" data-action="deselect">← Terug naar overzicht</button></div>';
   return html;
@@ -309,7 +315,7 @@ export function maxTrain(live, unit, away) {
 function trainHtml(app, live, b, units) {
   const d = app.data;
   const canAct = app.canAct;
-  let html = `<div class="card"><h3>🎯 Trainen</h3>`;
+  let html = `<div class="card"><h3>${icon('target')} Trainen</h3>`;
   for (const k of units) {
     const u = UNITS[k];
     const err = checkTrain(live, k, 1, d.awayPop);
@@ -318,9 +324,9 @@ function trainHtml(app, live, b, units) {
     const t = Math.round((u.time * Math.pow(0.85, Math.max(0, b.level - 1))) / d.world.speed);
     html += `<div class="urow"><img src="${unitThumb(k, d.team.color)}" alt="">
       <div><div class="nm">${u.name}</div>
-      ${u.atk !== undefined ? `<div class="stats"><span title="Aanval">⚔ ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">🛡 ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">🐎 ${u.speed}</span><span title="Draagvermogen">🎒 ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">👥 ${u.pop}</span>` : ''}</div>` : ''}
+      ${u.atk !== undefined ? `<div class="stats"><span title="Aanval">${icon('swords')} ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">${icon('shield')} ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">${icon('horse')} ${u.speed}</span><span title="Draagvermogen">${icon('cart')} ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">${icon('people')} ${u.pop}</span>` : ''}</div>` : ''}
       ${u.desc ? `<div class="small muted">${u.desc}</div>` : ''}
-      <div class="row small" style="margin-top:3px">${costHtml(u.cost, live.res)}<span class="muted">⏱ ${fmtDuration(t * 1000)}</span></div>
+      <div class="row small" style="margin-top:3px">${costHtml(u.cost, live.res)}<span class="muted">${icon('clock')} ${fmtDuration(t * 1000)}</span></div>
       ${locked ? `<p class="req">${err}</p>` : `<div class="trainrow">
         <input class="num" type="number" min="1" max="${Math.max(1, max)}" value="${Math.min(Math.max(1, max), k === 'villager' ? 5 : 10)}" id="tn-${k}">
         <button class="btn small" data-action="setmax" data-unit="${k}" data-max="${max}">max ${max}</button>
@@ -339,13 +345,13 @@ function marketHtml(app, live) {
   const canAct = app.canAct;
   const L = bLevel(live, 'market');
   const opts = (sel) => RES.map((r) => `<option value="${r}" ${r === sel ? 'selected' : ''}>${RES_NAMES[r]}</option>`).join('');
-  return `<div class="card"><h3>⚖️ Ruilen met handelaars</h3>
+  return `<div class="card"><h3>${icon('scales')} Ruilen met handelaars</h3>
     <p class="small muted" style="margin:0 0 6px">Koers: 100 → ${Math.round(rate * 100)}</p>
     <div class="trainrow"><select class="field" id="tr-give" style="width:auto">${opts('food')}</select> →
       <select class="field" id="tr-get" style="width:auto">${opts('gold')}</select></div>
     <div class="trainrow"><input class="num" id="tr-amount" type="number" min="10" step="10" value="100">
       <button class="btn primary small" data-action="trade" ${canAct ? '' : 'disabled'}>Ruilen</button></div></div>
-    <div class="card"><h3>🐫 Karavaan naar bondgenoot</h3>
+    <div class="card"><h3>${icon('cart')} Karavaan naar bondgenoot</h3>
     <p class="small muted" style="margin:0 0 6px">Max. ${fmt(MARKET.shipPerLevel * L)} grondstoffen per karavaan. Kies je bondgenoot op de wereldkaart of hieronder.</p>
     <div id="allyList" class="small muted">Bondgenoten laden…</div></div>`;
 }
@@ -366,8 +372,8 @@ export function worldPanelHtml(app, sel) {
       ${c.plundered ? `<div class="card"><b>Verlaten.</b> De rovers keren terug over ${timer(c.refreshAt)}.</div>` : ''}
       <div class="card"><h3>Geschatte bezetting (vol kamp)</h3><div class="unitgrid">${Object.keys(u).map((k) => `<div class="ucell"><img src="${unitThumb(k, '#333333')}" alt=""><b>${u[k]}</b>${UNITS[k].name}</div>`).join('')}</div>
       <p class="small muted" style="margin:8px 0 2px">Buit (vol kamp):</p>${costHtml(loot)}</div>
-      <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${app.canAct ? '' : 'disabled'}>⚔️ Aanvallen</button>
-      <button class="btn" data-action="send" data-kind="scout" ${app.canAct ? '' : 'disabled'}>🔍 Verkennen</button></div>`;
+      <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
+      <button class="btn" data-action="send" data-kind="scout" ${app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
   }
   const t = sel.obj;
   const team = app.map && app.map.teams.find((x) => x.id === t.teamId);
@@ -382,21 +388,21 @@ export function worldPanelHtml(app, sel) {
     ${t.monument ? `<dt>Monument</dt><dd>niveau ${t.monument}</dd>` : ''}
     <dt>Positie</dt><dd>(${t.x}, ${t.y})</dd>${mine ? '' : `<dt>Afstand</dt><dd>${dist.toFixed(1)} tegels</dd>`}</dl></div>`;
   if (mine) {
-    html += `<div class="actions"><button class="btn primary" data-action="view" data-view="town">🏰 Naar mijn stad</button></div>`;
+    html += `<div class="actions"><button class="btn primary" data-action="view" data-view="town">${icon('castle')} Naar mijn stad</button></div>`;
   } else if (ally) {
-    html += `<p class="desc">🤝 Dit is je bondgenoot. Help elkaar met troepen en grondstoffen!</p>
-      <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>🛡️ Troepen sturen</button>
-      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>🐫 Grondstoffen</button></div>`;
+    html += `<p class="desc">${icon('team')} Dit is je bondgenoot. Help elkaar met troepen en grondstoffen!</p>
+      <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
+      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
   } else {
     const war = d.world.phase === 'war';
     html += `${war ? '' : `<p class="req">Vredestijd: spelers aanvallen kan pas vanaf de oorlogsweek (over ${timer(d.world.prepEnd)}).</p>`}
-      <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${war && app.canAct ? '' : 'disabled'}>⚔️ Aanvallen</button>
-      <button class="btn" data-action="send" data-kind="scout" ${war && app.canAct ? '' : 'disabled'}>🔍 Verkennen</button></div>`;
+      <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${war && app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
+      <button class="btn" data-action="send" data-kind="scout" ${war && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
   }
   return html + `<div class="actions"><button class="btn ghost" data-action="deselect">← Overzicht</button></div>`;
 }
 
-const KIND = { attack: ['⚔️', 'Aanval'], scout: ['🔍', 'Verkenning'], support: ['🛡️', 'Versterking'], trade: ['🐫', 'Karavaan'], return: ['↩️', 'Terugkeer'] };
+const KIND = { attack: ['swords', 'Aanval'], scout: ['magnifier', 'Verkenning'], support: ['shield', 'Versterking'], trade: ['cart', 'Karavaan'], return: ['home', 'Terugkeer'] };
 
 export function marchesHtml(app) {
   const d = app.data;
@@ -408,7 +414,7 @@ export function marchesHtml(app) {
     const back = m.status === 'back';
     const label = hostile ? `<b style="color:var(--red)">${nm} van ${esc(m.player)}</b> op ${esc(m.to.name)}`
       : back ? `${m.own ? '' : `${esc(m.player)}: `}Terug van ${esc(m.to.name)}` : `${m.own ? '' : `${esc(m.player)}: `}${nm} → ${esc(m.to.name)}`;
-    return `<div class="qitem"><span style="font-size:22px;text-align:center">${back ? '↩️' : ic}</span>
+    return `<div class="qitem"><span class="qicon">${icon(back ? 'home' : ic)}</span>
       <div><div class="nm">${label}</div><div class="small muted">${marchCargo(m)}</div>
       ${bar(m.departAt, m.arriveAt)}</div>${timer(m.arriveAt)}</div>`;
   }).join('');
@@ -425,8 +431,8 @@ function worldOverviewHtml(app) {
   const d = app.data;
   return `<div class="ph"><div><h2>De Vallei</h2><div class="lvl">Wereldkaart</div></div></div>
     <p class="desc">Klik op een stad of roverskamp. Bondgenoten herken je aan de kleur van hun gebied: <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></p>
-    <div class="card"><h3>🚩 Onderweg</h3>${marchesHtml(app)}</div>
-    <div class="card small"><b>Legende</b><br>🏰 steden met teamkleur · ⛺ roverskampen (altijd aan te vallen) · gestippelde lijnen: legers onderweg (rood = vijandelijke aanval)</div>
+    <div class="card"><h3>${icon('flag')} Onderweg</h3>${marchesHtml(app)}</div>
+    <div class="card small"><b>Legende</b><br>${icon('castle')} steden met teamkleur · ${icon('tent')} roverskampen (altijd aan te vallen) · gestippelde lijnen: legers onderweg (rood = vijandelijke aanval)</div>
     <div class="actions"><button class="btn" data-action="home">⌂ Naar mijn stad op de kaart</button></div>`;
 }
 
@@ -435,7 +441,7 @@ export function sendHtml(app, live, target, kind) {
   const d = app.data;
   const me = d.town;
   const dist = Math.hypot(target.x - me.x, target.y - me.y);
-  const titles = { attack: '⚔️ Aanvallen', scout: '🔍 Verkennen', support: '🛡️ Troepen sturen', trade: '🐫 Grondstoffen sturen' };
+  const titles = { attack: `${icon('swords')} Aanvallen`, scout: `${icon('magnifier')} Verkennen`, support: `${icon('shield')} Troepen sturen`, trade: `${icon('cart')} Grondstoffen sturen` };
   let html = `<h2>${titles[kind]}: ${esc(target.name)}</h2><p class="desc">Afstand: ${dist.toFixed(1)} tegels.</p>`;
   if (kind === 'trade') {
     const L = bLevel(live, 'market');
@@ -468,10 +474,10 @@ export function sendSummaryHtml(app, live, target, kind, units, res) {
   if (!speed) return '<span class="muted">Kies wat je wil sturen.</span>';
   const ms = Math.max(10000, (dist / speed) * 3600000 / d.world.speed);
   const arrive = new Date(app.now() + ms);
-  let html = `<span>⏱ Reistijd <b>${fmtDuration(ms)}</b></span><span>📅 Aankomst <b>${arrive.toLocaleString('nl-BE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</b></span>`;
+  let html = `<span>${icon('clock')} Reistijd <b>${fmtDuration(ms)}</b></span><span>${icon('clock')} Aankomst <b>${arrive.toLocaleString('nl-BE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</b></span>`;
   if (kind === 'attack') {
     const p = attackPower(units, bLevel(live, 'smithy'));
-    html += `<span>⚔ Aanvalskracht <b>${fmt(p.total)}</b></span><span>🎒 Draagvermogen <b>${fmt(carryCapacity(units))}</b></span>`;
+    html += `<span>${icon('swords')} Aanvalskracht <b>${fmt(p.total)}</b></span><span>${icon('cart')} Draagvermogen <b>${fmt(carryCapacity(units))}</b></span>`;
   }
   if (kind === 'trade') html += `<span>Totaal <b>${fmt(Object.values(res).reduce((a, b) => a + b, 0))}</b></span>`;
   if ((kind === 'attack' || kind === 'scout') && target.kind === 'town' && app.now() + ms > d.world.warEnd) html += '<span class="req">Komt pas na het einde van het seizoen aan!</span>';
@@ -479,14 +485,14 @@ export function sendSummaryHtml(app, live, target, kind, units, res) {
 }
 
 // ---------- rapporten ----------
-const RICON = { attack: '⚔️', defense: '🛡️', scout: '🔍', support: '🤝', trade: '🐫', info: '📣' };
+const RICON = { attack: 'swords', defense: 'shield', scout: 'magnifier', support: 'team', trade: 'cart', info: 'bell' };
 
 export function reportsHtml(list, activeId, detail) {
-  return `<h2>📜 Rapporten</h2>
+  return `<h2>${icon('scroll')} Rapporten</h2>
     <div class="split"><div class="rlist">
       ${list.length ? '' : '<p class="empty">Nog geen rapporten.</p>'}
       ${list.map((r) => `<button class="ritem ${r.seen ? '' : 'unseen'} ${r.id === activeId ? 'active' : ''}" data-action="openReport" data-id="${r.id}">
-        <span class="ricon">${RICON[r.kind] || '•'}</span>${esc(r.title)}<small>${new Date(r.created_at).toLocaleString('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></button>`).join('')}
+        <span class="ricon">${icon(RICON[r.kind] || 'scroll')}</span>${esc(r.title)}<small>${new Date(r.created_at).toLocaleString('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></button>`).join('')}
       ${list.some((r) => !r.seen) ? '<button class="btn small" data-action="readAll">Alles gelezen</button>' : ''}
     </div><div>${detail ? reportDetailHtml(detail) : '<p class="empty">Kies een rapport.</p>'}</div></div>`;
 }
@@ -543,7 +549,7 @@ export function teamHtml(app, team, chan) {
     if (m < 1440) return `${Math.floor(m / 60)} u geleden`;
     return `${Math.floor(m / 1440)} d geleden`;
   };
-  return `<h2>🤝 <span style="color:${d.team.color}">${esc(d.team.name)}</span></h2>
+  return `<h2>${icon('team')} <span style="color:${d.team.color}">${esc(d.team.name)}</span></h2>
     <p class="desc">Jullie zijn automatisch aan elkaar gekoppeld als bondgenoten. Bondgenoten kunnen elkaar niet aanvallen, maar wel troepen en grondstoffen sturen.</p>
     <div class="members">${(team || []).map((m) => `<div class="card" style="margin:0">
       <h3>${esc(m.player)}${m.me ? ' (jij)' : ''}<span class="right">${ago(m.lastSeen)}</span></h3>
@@ -572,8 +578,8 @@ export function leaderboardHtml(app, lb) {
   const d = app.data;
   const max = Math.max(1, ...lb.teams.map((t) => t.score));
   const ended = lb.phase === 'ended';
-  return `<h2>🏆 ${ended ? 'Eindstand' : 'Ranglijst'}</h2>
-    ${ended && lb.teams[0] ? `<p class="outcome win">👑 ${esc(lb.teams[0].name)} wint het seizoen!</p>` : ''}
+  return `<h2>${icon('trophy')} ${ended ? 'Eindstand' : 'Ranglijst'}</h2>
+    ${ended && lb.teams[0] ? `<p class="outcome win">${icon('crown')} ${esc(lb.teams[0].name)} wint het seizoen!</p>` : ''}
     <h3>Teams</h3>
     ${lb.teams.map((t, i) => `<div class="teambar"><b>${i + 1}.</b><div class="tb"><i style="width:${(t.score / max) * 100}%;background:${t.color}"></i><span>${esc(t.name)} — ${t.members.map(esc).join(' & ')}</span></div><b>${fmt(t.score)}</b></div>`).join('')}
     <h3>Spelers</h3>
@@ -586,8 +592,8 @@ export function leaderboardHtml(app, lb) {
 // ---------- hulp ----------
 export function helpHtml(w) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  return `<div class="help"><h2>❔ Hoe speel je?</h2>
-    <div class="timeline"><div class="tp">🕊️ Vredestijd<br><small>${f(w.startAt)}</small></div><div class="tw">⚔️ Oorlog<br><small>${f(w.prepEnd)}</small></div></div>
+  return `<div class="help"><h2>${icon('book')} Hoe speel je?</h2>
+    <div class="timeline"><div class="tp">${icon('dove')} Vredestijd<br><small>${f(w.startAt)}</small></div><div class="tw">${icon('swords')} Oorlog<br><small>${f(w.prepEnd)}</small></div></div>
     <p>Het seizoen eindigt op <b>${f(w.warEnd)}</b>. Het team met de meeste punten wint.</p>
     <h3>1. Bouw je economie</h3>
     <ul><li>Je <b>dorpelingen</b> verzamelen voedsel, hout, steen en goud — ook als je offline bent.</li>
