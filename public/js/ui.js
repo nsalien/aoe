@@ -1,13 +1,15 @@
 // HTML-sjablonen voor panelen, vensters en de bovenbalk.
 import * as A from './art.js';
 import {
-  RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, levelCost, levelTime,
+  RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, levelCost, levelTime,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
-  canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, harvesting, checkHarvest,
+  canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
+  depositById, depLeft, campAlive, campSize, exploredNow,
 } from '../shared/sim.js';
+import { territory, exHas } from '../shared/territory.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
 import { icon } from './icons.js';
 
@@ -136,8 +138,8 @@ export function townOverviewHtml(app, live) {
   const d = app.data;
   const sl = slots(live);
   const r = rates(live, d.world.speed);
-  const away = harvesting(live);
-  const total = totalVillagers(live) - away;
+  const total = homeVillagers(live);
+  const away = totalVillagers(live) - total;
   const alloc = app.pendingAlloc || live.villagers;
   const assigned = RES.reduce((a, k) => a + alloc[k], 0);
   const idle = total - assigned;
@@ -169,6 +171,7 @@ export function townOverviewHtml(app, live) {
     ${idle > 0 ? `<p class="req">${idle} dorpeling(en) doen niets! Bouw werkplaatsen (boerderij, kampen) of verdeel ze.</p>` : ''}
   </div>`;
 
+  html += fieldCardHtml(app, live);
   html += queuesHtml(app, live);
 
   const units = ARMY_UNITS.filter((k) => live.units[k]);
@@ -193,9 +196,79 @@ export function townOverviewHtml(app, live) {
   html += `<div class="card"><h3>${icon('castle')} Verdediging</h3>
     <dl class="kv"><dt>Stadsmuur</dt><dd>${wall.level ? `niveau ${wall.level}` : 'geen'}</dd>
     <dt>Wachttorens</dt><dd>${findType(live, 'tower').filter((b) => b.level).length}</dd>
-    <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd></dl>
+    <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd>
+    ${live.terr ? `<dt>Barbarenkamp</dt><dd>${campText(live, app.now())}</dd>` : ''}</dl>
     <div class="actions"><button class="btn" data-action="selectWall">Stadsmuur bekijken</button></div></div>`;
   return html;
+}
+
+// wat weet je over het barbarenkamp?
+function campText(live, now) {
+  const c = territory(live.terr.seed).camp;
+  if (!c) return 'geen';
+  if (!exHas(exploredNow(live, now), Math.floor(c.x), Math.floor(c.y))) return 'nog niet gevonden';
+  if (!campAlive(live, now)) return `verwoest (herbouwd over <span data-end="${live.terr.camp.down}"></span>)`;
+  return `ongeveer ${Math.max(1, campSize(live))} barbaren`;
+}
+
+// waar is een groep in het veld mee bezig?
+export function groupStatus(live, g, now) {
+  const o = g.order ? g.order.type : null;
+  if (g.pending && now < g.t1) {
+    const eta = ` <span class="muted">(<span data-end="${g.t1}"></span>)</span>`;
+    if (o === 'home') return `keert terug naar huis${eta}`;
+    if (o === 'boar') return `op jacht naar een everzwijn${eta}`;
+    if (o === 'camp') return `trekt naar het barbarenkamp${eta}`;
+    if (o === 'chop') return `op weg om een boom te kappen${eta}`;
+    if (o === 'gather') { const d = depositById(live, g.order.id); return `op weg naar ${d ? WILD.deposits[d.kind].name.toLowerCase() : 'een bron'}${eta}`; }
+    return `onderweg${eta}`;
+  }
+  if (g.work && g.work.type === 'chop') return `kapt een boom <span class="muted">(<span data-end="${g.work.end}"></span>)</span>`;
+  if (g.work && g.work.type === 'gather') {
+    const d = depositById(live, g.work.id);
+    if (d) return `verzamelt ${RES_NAMES[WILD.deposits[d.kind].res].toLowerCase()} · nog ${fmt(depLeft(live, d))}`;
+  }
+  return 'wacht op een opdracht';
+}
+
+// groepen die in je eigen gebied rondtrekken, en nieuwe groepen op pad sturen
+function fieldCardHtml(app, live) {
+  if (!live.terr) return '';
+  const now = app.now();
+  const groups = live.field || [];
+  const canAct = app.canAct;
+  let html = `<div class="card field-card"><h3>${icon('map')} Op pad in je gebied <span class="right">${groups.length}/${FIELD.maxGroups} groepen</span></h3>`;
+  if (!groups.length) {
+    html += `<p class="small muted" style="margin:0 0 6px">Tik op een dorpeling of soldaat in je stad en daarna op de grond om hem te verplaatsen. Waar hij komt, verdwijnt de mist.
+      Dorpelingen kunnen bomen kappen en bronnen ontginnen; soldaten jagen op everzwijnen en vallen barbaren aan.</p>`;
+  }
+  for (const g of groups) {
+    const sel = app.selGroup === g.id;
+    html += `<div class="row field-row${sel ? ' sel' : ''}"><span class="grow"><b>${esc(unitsText(g.units))}</b><br><span class="small">${groupStatus(live, g, now)}</span></span>
+      <button class="btn small" data-action="fieldPick" data-id="${g.id}" title="Kies en toon op de kaart">${icon('target')}</button>
+      ${g.order && g.order.type === 'home' && g.pending ? '' : `<button class="btn small" data-action="fieldHome" data-id="${g.id}" ${canAct ? '' : 'disabled'}>${icon('home')} Naar huis</button>`}</div>`;
+  }
+  if (canAct && groups.length < FIELD.maxGroups) {
+    const home = ARMY_UNITS.filter((k) => live.units[k]);
+    html += `<details class="field-send"><summary>${icon('plus')} Een groep samenstellen</summary><div class="field-send-body">`;
+    html += `<div class="row small"><span class="grow">Dorpeling (kapt en ontgint)</span><button class="btn small" data-action="fieldVillager" ${homeVillagers(live) > 0 ? '' : 'disabled'}>Stuur 1</button></div>`;
+    for (const k of home) {
+      html += `<div class="row small"><img src="${unitThumb(k, app.data.team.color)}" alt="" class="ico"><span class="grow">${UNITS[k].name} <span class="muted">(${fmt(live.units[k])} thuis)</span></span>
+        <input class="field num" type="number" min="0" max="${live.units[k]}" value="0" data-field-unit="${k}" inputmode="numeric"></div>`;
+    }
+    html += home.length ? `<div class="actions"><button class="btn primary small" data-action="fieldSend">Soldaten op pad</button></div>` : '<p class="small muted">Geen soldaten thuis.</p>';
+    html += '</div></details>';
+  }
+  const log = (live.terr.log || []).slice(-5).reverse();
+  if (log.length) {
+    html += `<div class="field-log"><div class="small muted">Laatste gebeurtenissen</div>`;
+    for (const e of log) {
+      const bad = /lost/.test(e.kind);
+      html += `<div class="small log-row${bad ? ' bad' : ''}"><span class="muted">${new Date(e.t).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</span> ${esc(e.text)}</div>`;
+    }
+    html += '</div>';
+  }
+  return html + '</div>';
 }
 
 // vondsten rond de stad die je kan laten oogsten
@@ -342,7 +415,7 @@ function trainHtml(app, live, b, units) {
     const t = Math.round((u.time * Math.pow(0.85, Math.max(0, b.level - 1))) / d.world.speed);
     html += `<div class="urow"><img src="${unitThumb(k, d.team.color)}" alt="">
       <div><div class="nm">${u.name}</div>
-      ${u.atk !== undefined ? `<div class="stats"><span title="Aanval">${icon('swords')} ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">${icon('shield')} ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">${icon('horse')} ${u.speed}</span><span title="Draagvermogen">${icon('cart')} ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">${icon('people')} ${u.pop}</span>` : ''}</div>` : ''}
+      ${u.atk !== undefined && ARMY_UNITS.includes(k) ? `<div class="stats"><span title="Aanval">${icon('swords')} ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">${icon('shield')} ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">${icon('horse')} ${u.speed}</span><span title="Draagvermogen">${icon('cart')} ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">${icon('people')} ${u.pop}</span>` : ''}</div>` : ''}
       ${u.desc ? `<div class="small muted">${u.desc}</div>` : ''}
       <div class="row small" style="margin-top:3px">${costHtml(u.cost, live.res)}<span class="muted">${icon('clock')} ${fmtDuration(t * 1000)}</span></div>
       ${locked ? `<p class="req">${err}</p>` : `<div class="trainrow">
@@ -617,7 +690,16 @@ export function helpHtml(w) {
     <ul><li>Je <b>dorpelingen</b> verzamelen voedsel, hout, steen en goud — ook als je offline bent.</li>
     <li>Elke grondstof heeft <b>werkplekken</b>: bouw boerderijen, houthakkerskampen, steengroeves en goudmijnen.</li>
     <li>Bouw <b>huizen</b> voor meer bevolking en een <b>opslagplaats</b> zodat je niets verspilt.</li>
-    <li>Breng je stadscentrum naar een nieuw <b>tijdperk</b> om nieuwe gebouwen en troepen te ontgrendelen.</li></ul>
+    <li>Breng je stadscentrum naar een nieuw <b>tijdperk</b> om nieuwe gebouwen en troepen te ontgrendelen.
+    Elk tijdperk wordt je <b>bouwgrond</b> groter (de stippellijn rond je stad).</li></ul>
+    <h3>Je eigen gebied verkennen</h3>
+    <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Tik op een <b>dorpeling of soldaat</b> en daarna op de grond:
+    hij loopt er meteen naartoe en de mist verdwijnt waar hij komt. Een groep die je gekozen hebt, krijgt een gouden ring; tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>
+    <ul><li><b>Bomen kappen</b>: stuur een dorpeling naar een boom aan de rand van je bouwgrond. Gekapte grond wordt bouwgrond en levert hout op.</li>
+    <li><b>Bronnen</b>: in de wildernis liggen goudaders, rotswanden, oude eikenbossen en bessenstruiken. Stuur er een dorpeling heen om ze leeg te halen.</li>
+    <li><b>Everzwijnen</b>: stuur een paar soldaten (twee à drie speerdragers volstaan) en tik op het beest voor extra voedsel.</li>
+    <li><b>Barbarenkamp</b>: ergens in je gebied woont een bende barbaren die af en toe je stad overvalt en grondstoffen steelt.
+    Vind hun kamp en val het aan met een stevig leger: dat levert buit op en de overvallen stoppen een tijd. Muren en torens helpen ook tegen overvallen.</li></ul>
     <h3>Vondsten</h3>
     <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
     (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,
