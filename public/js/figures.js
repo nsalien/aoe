@@ -414,6 +414,7 @@ function drawHorse(c, o, mode, f) {
   c.fillStyle = '#5a3a1e'; c.beginPath(); c.ellipse(-0.2, by - 3.3, 2.6, 0.9, 0, 0, TAU); c.fill();
 
   // ruiter
+  if (o.noRider) return;
   const skin = SKIN[o.skin || 0];
   const body = o.body || '#8b6a43';
   const sy = by - 3.6; // zadel
@@ -433,9 +434,17 @@ function drawHorse(c, o, mode, f) {
   c.fillStyle = 'rgba(0,0,0,0.2)'; c.fillRect(0.9, ty - 1, 3, 8);
   c.restore();
   c.fillStyle = shade(skin, -0.12); c.fillRect(-0.6, ty - 1.5, 1.4, 1.3);
-  head(c, { ...o, weapon: null }, 0.3, ty - 2.9);
+  head(c, { ...o, weapon: null, helmet: o.look === 'yabusame' ? '#000' : o.helmet }, 0.3, ty - 2.9);
+  if (o.look === 'yabusame') {
+    eliteHead(c, 'samurai', 0.3, ty - 2.9, o.team, skin);
+    line(c, -2, ty + 2, -2.4, ty - 9, '#3a2a1a', 0.6); c.fillStyle = o.team || '#c0392b'; c.fillRect(-2.3, ty - 9, 3, 4.6);
+  }
   const sleeve = shade(body, -0.06);
-  if (o.weapon === 'spear') {
+  if (o.weapon === 'bow') {
+    const [ex, ey] = arm(c, 1.9, ty + 1, 1.35, sleeve, skin, 4);
+    c.strokeStyle = '#3a2a1a'; c.lineWidth = 0.85; c.beginPath(); c.arc(ex - 2.6, ey - 1, 6.4, -1.05, 1.05); c.stroke();
+    disc(c, ex, ey, 0.75, skin);
+  } else if (o.weapon === 'spear') {
     const [ex, ey] = arm(c, 1.9, ty + 1, 0.9, sleeve, skin, 3.8);
     line(c, ex - 1.4, ey + 5, ex + 2.4, ey - 17, '#7a5129', 0.9);
     c.fillStyle = '#d5dbe2'; c.beginPath(); c.moveTo(ex + 2.75, ey - 19.6); c.lineTo(ex + 1.75, ey - 16.6); c.lineTo(ex + 3.2, ey - 16.8); c.closePath(); c.fill();
@@ -455,7 +464,7 @@ export function horseman(ctx, x, y, o = {}) {
   const mode = o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
   const R = resFor(ctx, s);
-  const key = `h|${mode}${f}|${R}|${o.body || ''}|${o.horse || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.team || ''}`;
+  const key = `h|${mode}${f}|${R}|${o.body || ''}|${o.horse || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.team || ''}|${o.look || ''}`;
   blit(ctx, sprite(key, R, H_BOX, (c) => drawHorse(c, o, mode, f)), H_BOX, x, y, s);
 }
 
@@ -538,4 +547,288 @@ export function boar(ctx, x, y, o = {}) {
   const f = mode === 'walk' ? frameOf(o.phase) : 0;
   const R = resFor(ctx, s);
   blit(ctx, sprite(`b|${mode}${f}|${R}`, R, B_BOX, (c) => drawBoarFig(c, mode, f)), B_BOX, x, y, s);
+}
+
+// ---------- eenheden van de volkeren ----------
+
+const BRONZE = '#c8963e';
+
+// helm of hoofddeksel van een elite-eenheid
+function eliteHead(c, look, hx, hy, team, skin) {
+  if (look === 'immortal' || look === 'lionguard') { // baard
+    c.fillStyle = '#2a1a10'; c.beginPath(); c.moveTo(hx - 1.4, hy + 0.6); c.quadraticCurveTo(hx + 0.4, hy + 4.6, hx + 2.4, hy + 0.8); c.closePath(); c.fill();
+  }
+  if (look === 'hoplite') { // Korinthische helm met dwarse kam
+    c.fillStyle = BRONZE; c.beginPath(); c.arc(hx, hy - 0.2, 2.95, Math.PI * 0.9, Math.PI * 2.25); c.lineTo(hx + 1.2, hy + 2.6); c.lineTo(hx - 2.6, hy + 2.2); c.closePath(); c.fill();
+    c.fillStyle = '#2a1a10'; c.fillRect(hx + 0.6, hy - 0.6, 2.2, 0.7); c.fillRect(hx + 1, hy - 0.2, 0.5, 2.2);
+    c.fillStyle = 'rgba(255,240,200,0.5)'; c.beginPath(); c.arc(hx - 1, hy - 1.6, 0.9, 0, TAU); c.fill();
+    c.fillStyle = team || '#b03a2e'; c.beginPath(); c.ellipse(hx - 0.4, hy - 3.6, 3.6, 1.6, -0.15, Math.PI, 0); c.fill();
+    c.fillStyle = 'rgba(0,0,0,0.2)'; for (let i = -3; i < 3; i++) c.fillRect(hx - 0.4 + i * 1.1, hy - 4.6, 0.35, 1.2);
+  } else if (look === 'samurai') { // kabuto met gouden hoorns
+    c.fillStyle = '#25242a'; c.beginPath(); c.arc(hx, hy - 0.4, 3, Math.PI, 0); c.fill();
+    c.fillStyle = '#3a3840'; c.beginPath(); c.moveTo(hx - 3.6, hy - 0.5); c.lineTo(hx + 3.4, hy - 0.5); c.lineTo(hx + 4, hy + 1.2); c.lineTo(hx - 4.2, hy + 1.2); c.closePath(); c.fill();
+    c.strokeStyle = '#e0b23a'; c.lineWidth = 0.7;
+    c.beginPath(); c.moveTo(hx + 0.6, hy - 2.6); c.quadraticCurveTo(hx - 1.4, hy - 5.4, hx - 1.8, hy - 7); c.moveTo(hx + 0.6, hy - 2.6); c.quadraticCurveTo(hx + 2.6, hy - 5.4, hx + 3, hy - 7); c.stroke();
+    c.fillStyle = '#b8322a'; c.fillRect(hx + 0.8, hy + 0.4, 1.8, 1.2);
+  } else if (look === 'peltast') { // vilten muts
+    c.fillStyle = '#7a5129'; c.beginPath(); c.arc(hx, hy - 0.6, 2.7, Math.PI, 0); c.fill();
+    c.beginPath(); c.moveTo(hx - 1, hy - 3); c.quadraticCurveTo(hx + 0.4, hy - 6, hx + 2, hy - 4.6); c.lineTo(hx + 1.6, hy - 2.4); c.fill();
+  } else if (look === 'lionguard') { // hoge kegelmuts met gouden band
+    c.fillStyle = '#244e8f'; c.beginPath(); c.moveTo(hx - 2.7, hy - 0.8); c.lineTo(hx - 1.8, hy - 6.4); c.lineTo(hx + 1.9, hy - 6.4); c.lineTo(hx + 2.8, hy - 0.8); c.closePath(); c.fill();
+    c.fillStyle = '#e0b23a'; c.fillRect(hx - 2.7, hy - 1.6, 5.5, 0.9); c.fillRect(hx - 1.9, hy - 6.8, 3.8, 0.6);
+  } else if (look === 'immortal') { // stoffen tiara
+    c.fillStyle = '#e8dcc0'; c.beginPath(); c.moveTo(hx - 2.8, hy - 0.4); c.lineTo(hx - 2.2, hy - 4.6); c.quadraticCurveTo(hx, hy - 5.6, hx + 2.2, hy - 4.6); c.lineTo(hx + 2.8, hy - 0.4); c.closePath(); c.fill();
+    c.fillStyle = '#1f9a9a'; c.fillRect(hx - 2.6, hy - 2.2, 5.2, 0.8);
+    c.fillStyle = '#e8dcc0'; c.beginPath(); c.moveTo(hx - 2.8, hy - 0.4); c.lineTo(hx - 3.3, hy + 2.6); c.lineTo(hx - 1.6, hy + 2.6); c.lineTo(hx - 1.4, hy); c.fill();
+  }
+}
+
+const LOOK = {
+  hoplite: { body: '#8a2f22', leg: '#5a3a24', armor: BRONZE },
+  peltast: { body: '#c9a24a', leg: '#6b4a2b' },
+  samurai: { body: '#2b2a30', leg: '#1e1d22', armor: '#7a1f1f' },
+  lionguard: { body: '#2c5fae', leg: '#6b4a2b', armor: '#e0b23a' },
+  immortal: { body: '#e8dcc0', leg: '#e8dcc0', armor: '#1f9a9a' },
+};
+
+function drawElite(c, o, mode, f) {
+  const look = o.look;
+  const L = LOOK[look];
+  const a = (f / FR) * TAU;
+  const walk = mode === 'walk';
+  const sw = walk ? Math.sin(a) : 0;
+  const bob = walk ? Math.abs(Math.cos(a)) * 0.55 : 0;
+  const skin = SKIN[o.skin || (look === 'samurai' ? 1 : look === 'immortal' || look === 'lionguard' ? 2 : 0)];
+  const team = o.team || '#c0392b';
+  const hipY = -5.4 - bob; const ty = -11.9 - bob; const hx = 0.3; const hy = ty - 2.9;
+  // rugvlag (samoerai) of pijlkoker (onsterfelijke)
+  if (look === 'samurai') { line(c, -2.2, ty + 2, -2.6, ty - 11, '#3a2a1a', 0.6); c.fillStyle = team; c.fillRect(-2.5, ty - 11, 3.4, 5.6); c.fillStyle = 'rgba(255,255,255,0.8)'; c.beginPath(); c.arc(-0.8, ty - 8.2, 0.9, 0, TAU); c.fill(); }
+  if (look === 'immortal') { c.save(); c.translate(-2.4, ty + 1.4); c.rotate(-0.3); c.fillStyle = '#6b4523'; c.fillRect(-0.9, -1, 1.8, 6); c.restore(); }
+  // benen
+  const leg = (dx, s, col) => {
+    const fx = dx + s * 2.3; const lift = walk ? Math.max(0, s) * 0.7 : 0;
+    c.strokeStyle = col; c.lineWidth = 1.8;
+    c.beginPath(); c.moveTo(dx * 0.7, hipY); c.lineTo(dx * 0.7 + s * 1.4, hipY + 2.6 - lift * 0.5); c.lineTo(fx, -1 - lift); c.stroke();
+    c.fillStyle = look === 'hoplite' ? BRONZE : '#3a2a1c'; c.beginPath(); c.ellipse(fx + 0.55, -0.65 - lift, 1.35, 0.72, 0, 0, TAU); c.fill();
+  };
+  leg(-0.8, -sw, shade(L.leg, -0.18)); leg(0.8, sw, L.leg);
+  arm(c, -1.9, ty + 1.1, walk ? -sw * 0.4 : 0.15, shade(L.body, -0.3), shade(skin, -0.12));
+  // romp
+  const torso = () => {
+    c.beginPath(); c.moveTo(-2.8, ty + 1.3); c.quadraticCurveTo(-2.9, ty - 0.2, -1.3, ty - 0.45); c.lineTo(1.5, ty - 0.45);
+    c.quadraticCurveTo(3.0, ty - 0.2, 2.9, ty + 1.3);
+    if (look === 'immortal') { c.lineTo(3.6, -1.6); c.quadraticCurveTo(0.2, -0.8, -3.4, -1.6); } else { c.lineTo(3.35, hipY + 1.5); c.quadraticCurveTo(0.2, hipY + 2.3, -3.15, hipY + 1.5); }
+    c.closePath();
+  };
+  torso(); c.fillStyle = L.body; c.fill();
+  c.save(); torso(); c.clip();
+  if (look === 'hoplite') { c.fillStyle = BRONZE; c.fillRect(-3.2, ty - 0.6, 6.4, 5.4); c.fillStyle = 'rgba(255,240,200,0.35)'; c.fillRect(-2.4, ty + 0.4, 1.2, 3.6); c.fillStyle = 'rgba(80,50,20,0.5)'; for (let i = -2; i < 3; i++) c.fillRect(i * 1.2, hipY - 0.4, 0.5, 2.4); }
+  if (look === 'samurai') { c.fillStyle = L.armor; for (let yy = ty; yy < hipY + 1.5; yy += 1.3) c.fillRect(-3.4, yy, 6.8, 0.65); c.fillStyle = '#e0b23a'; c.fillRect(-0.4, ty, 0.8, 5); }
+  if (look === 'lionguard') { c.fillStyle = L.armor; c.fillRect(-3.3, ty + 3.4, 6.6, 0.8); c.fillRect(-0.5, ty, 1, 3.4); c.fillStyle = 'rgba(255,255,255,0.2)'; c.fillRect(-3, ty + 1, 1.2, 4); }
+  if (look === 'immortal') { c.fillStyle = L.armor; for (let yy = ty + 1.5; yy < -2; yy += 2.2) for (let xx = -3 + ((yy | 0) % 2); xx < 3.4; xx += 1.6) c.fillRect(xx, yy, 0.7, 0.7); c.fillStyle = '#d4a017'; c.fillRect(-3.4, -2.6, 7, 0.7); }
+  if (look === 'peltast') { c.fillStyle = team; c.fillRect(-3.4, ty + 3.6, 6.8, 0.8); }
+  c.fillStyle = 'rgba(0,0,0,0.2)'; c.fillRect(1, ty - 1, 4, 14);
+  c.fillStyle = 'rgba(255,255,255,0.12)'; c.fillRect(-3.6, ty - 1, 1.3, 14);
+  c.restore();
+  if (look !== 'immortal') { c.fillStyle = '#3e2a18'; c.fillRect(-3.0, hipY - 0.45, 6.3, 0.95); }
+  // schilden
+  if (look === 'hoplite') {
+    disc(c, -2.4, ty + 4, 4.1, shade(BRONZE, -0.3)); disc(c, -2.4, ty + 4, 3.6, BRONZE);
+    c.fillStyle = team; c.beginPath(); c.moveTo(-3.8, ty + 6); c.lineTo(-2.4, ty + 1.8); c.lineTo(-1, ty + 6); c.lineTo(-1.7, ty + 6); c.lineTo(-2.4, ty + 3.6); c.lineTo(-3.1, ty + 6); c.closePath(); c.fill();
+    c.fillStyle = 'rgba(255,240,200,0.35)'; c.beginPath(); c.arc(-3.3, ty + 3, 1.3, 0, TAU); c.fill();
+  } else if (look === 'peltast') {
+    c.fillStyle = '#8a6238'; c.beginPath(); c.arc(-2.4, ty + 4, 3, 0.2, Math.PI - 0.2); c.quadraticCurveTo(-2.4, ty + 4.6, 0.4, ty + 4.6); c.fill();
+    c.fillStyle = team; c.beginPath(); c.arc(-2.4, ty + 4.2, 1.2, 0, TAU); c.fill();
+  } else if (look === 'lionguard') {
+    roundShield(c, -2.6, ty + 3.8, 3.2, '#2c5fae');
+    c.fillStyle = '#e0b23a'; c.beginPath(); c.ellipse(-2.6, ty + 3.9, 1.6, 0.9, 0, 0, TAU); c.fill(); c.beginPath(); c.arc(-1.4, ty + 3.2, 0.8, 0, TAU); c.fill();
+  } else if (look === 'immortal') {
+    c.fillStyle = '#a07a46'; c.fillRect(-4.8, ty + 0.4, 3.4, 7.4);
+    c.strokeStyle = 'rgba(80,55,25,0.6)'; c.lineWidth = 0.35; for (let yy = ty + 1; yy < ty + 7.6; yy += 1) { c.beginPath(); c.moveTo(-4.8, yy); c.lineTo(-1.4, yy); c.stroke(); }
+    c.fillStyle = team; c.fillRect(-3.6, ty + 3, 1, 1.4);
+  }
+  // hoofd
+  c.fillStyle = shade(skin, -0.12); c.fillRect(-0.6, ty - 1.5, 1.4, 1.3);
+  head(c, { skin: o.skin || (look === 'samurai' ? 1 : look === 'immortal' || look === 'lionguard' ? 2 : 0), helmet: look === 'hoplite' || look === 'samurai' ? '#000' : null, hat: null }, hx, hy);
+  eliteHead(c, look, hx, hy, team, skin);
+  // wapen in de voorste hand
+  const sleeve = shade(L.body, -0.06);
+  if (look === 'samurai') {
+    const [ex, ey] = arm(c, 2.1, ty + 1.1, walk ? 0.8 + sw * 0.1 : 0.9, sleeve, skin, 4.2);
+    c.save(); c.translate(ex, ey); c.rotate(0.35);
+    c.strokeStyle = '#e8edf2'; c.lineWidth = 0.75; c.beginPath(); c.moveTo(0, -1); c.quadraticCurveTo(0.8, -5, 0.2, -9.5); c.stroke();
+    c.fillStyle = '#e0b23a'; c.fillRect(-1, -1.3, 2, 0.6); c.fillStyle = '#1e1d22'; c.fillRect(-0.4, -0.7, 0.8, 2.4);
+    c.restore(); disc(c, ex, ey, 0.8, skin);
+  } else if (look === 'peltast') {
+    const [ex, ey] = arm(c, 2.1, ty + 1.1, walk ? 2.4 : 2.6, sleeve, skin, 4.2);
+    for (const d of [0, 0.9]) { line(c, ex - 3 + d, ey + 2.6, ex + 3.6 + d, ey - 4, '#7a5129', 0.6); c.fillStyle = '#d5dbe2'; c.beginPath(); c.moveTo(ex + 4.4 + d, ey - 4.8); c.lineTo(ex + 3.2 + d, ey - 4.2); c.lineTo(ex + 3.8 + d, ey - 3.4); c.fill(); }
+    disc(c, ex, ey, 0.8, skin);
+  } else {
+    // speer (hopliet, leeuwenwacht, onsterfelijke)
+    const [ex, ey] = arm(c, 2.1, ty + 1.1, walk ? 0.45 + sw * 0.1 : 0.5, sleeve, skin, 4);
+    line(c, ex + 0.2, 1.2, ex + 1.3, -28, '#7a5129', 0.95);
+    c.fillStyle = look === 'hoplite' ? BRONZE : '#d5dbe2'; c.beginPath(); c.moveTo(ex + 1.45, -30.6); c.lineTo(ex + 0.55, -27.4); c.lineTo(ex + 2.2, -27.5); c.closePath(); c.fill();
+    if (look === 'immortal') disc(c, ex + 0.2, 1.4, 0.9, '#e0b23a'); // granaatappel onderaan de speer
+    disc(c, ex, ey, 0.8, skin);
+  }
+}
+
+export function elite(ctx, x, y, o = {}) {
+  const s = o.s || 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.24)';
+  ctx.beginPath(); ctx.ellipse(x + 0.4 * s, y, 4.6 * s, 2 * s, 0, 0, TAU); ctx.fill();
+  const mode = o.walking ? 'walk' : 'idle';
+  const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const R = resFor(ctx, s);
+  blit(ctx, sprite(`e|${o.look}|${mode}${f}|${R}|${o.team || ''}|${o.skin || 0}`, R, P_BOX, (c) => drawElite(c, o, mode, f)), P_BOX, x, y, s);
+}
+
+// ---------- kameel, strijdwagen en olifant ----------
+
+const C_BOX = [-13, -40, 15, 3];
+
+function drawCamel(c, o, mode, f) {
+  const a = (f / FR) * TAU; const walk = mode === 'walk';
+  const coat = '#c9a46a'; const dark = shade(coat, -0.3);
+  const bob = walk ? Math.abs(Math.sin(a)) * 0.8 : 0;
+  const by = -14 - bob;
+  for (const [lx, ph, far] of [[-5, 0, true], [4.2, Math.PI, true], [-3.6, Math.PI, false], [5.6, 0, false]]) {
+    const sw = walk ? Math.sin(a + ph) : 0;
+    c.strokeStyle = far ? shade(coat, -0.4) : shade(coat, -0.15); c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(lx, by + 2); c.lineTo(lx + sw * 1.2, by + 7.5); c.lineTo(lx + sw * 2.4, -0.8); c.stroke();
+    c.fillStyle = '#5a4630'; c.fillRect(lx + sw * 2.4 - 0.9, -1.1, 1.8, 1);
+  }
+  c.strokeStyle = dark; c.lineWidth = 1; c.beginPath(); c.moveTo(-7.4, by - 0.4); c.quadraticCurveTo(-9, by + 2, -8.4, by + 5); c.stroke();
+  c.fillStyle = coat; c.beginPath(); c.ellipse(-0.4, by, 7.4, 3.6, 0, 0, TAU); c.fill();
+  c.beginPath(); c.ellipse(-0.6, by - 3.2, 3.6, 3.2, 0, Math.PI, 0); c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.2)'; c.beginPath(); c.ellipse(-0.4, by + 1.8, 7, 1.6, 0, 0, Math.PI); c.fill();
+  // lange gebogen hals en kop
+  c.strokeStyle = coat; c.lineWidth = 2.6;
+  c.beginPath(); c.moveTo(5.6, by - 0.6); c.quadraticCurveTo(10.6, by + 1, 10.4, by - 9.4); c.stroke();
+  c.fillStyle = coat; c.beginPath(); c.ellipse(11.8, by - 10, 2.6, 1.3, 0.2, 0, TAU); c.fill();
+  c.fillStyle = dark; c.beginPath(); c.ellipse(13.6, by - 9.6, 0.9, 0.9, 0, 0, TAU); c.fill();
+  disc(c, 11.4, by - 10.6, 0.35, '#140d08');
+  // zadeldek met kwasten
+  c.fillStyle = o.team || '#b03a2e'; c.beginPath(); c.moveTo(-3.4, by - 4.6); c.lineTo(2.4, by - 4.6); c.lineTo(2.8, by + 1); c.lineTo(-3.8, by + 1); c.closePath(); c.fill();
+  c.fillStyle = '#e0b23a'; for (let i = -3; i < 3; i += 1.3) c.fillRect(i, by + 1, 0.5, 1.4);
+  // ruiter met hoofddoek en speer
+  const skin = SKIN[2]; const sy = by - 5;
+  line(c, 0, sy + 0.6, 1.6, sy + 4, '#e8dcc0', 1.7);
+  const ty = sy - 5.6;
+  c.fillStyle = '#e8dcc0'; c.beginPath(); c.moveTo(-2.4, sy + 0.6); c.lineTo(-2.2, ty); c.lineTo(2.2, ty); c.lineTo(2.6, sy + 0.6); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.18)'; c.fillRect(0.8, ty, 2, 6);
+  disc(c, 0.3, ty - 2.8, 2.5, skin);
+  c.fillStyle = '#2f6fb5'; c.beginPath(); c.arc(0.1, ty - 3.2, 2.8, Math.PI * 0.9, Math.PI * 2.1); c.lineTo(-2.6, ty + 0.4); c.closePath(); c.fill();
+  c.fillStyle = '#e0b23a'; for (let i = 0; i < 3; i++) c.fillRect(-2.4, ty - 2.6 + i * 1.1, 1.4, 0.5);
+  disc(c, 1.6, ty - 2.9, 0.33, '#2a1a10');
+  const [ex, ey] = arm(c, 1.9, ty + 1, 0.9, '#d9cdb0', skin, 3.8);
+  line(c, ex - 1.4, ey + 5, ex + 2.4, ey - 17, '#7a5129', 0.9);
+  c.fillStyle = '#d5dbe2'; c.beginPath(); c.moveTo(ex + 2.75, ey - 19.6); c.lineTo(ex + 1.75, ey - 16.6); c.lineTo(ex + 3.2, ey - 16.8); c.closePath(); c.fill();
+}
+
+const W_BOX = [-16, -30, 16, 3];
+
+function drawChariot(c, o, mode, f) {
+  const a = (f / FR) * TAU; const walk = mode === 'walk';
+  // paard vooraan
+  c.save(); c.translate(5, 0); c.scale(0.85, 0.85);
+  drawHorse(c, { horse: '#e8e0d0', team: o.team, noRider: true }, mode, f);
+  c.restore();
+  // disselboom
+  line(c, -6, -7, 4, -9, '#6b4523', 0.9);
+  // wagenbak met groot wiel
+  const team = o.team || '#c0392b';
+  c.fillStyle = '#c39563'; c.beginPath(); c.moveTo(-12, -6.5); c.lineTo(-5, -6.5); c.lineTo(-5.6, -12.5); c.quadraticCurveTo(-9, -14.5, -12.4, -12); c.closePath(); c.fill();
+  c.fillStyle = team; c.fillRect(-11.6, -11, 5.6, 1.4);
+  c.fillStyle = '#e0b23a'; c.fillRect(-11.6, -8.6, 5.6, 0.8);
+  const spin = walk ? a : 0;
+  c.fillStyle = '#5a3a1e'; c.beginPath(); c.arc(-8.5, -4.6, 4.3, 0, TAU); c.fill();
+  c.fillStyle = '#8a6238'; c.beginPath(); c.arc(-8.5, -4.6, 3.4, 0, TAU); c.fill();
+  c.strokeStyle = '#5a3a1e'; c.lineWidth = 0.6;
+  for (let k = 0; k < 6; k++) { const t = spin + (k / 6) * Math.PI; c.beginPath(); c.moveTo(-8.5 + Math.cos(t) * 3.4, -4.6 + Math.sin(t) * 3.4); c.lineTo(-8.5 - Math.cos(t) * 3.4, -4.6 - Math.sin(t) * 3.4); c.stroke(); }
+  disc(c, -8.5, -4.6, 0.8, '#e0b23a');
+  // wagenmenner met boog en nemes
+  const skin = SKIN[2]; const ty = -19;
+  c.fillStyle = '#efe6d0'; c.fillRect(-10.4, ty, 4.6, 7);
+  c.fillStyle = team; c.fillRect(-10.4, ty + 3, 4.6, 0.9);
+  disc(c, -8, ty - 2.6, 2.4, skin);
+  c.fillStyle = '#2f6fb5'; c.beginPath(); c.arc(-8.2, ty - 3, 2.7, Math.PI * 0.9, Math.PI * 2.1); c.lineTo(-10.8, ty + 1.4); c.lineTo(-9.4, ty + 1.4); c.closePath(); c.fill();
+  c.fillStyle = '#e0b23a'; for (let i = 0; i < 3; i++) c.fillRect(-10.6, ty - 2.2 + i * 1.2, 1.4, 0.5);
+  disc(c, -6.8, ty - 2.6, 0.32, '#2a1a10');
+  const [ex, ey] = arm(c, -6.4, ty + 1, 1.35, '#e6dcc4', skin, 4);
+  c.strokeStyle = '#7a5129'; c.lineWidth = 0.85; c.beginPath(); c.arc(ex - 2.2, ey, 4.4, -0.95, 0.95); c.stroke();
+}
+
+const E_BOX = [-18, -46, 20, 3];
+
+function drawElephant(c, o, mode, f) {
+  const a = (f / FR) * TAU; const walk = mode === 'walk';
+  const skinC = '#8c8a86'; const dark = shade(skinC, -0.3);
+  const bob = walk ? Math.abs(Math.sin(a)) * 0.7 : 0;
+  const by = -14 - bob;
+  for (const [lx, ph, far] of [[-7, 0, true], [5, Math.PI, true], [-4.6, Math.PI, false], [7.4, 0, false]]) {
+    const sw = walk ? Math.sin(a + ph) * 1.4 : 0;
+    c.fillStyle = far ? shade(skinC, -0.35) : shade(skinC, -0.08);
+    c.beginPath(); c.moveTo(lx - 1.9, by + 3); c.lineTo(lx + 1.9, by + 3); c.lineTo(lx + 1.7 + sw, -0.4); c.lineTo(lx - 1.7 + sw, -0.4); c.closePath(); c.fill();
+    c.fillStyle = '#e8e0cc'; for (const d of [-0.8, 0.6]) c.fillRect(lx + d + sw - 0.3, -1, 0.7, 0.6);
+  }
+  c.strokeStyle = dark; c.lineWidth = 1; c.beginPath(); c.moveTo(-10, by - 1); c.quadraticCurveTo(-12.4, by + 2, -11.6, by + 6); c.stroke();
+  c.fillStyle = skinC; c.beginPath(); c.ellipse(-1, by, 10.4, 6.6, 0, 0, TAU); c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.2)'; c.beginPath(); c.ellipse(-1, by + 3, 10, 3.2, 0, 0, Math.PI); c.fill();
+  c.fillStyle = 'rgba(255,255,255,0.12)'; c.beginPath(); c.ellipse(-3, by - 4.4, 7, 2, 0, 0, TAU); c.fill();
+  // kleed in teamkleur
+  const team = o.team || '#c0392b';
+  c.fillStyle = team; c.beginPath(); c.moveTo(-7, by - 5.4); c.lineTo(4, by - 5.4); c.lineTo(5, by + 3); c.lineTo(-8, by + 3); c.closePath(); c.fill();
+  c.fillStyle = '#e0b23a'; c.fillRect(-8, by + 2.2, 13, 0.9); for (let x = -7.4; x < 4.6; x += 1.6) disc(c, x, by + 3.6, 0.5, '#e0b23a');
+  // kop, oor, slurf en slagtanden
+  c.fillStyle = skinC; c.beginPath(); c.ellipse(9.4, by - 2.6, 4.6, 4.4, 0, 0, TAU); c.fill();
+  c.fillStyle = shade(skinC, -0.15); c.beginPath(); c.ellipse(7.2, by - 2, 2.8, 4.2, -0.2, 0, TAU); c.fill();
+  c.strokeStyle = skinC; c.lineWidth = 2.6; c.beginPath(); c.moveTo(12.6, by - 0.6); c.quadraticCurveTo(15.4, by + 5, 13.2 + (walk ? Math.sin(a) : 0), by + 10.4); c.stroke();
+  c.strokeStyle = '#f4efe0'; c.lineWidth = 1.1; c.beginPath(); c.moveTo(11.6, by + 1); c.quadraticCurveTo(15.6, by + 3, 16.4, by); c.stroke();
+  disc(c, 10.6, by - 4, 0.45, '#140d08');
+  c.fillStyle = team; c.beginPath(); c.ellipse(9.2, by - 6.6, 3, 1.2, 0, 0, TAU); c.fill();
+  // torentje (howdah) met een boogschutter
+  c.fillStyle = '#8a6238'; c.fillRect(-6, by - 13, 9, 7.6);
+  c.fillStyle = '#e0b23a'; c.fillRect(-6, by - 13, 9, 1); c.fillRect(-6, by - 7.4, 9, 0.9);
+  c.fillStyle = '#29a9a9'; c.beginPath(); c.moveTo(-7, by - 13); c.quadraticCurveTo(-1.5, by - 18, 4, by - 13); c.closePath(); c.fill();
+  for (const x of [-6.6, 3.4]) line(c, x, by - 6, x, by - 13, '#6b4523', 0.6);
+  const skin = SKIN[2];
+  disc(c, -0.6, by - 15.2, 1.9, skin);
+  c.fillStyle = '#e8dcc0'; c.beginPath(); c.arc(-0.6, by - 15.6, 2.1, Math.PI, 0); c.fill();
+  // mahout op de nek
+  disc(c, 6.6, by - 9.4, 1.6, skin);
+  c.fillStyle = '#e8dcc0'; c.fillRect(5.4, by - 8, 2.6, 3.4);
+}
+
+export function camel(ctx, x, y, o = {}) {
+  const s = o.s || 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(x + 1 * s, y, 9 * s, 2.6 * s, 0, 0, TAU); ctx.fill();
+  const mode = o.walking ? 'walk' : 'idle'; const f = mode === 'idle' ? 0 : frameOf(o.phase); const R = resFor(ctx, s);
+  blit(ctx, sprite(`k|${mode}${f}|${R}|${o.team || ''}`, R, C_BOX, (c) => drawCamel(c, o, mode, f)), C_BOX, x, y, s);
+}
+export function chariot(ctx, x, y, o = {}) {
+  const s = o.s || 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(x, y, 13 * s, 3 * s, 0, 0, TAU); ctx.fill();
+  const mode = o.walking ? 'walk' : 'idle'; const f = mode === 'idle' ? 0 : frameOf(o.phase); const R = resFor(ctx, s);
+  blit(ctx, sprite(`w|${mode}${f}|${R}|${o.team || ''}`, R, W_BOX, (c) => drawChariot(c, o, mode, f)), W_BOX, x, y, s);
+}
+export function elephant(ctx, x, y, o = {}) {
+  const s = o.s || 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.beginPath(); ctx.ellipse(x + 1 * s, y, 13 * s, 3.6 * s, 0, 0, TAU); ctx.fill();
+  const mode = o.walking ? 'walk' : 'idle'; const f = mode === 'idle' ? 0 : frameOf(o.phase); const R = resFor(ctx, s);
+  blit(ctx, sprite(`o|${mode}${f}|${R}|${o.team || ''}`, R, E_BOX, (c) => drawElephant(c, o, mode, f)), E_BOX, x, y, s);
+}
+
+// eenheid van een volk tekenen (geeft false terug als het geen eenheid van een volk is)
+export function uniqueUnit(ctx, kind, x, y, o = {}) {
+  const base = { s: o.s || 1, team: o.team, walking: o.walking, phase: o.phase };
+  switch (kind) {
+    case 'hoplite': case 'peltast': case 'samurai': case 'lionguard': case 'immortal':
+      elite(ctx, x, y, { ...base, look: kind }); return true;
+    case 'chariot': chariot(ctx, x, y, { ...base, s: base.s * 0.85 }); return true;
+    case 'camel': camel(ctx, x, y, { ...base, s: base.s * 0.85 }); return true;
+    case 'elephant': elephant(ctx, x, y, { ...base, s: base.s * 0.85 }); return true;
+    case 'yabusame': horseman(ctx, x, y, { ...base, s: base.s * 0.85, look: 'yabusame', weapon: 'bow', body: '#7a1f1f', horse: '#3d3530', skin: 1 }); return true;
+    default: return false;
+  }
 }

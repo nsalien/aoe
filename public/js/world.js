@@ -481,10 +481,10 @@ export class WorldView {
     const col = this.teamColor(tw.teamId);
     const houses = Math.min(9, Math.floor(tw.buildings / 2));
     const spots = [[-0.55, -0.15], [0.05, -0.62], [-0.6, 0.45], [0.55, -0.4], [0.5, 0.45], [-0.1, 0.62], [0.65, 0.05], [-0.75, -0.6], [0.2, 0.85]];
-    const parts = [{ ox: 0, oy: 0, spr: A.buildingSprite('tc', tw.age, col), scale: 0.42 }];
-    for (let i = 0; i < houses; i++) parts.push({ ox: spots[i][0], oy: spots[i][1], spr: A.buildingSprite('house', Math.min(3, tw.age), col), scale: 0.4 });
-    if (tw.wall >= 2) parts.push({ ox: -0.85, oy: 0.85, spr: A.buildingSprite('tower', Math.min(3, tw.wall - 1), col), scale: 0.32 });
-    if (tw.monument) parts.push({ ox: 0.75, oy: 0.75, spr: A.buildingSprite('monument', tw.monument, col), scale: 0.3 });
+    const parts = [{ ox: 0, oy: 0, spr: A.buildingSprite('tc', tw.age, col, tw.civ), scale: 0.42 }];
+    for (let i = 0; i < houses; i++) parts.push({ ox: spots[i][0], oy: spots[i][1], spr: A.buildingSprite('house', Math.min(3, tw.age), col, tw.civ), scale: 0.4 });
+    if (tw.wall >= 2) parts.push({ ox: -0.85, oy: 0.85, spr: A.buildingSprite('tower', Math.min(3, tw.wall - 1), col, tw.civ), scale: 0.32 });
+    if (tw.monument) parts.push({ ox: 0.75, oy: 0.75, spr: A.buildingSprite('monument', tw.monument, col, tw.civ), scale: 0.3 });
     parts.sort((a, b) => a.ox + a.oy - (b.ox + b.oy));
     for (const part of parts) {
       const q = toWorld(part.ox, part.oy);

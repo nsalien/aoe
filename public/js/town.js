@@ -747,7 +747,7 @@ export class TownView {
   computeSoldierSpots() {
     const s = this.state;
     const units = s.units || {};
-    const order = ['knight', 'rider', 'sword', 'spear', 'archer', 'scout', 'ram'];
+    const order = ['elephant', 'chariot', 'camel', 'yabusame', 'knight', 'rider', 'samurai', 'hoplite', 'lionguard', 'immortal', 'sword', 'spear', 'peltast', 'archer', 'scout', 'stonethrower', 'ram'];
     const total = order.reduce((a, k) => a + (units[k] || 0), 0);
     if (!total) return [];
     const show = Math.min(total, FX.LOW_POWER ? 28 : 44);
@@ -792,6 +792,8 @@ export class TownView {
       ctx.strokeStyle = 'rgba(255,225,90,0.85)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.ellipse(x, y, 9, 4.5, 0, 0, Math.PI * 2); ctx.stroke();
     }
+    if (s.kind === 'stonethrower') { A.stoneThrower(ctx, x, y, 0.8, t); return; }
+    if (FIG.uniqueUnit(ctx, s.kind, x, y + bob, o)) return;
     switch (s.kind) {
       case 'spear': A.person(ctx, x, y + bob, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
       case 'sword': A.person(ctx, x, y + bob, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
@@ -1841,7 +1843,7 @@ export class TownView {
     for (const b of s.buildings) {
       if (!isPlaced(b) || b.level === 0) continue;
       const c = this.footprintCenter(b);
-      const spr = A.buildingSprite(b.type, b.level, this.team);
+      const spr = A.buildingSprite(b.type, b.level, this.team, this.state.civ);
       for (const [lx, ly, r] of spr.lights || []) {
         const fl = 0.85 + Math.sin(t * 0.003 + lx * 3.1 + b.id) * 0.08;
         FX.drawGlow(ctx, c.x + lx, c.y + ly, 9 * r, FX.WARM, night * fl * 0.85);
@@ -1898,7 +1900,7 @@ export class TownView {
     const ok = canPlaceAt(this.state, type, x, y);
     const c = toWorld(x + size / 2, y + size / 2);
     A.diamond(ctx, c.x, c.y, size * A.TW, size * A.TH, ok ? 'rgba(80,220,90,0.35)' : 'rgba(230,60,50,0.4)', ok ? '#5fe06a' : '#e64a3c');
-    A.drawSprite(ctx, A.buildingSprite(type, 1, this.team), c.x, c.y, 1, ok ? 0.7 : 0.35);
+    A.drawSprite(ctx, A.buildingSprite(type, 1, this.team, this.state.civ), c.x, c.y, 1, ok ? 0.7 : 0.35);
   }
 
   drawDecor(ctx, d, t) {
@@ -1953,7 +1955,7 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team), c.x, c.y);
+      A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ), c.x, c.y);
       this.drawOverlay(ctx, b, c, t);
       if (job && emit) this.particles.dust(c.x, c.y + 6, 1);
       if (b.type === 'smithy' && emit && Math.random() < 0.6) {
@@ -1968,9 +1970,11 @@ export class TownView {
     const at = (x, y, z) => { const [px, py] = A.P(x, y, z); return [c.x + px, c.y + py]; };
     switch (b.type) {
       case 'tc': {
-        const z = [0, 50, 78, 92, 96][L];
-        const [x, y] = L === 1 ? at(0.7, 0, 46) : at(0, 0, z);
-        A.flag(ctx, x, y, 18, this.team, t);
+        const st = A.STYLES[this.state.civ];
+        // de kastelen van de volkeren hebben hun eigen vlaggen; anders een vlag op het hoogste punt
+        const z = st ? [0, 50, { flat: 70, crenel: 74, pagoda: 76, greek: 72, dome: 82 }[st.roof], null, null][L] : [0, 50, 78, 92, 96][L];
+        const [x, y] = L === 1 ? at(0.7, 0, 46) : at(0, 0, z || 0);
+        if (L === 1 || z) A.flag(ctx, x, y, 18, this.team, t);
         if (L === 1) A.smoke(ctx, ...at(-0.3, 0, 46), t, b.id);
         break;
       }
