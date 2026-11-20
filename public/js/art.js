@@ -705,98 +705,36 @@ function tc(ctx, L, team) {
 
 export function ram(ctx, x, y, s = 1) {
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
-  ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(0, 0, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#7a5129'; ctx.fillRect(-10, -9, 20, 6);
-  ctx.fillStyle = '#9c6b3c'; ctx.beginPath(); ctx.moveTo(-11, -9); ctx.lineTo(0, -17); ctx.lineTo(11, -9); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = '#4a3220'; ctx.lineWidth = 0.8; ctx.stroke();
-  ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-6, -7); ctx.lineTo(15, -7); ctx.stroke();
-  ctx.fillStyle = C.iron; ctx.fillRect(13, -9.5, 4, 5);
-  ctx.fillStyle = '#3a2716';
-  for (const wx of [-7, 7]) { ctx.beginPath(); ctx.arc(wx, -2.5, 3, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.beginPath(); ctx.ellipse(1, 0, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
+  // wielen achteraan
+  for (const wx of [-7, 6]) { ctx.fillStyle = '#3a2716'; ctx.beginPath(); ctx.arc(wx + 1.5, -3.2, 3, 0, Math.PI * 2); ctx.fill(); }
+  // onderstel en stam met ijzeren kop
+  ctx.fillStyle = '#6b4826'; ctx.fillRect(-11, -9, 22, 5);
+  ctx.strokeStyle = '#4a3220'; ctx.lineWidth = 0.6; ctx.strokeRect(-11, -9, 22, 5);
+  ctx.fillStyle = '#7a5129'; ctx.beginPath(); ctx.ellipse(1, -8.2, 14, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#d6b27a'; ctx.beginPath(); ctx.ellipse(-12.8, -8.2, 0.9, 1.6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = C.iron; ctx.beginPath(); ctx.moveTo(13, -10.6); ctx.lineTo(18, -9.4); ctx.lineTo(18, -7); ctx.lineTo(13, -5.8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(13.5, -10, 4, 0.8);
+  // dak van huiden
+  ctx.fillStyle = '#8a6a48'; ctx.beginPath(); ctx.moveTo(-12, -9); ctx.lineTo(-1, -19); ctx.lineTo(12, -9); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#a5845c'; ctx.beginPath(); ctx.moveTo(-12, -9); ctx.lineTo(-1, -19); ctx.lineTo(1, -9); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(70,45,25,0.6)'; ctx.lineWidth = 0.5;
+  for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-12 + i * 3, -9); ctx.lineTo(-1, -19 + i * 0.4); ctx.stroke(); }
+  ctx.strokeStyle = '#3e2a18'; ctx.lineWidth = 0.9;
+  ctx.beginPath(); ctx.moveTo(-12, -9); ctx.lineTo(-1, -19); ctx.lineTo(12, -9); ctx.stroke();
+  // wielen vooraan
+  for (const wx of [-8, 5]) {
+    ctx.fillStyle = '#4a3220'; ctx.beginPath(); ctx.arc(wx, -2.8, 3.1, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 0.6; ctx.beginPath();
+    for (let k = 0; k < 4; k++) { const a = (k / 4) * Math.PI; ctx.moveTo(wx + Math.cos(a) * 2.6, -2.8 + Math.sin(a) * 2.6); ctx.lineTo(wx - Math.cos(a) * 2.6, -2.8 - Math.sin(a) * 2.6); }
+    ctx.stroke();
+    ctx.fillStyle = C.iron; ctx.beginPath(); ctx.arc(wx, -2.8, 0.8, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.restore();
 }
 
-const SKIN = ['#f1c9a0', '#e0ac7e', '#c98e5f', '#8d5a3b'];
-
-export function person(ctx, x, y, o = {}) {
-  const s = o.s || 1;
-  const ph = o.phase || 0;
-  const step = o.walking ? Math.sin(ph) * 2.2 * s : 0;
-  const bob = o.walking ? Math.abs(Math.sin(ph)) * 0.8 * s : 0;
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.beginPath(); ctx.ellipse(x, y, 4 * s, 1.8 * s, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = o.leg || '#4b3a28'; ctx.lineWidth = 1.6 * s; ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x - 1.3 * s, y - 5 * s - bob); ctx.lineTo(x - 1.3 * s + step, y - 0.3 * s);
-  ctx.moveTo(x + 1.3 * s, y - 5 * s - bob); ctx.lineTo(x + 1.3 * s - step, y - 0.3 * s);
-  ctx.stroke();
-  ctx.lineCap = 'butt';
-  const by = y - 11 * s - bob;
-  ctx.fillStyle = o.body || '#8b6a43';
-  ctx.beginPath();
-  ctx.moveTo(x - 3 * s, by + 7 * s); ctx.lineTo(x - 2.6 * s, by + 1 * s); ctx.quadraticCurveTo(x, by - 0.5 * s, x + 2.6 * s, by + 1 * s);
-  ctx.lineTo(x + 3 * s, by + 7 * s); ctx.closePath(); ctx.fill();
-  if (o.armor) { ctx.fillStyle = 'rgba(200,205,215,0.55)'; ctx.fillRect(x - 2.4 * s, by + 1.5 * s, 4.8 * s, 3 * s); }
-  ctx.fillStyle = SKIN[o.skin || 0];
-  ctx.beginPath(); ctx.arc(x, by - 2.2 * s, 2.5 * s, 0, Math.PI * 2); ctx.fill();
-  if (o.helmet) {
-    ctx.fillStyle = o.helmet;
-    ctx.beginPath(); ctx.arc(x, by - 2.6 * s, 2.7 * s, Math.PI, 0); ctx.fill();
-    ctx.fillRect(x - 3 * s, by - 2.8 * s, 6 * s, 0.9 * s);
-  } else if (o.hat) {
-    ctx.fillStyle = o.hat;
-    ctx.beginPath(); ctx.ellipse(x, by - 3.8 * s, 3.6 * s, 1.2 * s, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x, by - 4 * s, 1.8 * s, Math.PI, 0); ctx.fill();
-  }
-  const hx = x + 3.2 * s; const hy = by + 4 * s;
-  if (o.weapon === 'spear') {
-    ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 1 * s;
-    ctx.beginPath(); ctx.moveTo(hx, y - 1 * s); ctx.lineTo(hx + 1 * s, by - 10 * s); ctx.stroke();
-    ctx.fillStyle = '#c9ced6'; ctx.beginPath(); ctx.moveTo(hx + 1 * s, by - 13 * s); ctx.lineTo(hx - 0.2 * s, by - 9.5 * s); ctx.lineTo(hx + 2.2 * s, by - 9.5 * s); ctx.fill();
-  } else if (o.weapon === 'sword') {
-    ctx.strokeStyle = '#d5dae2'; ctx.lineWidth = 1.3 * s;
-    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + 2 * s, hy - 7 * s); ctx.stroke();
-    ctx.fillStyle = o.team || '#888';
-    ctx.beginPath(); ctx.arc(x - 3 * s, by + 4 * s, 2.6 * s, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.5; ctx.stroke();
-  } else if (o.weapon === 'bow') {
-    ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 1 * s;
-    ctx.beginPath(); ctx.arc(hx - 0.5 * s, hy - 2 * s, 5 * s, -1.2, 1.2); ctx.stroke();
-    ctx.strokeStyle = 'rgba(240,230,200,0.8)'; ctx.lineWidth = 0.4 * s;
-    ctx.beginPath(); ctx.moveTo(hx + 1.3 * s, hy - 6.7 * s); ctx.lineTo(hx + 1.3 * s, hy + 2.7 * s); ctx.stroke();
-  } else if (o.weapon === 'tool') {
-    ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 1 * s;
-    ctx.beginPath(); ctx.moveTo(hx - 1 * s, hy + 2 * s); ctx.lineTo(hx + 2 * s, hy - 6 * s); ctx.stroke();
-    ctx.fillStyle = '#9aa1ab'; ctx.fillRect(hx + 0.8 * s, hy - 7.5 * s, 3 * s, 2 * s);
-  }
-  if (o.carry) {
-    ctx.fillStyle = o.carry;
-    ctx.beginPath(); ctx.ellipse(x - 0.5 * s, by - 6.5 * s, 3 * s, 2 * s, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.5; ctx.stroke();
-  }
-  if (o.team && o.weapon !== 'sword' && o.weapon !== 'tool') {
-    ctx.fillStyle = o.team; ctx.fillRect(x - 2.6 * s, by + 3.2 * s, 5.2 * s, 1.3 * s);
-  }
-}
-
-export function horseman(ctx, x, y, o = {}) {
-  const s = o.s || 1;
-  const ph = o.phase || 0;
-  const g = o.walking ? Math.sin(ph) * 2 * s : 0;
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.beginPath(); ctx.ellipse(x, y, 8 * s, 2.5 * s, 0, 0, Math.PI * 2); ctx.fill();
-  const col = o.horse || '#7b4f2c';
-  ctx.strokeStyle = shade('#5a3a1a', 0); ctx.lineWidth = 1.5 * s; ctx.lineCap = 'round';
-  ctx.beginPath();
-  for (const [lx, d] of [[-5, g], [-3, -g], [3, -g], [5, g]]) { ctx.moveTo(x + lx * s, y - 6 * s); ctx.lineTo(x + lx * s + d, y - 0.4 * s); }
-  ctx.stroke(); ctx.lineCap = 'butt';
-  ctx.fillStyle = col;
-  ctx.beginPath(); ctx.ellipse(x, y - 8 * s, 7 * s, 3.4 * s, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(x + 5 * s, y - 10 * s); ctx.lineTo(x + 8.5 * s, y - 15 * s); ctx.lineTo(x + 10.5 * s, y - 13.5 * s); ctx.lineTo(x + 7 * s, y - 7.5 * s); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#2b1d10'; ctx.fillRect(x - 7.5 * s, y - 9 * s, 1.5 * s, 5 * s);
-  if (o.team) { ctx.fillStyle = o.team; ctx.fillRect(x - 4 * s, y - 10 * s, 6 * s, 4 * s); }
-  person(ctx, x - 0.5 * s, y - 7 * s, { s: s * 0.9, body: o.body, helmet: o.helmet, armor: o.armor, weapon: o.weapon, team: null, skin: o.skin });
-}
+// mensen en ruiters staan in figures.js (rijker getekend en per animatiebeeld gecachet)
+export { person, horseman } from './figures.js';
 
 // ---------- natuur ----------
 

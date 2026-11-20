@@ -62,7 +62,7 @@ export function unitThumb(unit, team = '#3f7fd9') {
   ctx.scale(2, 2);
   const o = { s: 2.1, team };
   switch (unit) {
-    case 'villager': A.person(ctx, 22, 40, { ...o, team: null, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', carry: '#e6c45a' }); break;
+    case 'villager': A.person(ctx, 22, 40, { ...o, team: null, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe' }); break;
     case 'spear': A.person(ctx, 20, 40, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
     case 'sword': A.person(ctx, 22, 40, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
     case 'archer': A.person(ctx, 20, 40, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
