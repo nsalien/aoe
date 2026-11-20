@@ -532,3 +532,27 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
 .field-send input.num { width: 64px; }
 .field-log { margin-top: 8px; border-top: 1px dashed #b9cc98; padding-top: 6px; display: grid; gap: 3px; }
 .log-row.bad { color: #9a2a1e; }
+
+/* volkeren */
+.civ-emblem { vertical-align: -3px; flex: none; }
+.civ-tag { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; }
+.civ-pick { display: grid; gap: 6px; }
+.civ-pick-title { font-size: 13px; font-weight: 700; color: var(--ink2); }
+.civ-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.civ-card {
+  position: relative; display: grid; gap: 2px; align-content: start; padding: 6px; border-radius: 10px; cursor: pointer;
+  background: rgba(255, 250, 235, 0.7); border: 2px solid #d8c49a; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.civ-card:hover { transform: translateY(-1px); }
+.civ-card input { position: absolute; opacity: 0; pointer-events: none; }
+.civ-card:has(input:checked) { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(212, 160, 23, 0.35), 0 4px 10px rgba(60, 40, 10, 0.2); background: #fff7df; }
+.civ-card > img { width: 100%; height: 74px; object-fit: contain; }
+.civ-name { display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 13px; color: var(--ink); }
+.civ-desc { font-size: 11px; line-height: 1.25; color: var(--ink2); font-weight: 500; }
+.civ-units { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 10.5px; font-weight: 700; color: #7a5a2a; }
+.civ-units img { width: 22px; height: 22px; }
+.castle-card { border-color: #d4a017; background: linear-gradient(180deg, rgba(255, 246, 214, 0.95), rgba(250, 234, 190, 0.8)); }
+.castle-card h3 { display: flex; align-items: center; gap: 6px; }
+.castle-preview img { width: 34px; height: 34px; }
+.elite-tag { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; font-weight: 800; color: #9a6a00; background: #ffe9a8; border-radius: 999px; padding: 0 6px; vertical-align: 1px; }
+.elite-tag svg { width: 11px; height: 11px; }
