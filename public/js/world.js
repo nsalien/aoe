@@ -3,6 +3,16 @@ import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
 import { generateTerrain, T } from '../shared/worldgen.js';
+import * as NAT from './nature.js';
+
+// bomen van de stadsweergave, klein getekend op de wereldkaart
+let worldTrees = null;
+function wtree(g, x, y, conifer, h, s = 0.5) {
+  if (!worldTrees) worldTrees = Array.from({ length: 12 }, (_, k) => NAT.treeSprite(k));
+  const list = conifer ? NAT.CONIFERS : NAT.LEAFY;
+  const spr = worldTrees[list[Math.floor(h * list.length) % list.length]];
+  g.drawImage(spr.cv, x - spr.ax * s, y - spr.ay * s, spr.w * s, spr.h * s);
+}
 
 export const WTW = 40;
 export const WTH = 20;
@@ -181,12 +191,12 @@ export class WorldView {
             const [ox, oy] = pts[j];
             const [tx, ty] = P(gx + 0.5 + ox, gy + 0.5 + oy, h);
             const conif = hashInt(gx + j, gy, this.seed + 4) < 0.5;
-            if (conif) A.conifer(g, tx, ty, 0.55, hashInt(gx, gy + j, 5)); else A.broadleaf(g, tx, ty, 0.5, hashInt(gx, gy + j, 6));
+            wtree(g, tx, ty, conif, hashInt(gx, gy + j, 5), 0.48);
           }
         } else if (t === T.GRASS && hashInt(gx, gy, this.seed + 7) < 0.07 && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
-          A.broadleaf(g, cx + 4, cy + 2, 0.5, 0.3);
+          wtree(g, cx + 4, cy + 2, false, hashInt(gx, gy, 13), 0.48);
         } else if (t === T.HILL && hashInt(gx, gy, this.seed + 8) < 0.25 && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
-          if (hashInt(gx, gy, 9) < 0.5) A.conifer(g, cx, cy + 2, 0.5, 0.6); else A.rock(g, cx, cy + 2, 0.7);
+          if (hashInt(gx, gy, 9) < 0.5) wtree(g, cx, cy + 2, true, hashInt(gx, gy, 14), 0.45); else A.rock(g, cx, cy + 2, 0.7);
         } else if (t === T.MOUNTAIN) {
           const ph = 14 + (e - 0.82) * 120 + hashInt(gx, gy, 10) * 8;
           const w = 13 + hashInt(gx, gy, 11) * 5;
@@ -194,6 +204,11 @@ export class WorldView {
           g.beginPath(); g.moveTo(cx - w, cy + 3); g.lineTo(cx - 2, cy - ph); g.lineTo(cx + w, cy + 3); g.closePath(); g.fill();
           g.fillStyle = '#a29d92';
           g.beginPath(); g.moveTo(cx - w, cy + 3); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - 1, cy + 4); g.closePath(); g.fill();
+          g.strokeStyle = 'rgba(60,55,48,0.45)'; g.lineWidth = 0.8;
+          g.beginPath(); g.moveTo(cx - 2, cy - ph); g.lineTo(cx + w * 0.25, cy - ph * 0.5); g.lineTo(cx + w * 0.15, cy - ph * 0.15);
+          g.moveTo(cx - 2, cy - ph * 0.7); g.lineTo(cx - w * 0.35, cy - ph * 0.25); g.stroke();
+          g.fillStyle = 'rgba(255,255,255,0.18)';
+          g.beginPath(); g.moveTo(cx - w * 0.6, cy); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - w * 0.2, cy - ph * 0.3); g.closePath(); g.fill();
           if (e > 0.86) {
             g.fillStyle = '#f4f6f8';
             g.beginPath(); g.moveTo(cx - 2 - w * 0.32, cy - ph * 0.62); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - 2 + w * 0.32, cy - ph * 0.62);
@@ -204,6 +219,21 @@ export class WorldView {
         }
       }
     }
+    // korrel over het hele landschap (masker = wat al getekend is)
+    const tex = NAT.groundTexture('grass', window.innerWidth < 800 ? 128 : 256);
+    const tmp = document.createElement('canvas');
+    tmp.width = cv.width; tmp.height = cv.height;
+    const t2 = tmp.getContext('2d');
+    t2.fillStyle = t2.createPattern(tex, 'repeat');
+    t2.fillRect(0, 0, tmp.width, tmp.height);
+    t2.globalCompositeOperation = 'destination-in';
+    t2.drawImage(cv, 0, 0);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'overlay';
+    g.globalAlpha = 0.5;
+    g.drawImage(tmp, 0, 0);
+    g.restore();
   }
 
   townPos(t) {
