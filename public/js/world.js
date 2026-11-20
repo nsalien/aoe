@@ -328,7 +328,6 @@ export class WorldView {
     // wolken boven alles, doorzichtiger als je inzoomt
     const cloudAlpha = Math.max(0.12, Math.min(0.85, 1.25 - cam.zoom * 0.55)) * (1 - night * 0.6);
     this.clouds.draw(ctx, cloudAlpha);
-    FX.vignette(ctx, this.canvas.width, this.canvas.height, 0.32);
 
     // labels in schermruimte
     ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);

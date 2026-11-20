@@ -30,13 +30,16 @@ const SHADOW = {
 function treeSprites() {
   const out = [];
   for (let i = 0; i < 8; i++) {
-    const cv = document.createElement('canvas');
-    cv.width = 60 * 2; cv.height = 70 * 2;
-    const c = cv.getContext('2d');
-    c.scale(2, 2);
-    const s = 1.05 + (i % 4) * 0.12;
-    if (i < 4) A.conifer(c, 30, 64, s, i / 4); else A.broadleaf(c, 30, 64, s, (i - 4) / 4);
-    out.push({ cv, w: 60, h: 70, ax: 30, ay: 64 });
+    const make = (k) => {
+      const cv = document.createElement('canvas');
+      cv.width = 60 * k; cv.height = 70 * k;
+      const c = cv.getContext('2d');
+      c.scale(k, k);
+      const s = 1.05 + (i % 4) * 0.12;
+      if (i < 4) A.conifer(c, 30, 64, s, i / 4); else A.broadleaf(c, 30, 64, s, (i - 4) / 4);
+      return cv;
+    };
+    out.push({ cv: make(2), small: make(1), w: 60, h: 70, ax: 30, ay: 64 });
   }
   return out;
 }
@@ -50,6 +53,27 @@ function hull(pts) {
   for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
   return lo.slice(0, -1).concat(up.slice(0, -1));
 }
+
+// Teken een figuur gespiegeld als hij naar links loopt.
+function facing(ctx, x, dir, fn) {
+  if (dir >= 0) { fn(); return; }
+  ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0);
+  fn();
+  ctx.restore();
+}
+
+// Teken enkel het zichtbare stuk van een grote, vooraf getekende laag (veel minder pixelwerk per beeld).
+function drawSub(ctx, cv, scale, ox, oy, W, H, v) {
+  const x0 = Math.max(ox, v.x0); const y0 = Math.max(oy, v.y0);
+  const x1 = Math.min(ox + W, v.x1); const y1 = Math.min(oy + H, v.y1);
+  if (x1 <= x0 || y1 <= y0) return;
+  const sx = (x0 - ox) * scale; const sy = (y0 - oy) * scale;
+  const sw = Math.min(cv.width - sx, (x1 - x0) * scale); const sh = Math.min(cv.height - sy, (y1 - y0) * scale);
+  if (sw <= 0 || sh <= 0) return;
+  ctx.drawImage(cv, sx, sy, sw, sh, x0, y0, sw / scale, sh / scale);
+}
+
+const FOG_SCALE = 0.25;
 
 export class TownView {
   constructor(canvas) {
@@ -104,6 +128,14 @@ export class TownView {
     this.fogCv.width = T_W + 2; this.fogCv.height = T_W + 2;
     this.fogCtx = this.fogCv.getContext('2d');
     this.fogAt = 0;
+    this.fogPrev = null;
+    this.fogIso = document.createElement('canvas');
+    this.fogIso.width = Math.ceil((T_W + 2) * A.TW * FOG_SCALE); this.fogIso.height = Math.ceil((T_W + 2) * A.TH * FOG_SCALE);
+    this.fogIsoCtx = this.fogIso.getContext('2d');
+    this.fogOrigin = { x: toWorld(T_MIN - 1, T_MAX + 1).x, y: toWorld(T_MIN - 1, T_MIN - 1).y };
+    this.groundComp = null; // grond + boomschaduwen als één laag
+    this.frameAvg = 0;
+    this.frameN = 0;
     this.explored = null;
     this.visibleArr = null;
     this.treeKey = '';
@@ -416,6 +448,7 @@ export class TownView {
       this.lilies.push({ gx: pd.x + Math.cos(a) * rr, gy: pd.y + Math.sin(a) * rr * 0.8, f: k % 3 === 0 });
     }
     this.ground = { cv, W, H };
+    this.groundComp = null;
 
     // vaste versiering: struiken, rotsen en de grondstofplekjes vlak bij de stad
     const decor = [];
@@ -545,6 +578,13 @@ export class TownView {
   // ---------- soldaten ----------
 
   soldierSpots() {
+    if (this.spotCache && this.spotCache.state === this.state) return this.spotCache.out;
+    const out = this.computeSoldierSpots();
+    this.spotCache = { state: this.state, out };
+    return out;
+  }
+
+  computeSoldierSpots() {
     const s = this.state;
     const units = s.units || {};
     const order = ['knight', 'rider', 'sword', 'spear', 'archer', 'scout', 'ram'];
@@ -615,18 +655,19 @@ export class TownView {
     const walk = Math.max(1, (D - BONUS.gatherMs) / 2);
     const el = Math.max(0, now - hv.start);
     const lerp = (a, b, f) => ({ gx: a.gx + (b.gx - a.gx) * f, gy: a.gy + (b.gy - a.gy) * f });
-    if (el < walk) return { ...lerp(from, at, el / walk), phase: 'out', node };
-    if (el < walk + BONUS.gatherMs) return { ...at, phase: 'work', node };
-    return { ...lerp(at, door, Math.min(1, (el - walk - BONUS.gatherMs) / walk)), phase: 'back', node };
+    const dirOf = (a, b) => ((b.gx - a.gx) - (b.gy - a.gy) >= 0 ? 1 : -1);
+    if (el < walk) return { ...lerp(from, at, el / walk), phase: 'out', node, dir: dirOf(from, at) };
+    if (el < walk + BONUS.gatherMs) return { ...at, phase: 'work', node, dir: 1 };
+    return { ...lerp(at, door, Math.min(1, (el - walk - BONUS.gatherMs) / walk)), phase: 'back', node, dir: dirOf(at, door) };
   }
 
   drawHarvester(ctx, hv, pos, t, emit) {
     const p = toWorld(pos.gx, pos.gy);
     const work = pos.phase === 'work';
-    A.person(ctx, p.x, p.y + (work ? Math.sin(t * 0.015) * 0.7 : 0), {
+    facing(ctx, p.x, pos.dir, () => A.person(ctx, p.x, p.y + (work ? Math.sin(t * 0.015) * 0.7 : 0), {
       s: 0.95, walking: !work, phase: t * 0.012, body: '#8b6a43', hat: '#d8ae52',
       weapon: pos.phase === 'back' ? null : 'tool', carry: pos.phase === 'back' ? CARRY[pos.node.res] : null,
-    });
+    }));
     if (work && emit) {
       const n = toWorld(pos.node.gx, pos.node.gy);
       if (pos.node.kind === 'stone' || pos.node.kind === 'gold') this.particles.sparks(n.x + 6, n.y - 8, 3);
@@ -991,9 +1032,35 @@ export class TownView {
         d[o + 3] = a;
       }
     }
-    this.fogCtx.putImageData(img, 0, 0);
     this.explored = ex;
     this.visibleArr = vis;
+    const prev = this.fogPrev;
+    if (prev && prev.length === d.length) {
+      let same = true;
+      for (let i = 3; i < d.length; i += 4) if (prev[i] !== d[i]) { same = false; break; }
+      if (same) return;
+    }
+    this.fogPrev = d;
+    // tegels die volledig in het donker liggen (ook hun buren): daar hoeven we geen bomen of decor te tekenen
+    const dark = new Uint8Array(T_W * T_W);
+    const seen = (i, j) => i < T_MIN || j < T_MIN || i >= T_MAX || j >= T_MAX ? false : vis[tileIndex(i, j)] === 1 || exHas(ex, i, j);
+    for (let j = T_MIN; j < T_MAX; j++) {
+      for (let i = T_MIN; i < T_MAX; i++) {
+        let lit = false;
+        for (let dj = -1; dj <= 1 && !lit; dj++) for (let di = -1; di <= 1; di++) if (seen(i + di, j + dj)) { lit = true; break; }
+        if (!lit) dark[tileIndex(i, j)] = 1;
+      }
+    }
+    this.dark = dark;
+    this.fogCtx.putImageData(img, 0, 0);
+    const g = this.fogIsoCtx;
+    const o = this.fogOrigin;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, this.fogIso.width, this.fogIso.height);
+    g.setTransform(FOG_SCALE, 0, 0, FOG_SCALE, -o.x * FOG_SCALE, -o.y * FOG_SCALE);
+    g.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    g.imageSmoothingEnabled = true;
+    g.drawImage(this.fogCv, T_MIN - 1, T_MIN - 1, T_W + 2, T_W + 2);
   }
 
   isExplored(gx, gy) {
@@ -1008,13 +1075,69 @@ export class TownView {
     return this.visibleArr[tileIndex(i, j)] === 1;
   }
 
-  drawFog(ctx) {
-    if (!this.explored) return;
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-    ctx.drawImage(this.fogCv, T_MIN - 1, T_MIN - 1, T_W + 2, T_W + 2);
-    ctx.restore();
+  drawFog(ctx, v) {
+    if (!this.explored || !this.fogInView(v)) return;
+    drawSub(ctx, this.fogIso, FOG_SCALE, this.fogOrigin.x, this.fogOrigin.y, (T_W + 2) * A.TW, (T_W + 2) * A.TH, v);
+  }
+
+  // De grond met alle boomschaduwen erop, als één laag. Wordt enkel opnieuw samengesteld als het bos,
+  // de stand van de zon of de duisternis merkbaar verandert; per beeld is het dan één enkele kopie.
+  groundLayer(light) {
+    const len = 0.75 + Math.min(0.7, Math.abs(light.hour - 13) / 8);
+    const alpha = 0.26 * (1 - light.dark * 0.75);
+    const key = `${this.treeKey}|${Math.round(len * 10)}|${Math.round(alpha * 40)}`;
+    const L = this.groundComp;
+    if (L && L.key === key) return L.cv;
+    const gnd = this.ground;
+    const cv = L ? L.cv : document.createElement('canvas');
+    if (cv.width !== gnd.cv.width || cv.height !== gnd.cv.height) { cv.width = gnd.cv.width; cv.height = gnd.cv.height; }
+    const g = cv.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(gnd.cv, 0, 0);
+    if (alpha >= 0.02) {
+      g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
+      g.beginPath();
+      const Ls = 26 * (Math.round(len * 10) / 10);
+      const rx = Ls * 0.55 + 6;
+      for (const d of this.visTrees) {
+        const p = toWorld(d.gx, d.gy);
+        const ex = p.x + 4 + Ls * 0.5; const ey = p.y + 2 + Ls * 0.2;
+        g.moveTo(ex + rx * Math.cos(0.38), ey + rx * Math.sin(0.38));
+        g.ellipse(ex, ey, rx, 5, 0.38, 0, Math.PI * 2);
+      }
+      g.fillStyle = `rgba(20,32,8,${Math.round(alpha * 40) / 40})`;
+      g.fill('nonzero');
+    }
+    this.groundComp = { cv, key };
+    return cv;
+  }
+
+  // ligt er in beeld ergens mist? (anders hoeft die laag niet getekend te worden)
+  fogInView(v) {
+    const d = this.fogPrev;
+    if (!d) return false;
+    const cs = [toGrid(v.x0, v.y0), toGrid(v.x1, v.y0), toGrid(v.x0, v.y1), toGrid(v.x1, v.y1)];
+    const S = T_W + 2;
+    const xa = Math.max(0, Math.floor(Math.min(...cs.map((c) => c.gx))) - T_MIN);
+    const xb = Math.min(S - 1, Math.ceil(Math.max(...cs.map((c) => c.gx))) - T_MIN + 2);
+    const ya = Math.max(0, Math.floor(Math.min(...cs.map((c) => c.gy))) - T_MIN);
+    const yb = Math.min(S - 1, Math.ceil(Math.max(...cs.map((c) => c.gy))) - T_MIN + 2);
+    for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) if (d[(y * S + x) * 4 + 3] > 0) return true;
+    return false;
+  }
+
+  // Als het tekenen te traag gaat, tekenen we op een iets lagere resolutie zodat alles vlot blijft bewegen.
+  adaptQuality(dt) {
+    if (!(dt > 0) || dt > 250) return;
+    this.frameAvg = this.frameAvg ? this.frameAvg * 0.94 + dt * 0.06 : dt;
+    this.frameN++;
+    if (this.frameN < 120) return;
+    const cam = this.cam;
+    if (this.frameAvg > 25 && cam.quality > 0.55) {
+      cam.quality = Math.max(0.55, cam.quality - 0.15);
+      this.frameN = 0;
+    }
   }
 
   viewRect(m = 140) {
@@ -1073,27 +1196,37 @@ export class TownView {
     this.particles.update(dt);
     this.birds.update(dt);
     this.clouds.update(dt);
+    this.adaptQuality(dt);
     if (now - this.fogAt > 120 || now < this.fogAt) this.updateFog(now);
     cam.apply(ctx);
     const gnd = this.ground;
-    ctx.drawImage(gnd.cv, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H);
+    const vis = this.viewRect(2);
+    drawSub(ctx, this.groundLayer(this.light), BAKE, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H, vis);
     this.drawPond(ctx, t);
     this.drawLakes(ctx, t);
 
     const s = this.state;
     const v = this.viewRect();
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
+    this.treeMip = cam.zoom * cam.dpr < 0.95;
     if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
     const wall = s.buildings.find((b) => b.type === 'wall');
     const wallLevel = wall ? wall.level : 0;
     const segs = this.wallSegments(wallLevel);
-    this.drawShadows(ctx, segs, wallLevel, light, inView);
+    this.drawShadows(ctx, segs, wallLevel, light, vis);
 
     const items = [];
     const nodes = s.nodes || [];
-    for (const d of this.decor) { const p = toWorld(d.gx, d.gy); if (inView(p)) items.push({ depth: d.gx + d.gy, kind: 'decor', d }); }
+    const dark = this.dark;
+    const inDark = (gx, gy) => {
+      if (!dark) return false;
+      const i = Math.floor(gx); const j = Math.floor(gy);
+      return i >= T_MIN && j >= T_MIN && i < T_MAX && j < T_MAX && dark[tileIndex(i, j)] === 1;
+    };
+    for (const d of this.decor) { const p = toWorld(d.gx, d.gy); if (inView(p) && !inDark(d.gx, d.gy)) items.push({ depth: d.gx + d.gy, kind: 'decor', d }); }
     const chopping = new Set((s.field || []).filter((g) => g.work && g.work.type === 'chop').map((g) => `${g.work.i},${g.work.j}`));
     for (const tr of this.visTrees) {
+      if (dark && dark[tileIndex(tr.i, tr.j)] === 1) continue;
       const p = toWorld(tr.gx, tr.gy);
       if (!inView(p)) continue;
       if (nodes.some((n) => Math.hypot(n.gx - tr.gx, n.gy - tr.gy) < 1)) continue;
@@ -1168,7 +1301,7 @@ export class TownView {
     if (this.flutter && night < 0.5) this.flutter.draw(ctx, t, night);
     this.clouds.drawShadows(ctx, 0.12 * (1 - night));
     this.birds.draw(ctx, t, 90);
-    this.drawFog(ctx);
+    this.drawFog(ctx, vis);
 
     // licht en donker
     FX.applyLight(ctx, this.canvas.width, this.canvas.height, light);
@@ -1186,7 +1319,6 @@ export class TownView {
     if (wall && jobs.has(wall.id)) this.drawWallProgress(ctx, jobs.get(wall.id), now);
     this.drawWorkProgress(ctx, now);
     this.drawHover(ctx);
-    FX.vignette(ctx, this.canvas.width, this.canvas.height, 0.28);
   }
 
   // ---------- wildernis tekenen ----------
@@ -1208,7 +1340,7 @@ export class TownView {
     const spr = this.trees[tr.v];
     let sway = Math.sin(t * 0.0012 + tr.gx) * 0.6;
     if (shake) sway += Math.sin(t * 0.05) * 1.6;
-    ctx.drawImage(spr.cv, p.x - spr.ax + sway, p.y - spr.ay, spr.w, spr.h);
+    ctx.drawImage(this.treeMip ? spr.small : spr.cv, p.x - spr.ax + sway, p.y - spr.ay, spr.w, spr.h);
   }
 
   drawStump(ctx, st) {
@@ -1334,7 +1466,7 @@ export class TownView {
     const offs = [[0, 0], [0.35, -0.1], [-0.1, 0.35], [0.4, 0.3], [-0.35, 0.05], [0.1, -0.4], [0.5, -0.4], [-0.4, 0.4]];
     for (let i = n - 1; i >= 0; i--) {
       const q = toWorld(offs[i][0], offs[i][1]);
-      A.person(ctx, p.x + q.x, p.y + q.y, { s: 1, walking: true, phase: t * 0.014 + i, body: '#5b4636', hat: '#3a2a1a', weapon: i % 2 ? 'sword' : 'spear', team: '#2a2a2a', skin: 1 });
+      facing(ctx, p.x + q.x, raid.dir, () => A.person(ctx, p.x + q.x, p.y + q.y, { s: 1, walking: true, phase: t * 0.014 + i, body: '#5b4636', hat: '#3a2a1a', weapon: i % 2 ? 'sword' : 'spear', team: '#2a2a2a', skin: 1 }));
     }
     A.flag(ctx, p.x + 4, p.y - 2, 28, '#7a1b12', t, 0.9);
   }
@@ -1361,10 +1493,14 @@ export class TownView {
     const figs = kinds.slice(0, 7);
     const offs = [[0, 0], [0.34, -0.06], [-0.06, 0.34], [0.36, 0.3], [-0.32, 0.04], [0.04, -0.34], [0.38, -0.4]];
     const working = !!g.work;
+    if (!this.groupDir) this.groupDir = new Map();
+    if (moving) this.groupDir.set(g.id, (g.x1 - g.x0) - (g.y1 - g.y0) >= 0 ? 1 : -1);
+    const dir = this.groupDir.get(g.id) || 1;
     const order = figs.map((k, i) => ({ k, o: offs[i] })).sort((a, b) => a.o[0] + a.o[1] - (b.o[0] + b.o[1]));
     for (const { k, o } of order) {
       const q = toWorld(o[0], o[1]);
-      this.drawFigure(ctx, k, p.x + q.x, p.y + q.y, t, moving, working);
+      const fx = p.x + q.x;
+      facing(ctx, fx, dir, () => this.drawFigure(ctx, k, fx, p.y + q.y, t, moving, working));
     }
     const total = Object.values(g.units).reduce((a, b) => a + b, 0);
     if (total > figs.length) {
@@ -1508,7 +1644,7 @@ export class TownView {
     ctx.restore();
   }
 
-  drawShadows(ctx, segs, wallLevel, light, inView = () => true) {
+  drawShadows(ctx, segs, wallLevel, light, vis) {
     const s = this.state;
     const h = light.hour;
     const len = 0.75 + Math.min(0.7, Math.abs(h - 13) / 8);
@@ -1546,14 +1682,6 @@ export class TownView {
       ctx.moveTo(hl[0][0], hl[0][1]);
       for (let i = 1; i < hl.length; i++) ctx.lineTo(hl[i][0], hl[i][1]);
       ctx.closePath();
-    }
-    for (const d of this.visTrees) {
-      const p = toWorld(d.gx, d.gy);
-      if (!inView(p)) continue;
-      const L = 26 * len;
-      const ex = p.x + 4 + L * 0.5; const ey = p.y + 2 + L * 0.2; const rx = L * 0.55 + 6;
-      ctx.moveTo(ex + rx * Math.cos(0.38), ey + rx * Math.sin(0.38));
-      ctx.ellipse(ex, ey, rx, 5, 0.38, 0, Math.PI * 2);
     }
     ctx.fillStyle = `rgba(20,32,8,${alpha})`;
     ctx.fill('nonzero');
@@ -1656,10 +1784,10 @@ export class TownView {
     const tool = w.phase === 'work';
     let y = p.y;
     if (tool) y += Math.sin(t * 0.012 + w.gx) * 0.6;
-    A.person(ctx, p.x, y, {
+    facing(ctx, p.x, w.dir || 1, () => A.person(ctx, p.x, y, {
       s: 0.9, walking, phase: w.t * 0.012, body: w.job === 'idle' ? '#a08560' : '#8b6a43', hat: w.job === 'idle' ? null : '#d8ae52',
       weapon: tool || w.phase === 'out' ? 'tool' : null, carry: w.phase === 'back' ? CARRY[w.job] : null, skin: w.skin,
-    });
+    }));
   }
 
   drawBuilding(ctx, b, job, t, now, emit) {

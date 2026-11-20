@@ -15,12 +15,14 @@ export class Camera {
     this.dragging = false;
     this.enabled = true;
     this.dpr = 1;
+    this.quality = 1; // < 1: tekenen op lagere resolutie als het toestel het niet bijhoudt
     this._bind();
   }
 
   resize() {
     const c = this.canvas;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const base = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = Math.max(Math.min(base, 0.75), base * this.quality);
     const w = c.clientWidth; const h = c.clientHeight;
     if (c.width !== Math.round(w * this.dpr) || c.height !== Math.round(h * this.dpr)) {
       c.width = Math.round(w * this.dpr);
