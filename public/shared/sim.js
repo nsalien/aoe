@@ -3,8 +3,13 @@
 // dezelfde code om grondstoffen en timers vloeiend te laten doortellen.
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
-  TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
+  TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS,
+  levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
+import {
+  territory, ringOf, ringForAge, tileIndex, inTerr, T_MIN, T_MAX, TILE, exDecode, exEncode, revealCircle, revealSegment,
+} from './territory.js';
+import { resolveBattle, computeLoot, carryCapacity } from './battle.js';
 
 export class GameError extends Error {
   constructor(msg, status = 400) { super(msg); this.status = status; }
@@ -28,11 +33,22 @@ export function newTownState(t) {
 }
 
 export const age = (s) => s.buildings.find((b) => b.type === 'tc').level;
+// de muur heeft geen plaats op de kaart; alle andere gebouwen wel (ook op negatieve coördinaten)
+export const isPlaced = (b) => b.type !== 'wall';
 export const findType = (s, type) => s.buildings.filter((b) => b.type === type);
 export const bLevel = (s, type) => findType(s, type).reduce((m, b) => Math.max(m, b.level), 0);
 // dorpelingen die even een vondst gaan oogsten, tellen nog altijd mee
 export const harvesting = (s) => (s.harvests ? s.harvests.length : 0);
-export const totalVillagers = (s) => RES.reduce((a, r) => a + s.villagers[r], s.villagers.idle) + harvesting(s);
+// dorpelingen die in je gebied rondlopen (verkennen, kappen, verzamelen)
+export const fieldVillagers = (s) => (s.field || []).reduce((a, g) => a + (g.units.villager || 0), 0);
+export const fieldSoldierPop = (s) => (s.field || []).reduce((a, g) => {
+  let p = 0;
+  for (const k of Object.keys(g.units)) if (k !== 'villager' && UNITS[k]) p += UNITS[k].pop * g.units[k];
+  return a + p;
+}, 0);
+export const totalVillagers = (s) => RES.reduce((a, r) => a + s.villagers[r], s.villagers.idle) + harvesting(s) + fieldVillagers(s);
+// dorpelingen die nu thuis zijn en verdeeld kunnen worden
+export const homeVillagers = (s) => totalVillagers(s) - harvesting(s) - fieldVillagers(s);
 
 export function slots(s) {
   const out = { ...TC_SLOTS };
@@ -81,7 +97,7 @@ export function unitsPop(units) {
 }
 
 // bevolking die in de stad zelf zit (zonder troepen die onderweg of elders gestationeerd zijn)
-export const homePop = (s) => totalVillagers(s) + unitsPop(s.units) + queuedPop(s);
+export const homePop = (s) => totalVillagers(s) + unitsPop(s.units) + queuedPop(s) + fieldSoldierPop(s);
 
 export function maxBuilds(s) {
   return age(s) >= 3 ? 3 : 2;
@@ -91,10 +107,11 @@ function accrue(s, t, speed) {
   const dt = (t - s.t) / 3600000;
   if (dt <= 0) return;
   const r = rates(s, speed);
+  const extra = gatherAccrue(s, dt, speed);
   const cap = capacity(s);
   for (const k of RES) {
     const v = s.res[k];
-    if (v < cap) s.res[k] = Math.min(cap, v + r[k] * dt);
+    if (v < cap) s.res[k] = Math.min(cap, v + r[k] * dt + (extra[k] || 0));
   }
   s.t = t;
 }
@@ -156,14 +173,15 @@ export function ensureBonus(s, speed = 1) {
 export const tcDoor = () => ({ gx: TC_POS.x + 1, gy: TC_POS.y + 2.35 });
 
 function bonusSpot(s) {
-  const N = TOWN_GRID; const mid = N / 2;
+  const k = ringForAge(age(s));
+  const lo = -k; const hi = TOWN_GRID + k; const mid = TOWN_GRID / 2;
   for (let tr = 0; tr < 30; tr++) {
     const side = Math.floor(bonusRand(s, 10 + tr * 3) * 4);
-    const along = -1.2 + bonusRand(s, 11 + tr * 3) * (N + 2.4);
+    const along = lo - 1.2 + bonusRand(s, 11 + tr * 3) * (hi - lo + 2.4);
     const off = 0.7 + bonusRand(s, 12 + tr * 3) * 1.1;
     if (Math.abs(along - mid) < 1.3) continue; // niet op de wegen
     let gx; let gy;
-    if (side === 0) { gx = along; gy = -off; } else if (side === 1) { gx = N + off; gy = along; } else if (side === 2) { gx = along; gy = N + off; } else { gx = -off; gy = along; }
+    if (side === 0) { gx = along; gy = lo - off; } else if (side === 1) { gx = hi + off; gy = along; } else if (side === 2) { gx = along; gy = hi + off; } else { gx = lo - off; gy = along; }
     if (s.nodes.some((n) => Math.hypot(n.gx - gx, n.gy - gy) < 1.4)) continue;
     return { gx: Math.round(gx * 100) / 100, gy: Math.round(gy * 100) / 100 };
   }
@@ -239,30 +257,470 @@ export function doHarvest(s, nodeId, job, now) {
 export function advance(s, t, speed = 1) {
   if (t <= s.t) return s;
   ensureBonus(s, speed);
+  if (s.terr) {
+    if (!s.field) s.field = [];
+    if (s.terr.camp.next == null) s.terr.camp.next = s.t + Math.round((WILD.raid.firstHours * 3600000) / speed);
+    autoReveal(s);
+  }
   for (let guard = 0; guard < 20000; guard++) {
     let next = Infinity;
     let job = null;
     let qkey = null;
     let hv = null;
     let spawn = false;
-    for (const b of s.builds) if (b.end < next) { next = b.end; job = b; }
+    let wild = null;
+    if (s.terr) {
+      wild = nextWildEvent(s, speed);
+      if (wild) next = wild.t;
+    }
+    for (const b of s.builds) if (b.end < next) { next = b.end; job = b; wild = null; }
     for (const key of Object.keys(s.queues)) {
       const head = s.queues[key][0];
       if (!head) continue;
       const tt = head.start + (head.done + 1) * head.dur;
-      if (tt < next) { next = tt; job = null; qkey = key; }
+      if (tt < next) { next = tt; job = null; qkey = key; wild = null; }
     }
-    for (const h of s.harvests) if (h.end < next) { next = h.end; job = null; qkey = null; hv = h; }
-    if (s.nextNode < next) { next = s.nextNode; job = null; qkey = null; hv = null; spawn = true; }
+    for (const h of s.harvests) if (h.end < next) { next = h.end; job = null; qkey = null; hv = h; wild = null; }
+    if (s.nextNode < next) { next = s.nextNode; job = null; qkey = null; hv = null; spawn = true; wild = null; }
     if (next > t) break;
     accrue(s, next, speed);
-    if (spawn) spawnBonus(s, next, speed);
+    if (wild) applyWildEvent(s, wild, speed);
+    else if (spawn) spawnBonus(s, next, speed);
     else if (hv) finishHarvest(s, hv);
     else if (job) finishBuild(s, job);
     else finishUnit(s, qkey);
+    if (s.terr) autoReveal(s);
   }
   accrue(s, t, speed);
   return s;
+}
+
+// ---------- eigen gebied: verkennen, bos kappen, wilde bronnen, everzwijnen en barbaren ----------
+
+// De server roept dit op met het stadsnummer als zaad (de browser krijgt de state al zo).
+export function ensureTerritory(s, seed) {
+  if (!s.field) s.field = [];
+  if (s.terr) return;
+  s.terr = { seed, ex: '', rv: -1, cl: [], dep: {}, boar: {}, camp: { down: 0, raids: 0, loss: 0, next: null }, log: [], lid: 0 };
+}
+
+export function clearedSet(s) {
+  return new Set(s.terr ? s.terr.cl : []);
+}
+
+export function buildRing(s) {
+  return ringForAge(age(s));
+}
+
+// mag je op tegel (i, j) bouwen? (binnen het bouwvierkant van je tijdperk, of op gekapt bos)
+export function isBuildable(s, i, j, cl = null) {
+  if (ringOf(i, j) <= ringForAge(age(s))) return true;
+  if (!s.terr || !inTerr(i, j)) return false;
+  return (cl || clearedSet(s)).has(tileIndex(i, j));
+}
+
+// staat er (nog) een boom op tegel (i, j)?
+export function hasTree(s, i, j, cl = null) {
+  if (!s.terr || !inTerr(i, j)) return false;
+  const terr = territory(s.terr.seed);
+  if (terr.tiles[tileIndex(i, j)] !== TILE.FOREST) return false;
+  return !isBuildable(s, i, j, cl);
+}
+
+// kan je deze boom omhakken om bouwgrond te winnen? (grenst aan bouwgrond, niet te ver)
+export function canChop(s, i, j) {
+  const cl = clearedSet(s);
+  if (!hasTree(s, i, j, cl)) return false;
+  if (ringOf(i, j) > ringForAge(age(s)) + FIELD.clearReach) return false;
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => isBuildable(s, i + dx, j + dy, cl));
+}
+
+export function groupPos(g, t) {
+  if (!g.pending || t >= g.t1) return { x: g.x1, y: g.y1 };
+  if (t <= g.t0) return { x: g.x0, y: g.y0 };
+  const f = (t - g.t0) / (g.t1 - g.t0);
+  return { x: g.x0 + (g.x1 - g.x0) * f, y: g.y0 + (g.y1 - g.y0) * f };
+}
+export const groupSpeed = (g) => Math.min(...Object.keys(g.units).map((k) => FIELD.speed[k] || 1));
+export const groupVision = (g) => Math.max(...Object.keys(g.units).map((k) => FIELD.vision[k] || 3));
+export const isVillagerGroup = (g) => Object.keys(g.units).every((k) => k === 'villager');
+
+function withEx(s, fn) {
+  const b = exDecode(s.terr.ex);
+  fn(b);
+  s.terr.ex = exEncode(b);
+}
+
+// wat is er nu ontdekt (inclusief wat lopende eenheden onderweg al zagen)
+export function exploredNow(s, now) {
+  const b = exDecode(s.terr ? s.terr.ex : '');
+  for (const g of s.field || []) {
+    const p = groupPos(g, now);
+    if (g.pending) revealSegment(b, g.x0, g.y0, p.x, p.y, groupVision(g));
+    else revealCircle(b, p.x, p.y, groupVision(g));
+  }
+  return b;
+}
+
+// het bouwvierkant en de bosrand errond zijn altijd zichtbaar
+function autoReveal(s) {
+  const want = ringForAge(age(s)) + 4;
+  if (s.terr.rv >= want) return;
+  withEx(s, (b) => {
+    for (let j = T_MIN; j < T_MAX; j++) {
+      for (let i = T_MIN; i < T_MAX; i++) {
+        if (ringOf(i, j) > want) continue;
+        const k = tileIndex(i, j);
+        b[k >> 3] |= 1 << (k & 7);
+      }
+    }
+  });
+  s.terr.rv = want;
+}
+
+function wildRand(s, k) {
+  let h = (s.terr.seed * 374761393 + k * 668265263 + 1013904223) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+function pushLog(s, t, kind, text) {
+  s.terr.lid++;
+  s.terr.log.push({ id: s.terr.lid, t, kind, text });
+  if (s.terr.log.length > 12) s.terr.log.shift();
+}
+
+function addRes(s, res) {
+  const cap = capacity(s);
+  for (const r of RES) {
+    const a = res[r] || 0;
+    if (a > 0) s.res[r] = Math.max(s.res[r], Math.min(cap, s.res[r] + a));
+  }
+}
+
+const ageMult = (s) => 1 + 0.5 * (age(s) - 1);
+const scaleRes = (res, m) => Object.fromEntries(Object.entries(res).map(([k, v]) => [k, Math.round(v * m)]));
+const resText = (res) => Object.entries(res).filter(([, v]) => v > 0).map(([k, v]) => `${v} ${({ food: 'voedsel', wood: 'hout', stone: 'steen', gold: 'goud' })[k]}`).join(', ');
+
+export function depositById(s, id) {
+  return territory(s.terr.seed).deposits.find((d) => d.id === id) || null;
+}
+export function depLeft(s, d) {
+  const v = s.terr.dep[d.id];
+  return v === undefined ? WILD.deposits[d.kind].amount : v;
+}
+function gatherPerHour(s, speed) {
+  return (r) => GATHER_RATE[r] * (1 + 0.1 * (age(s) - 1)) * speed * FIELD.gatherEff;
+}
+function gatherers(s) {
+  const out = new Map();
+  for (const g of s.field || []) {
+    if (!g.work || g.work.type !== 'gather') continue;
+    out.set(g.work.id, (out.get(g.work.id) || 0) + (g.units.villager || 0));
+  }
+  return out;
+}
+function gatherAccrue(s, dt, speed) {
+  const extra = {};
+  if (!s.terr || !s.field || !s.field.length) return extra;
+  const per = gatherPerHour(s, speed);
+  for (const [id, n] of gatherers(s)) {
+    const d = depositById(s, id);
+    if (!d) continue;
+    const res = WILD.deposits[d.kind].res;
+    const amt = Math.min(depLeft(s, d), per(res) * n * dt);
+    s.terr.dep[d.id] = depLeft(s, d) - amt;
+    extra[res] = (extra[res] || 0) + amt;
+  }
+  return extra;
+}
+
+export const campSize = (s) => Math.round(5 + 3 * age(s) + Math.min(10, s.terr.camp.raids)) - (s.terr.camp.loss || 0);
+export const raidSize = (s) => Math.min(40, Math.round(3 + age(s) * 2.5 + s.terr.camp.raids * 1.2));
+export const boarAlive = (s, id, t) => (s.terr.boar[id] || 0) <= t;
+export const campAlive = (s, t) => s.terr.camp.down <= t;
+
+function nextWildEvent(s, speed) {
+  let ev = null;
+  const take = (t, e) => { if (!ev || t < ev.t) ev = { t, ...e }; };
+  for (const g of s.field) {
+    if (g.pending) take(g.t1, { kind: 'arrive', g });
+    if (g.work && g.work.type === 'chop') take(g.work.end, { kind: 'chopped', g });
+  }
+  const gs = gatherers(s);
+  if (gs.size) {
+    const per = gatherPerHour(s, speed);
+    for (const [id, n] of gs) {
+      const d = depositById(s, id);
+      if (!d || !n) continue;
+      const rate = per(WILD.deposits[d.kind].res) * n;
+      take(s.t + Math.ceil((depLeft(s, d) / rate) * 3600000), { kind: 'depleted', id });
+    }
+  }
+  if (s.terr.camp.next != null) take(s.terr.camp.next, { kind: 'raid' });
+  return ev;
+}
+
+function applyWildEvent(s, ev, speed) {
+  if (ev.kind === 'arrive') fieldArrive(s, ev.g, ev.t, speed);
+  else if (ev.kind === 'chopped') chopDone(s, ev.g, ev.t);
+  else if (ev.kind === 'depleted') depleted(s, ev.id, ev.t);
+  else if (ev.kind === 'raid') barbarianRaid(s, ev.t, speed);
+}
+
+function setPath(g, from, to, t) {
+  const sp = groupSpeed(g);
+  g.x0 = from.x; g.y0 = from.y; g.x1 = to.x; g.y1 = to.y;
+  g.t0 = t;
+  g.t1 = t + Math.max(300, Math.round((Math.hypot(to.x - from.x, to.y - from.y) / sp) * 1000));
+  g.pending = true;
+}
+
+function goHome(s, g, t) {
+  const d = tcDoor();
+  g.order = { type: 'home' };
+  g.work = null;
+  setPath(g, { x: g.x1, y: g.y1 }, { x: d.gx, y: d.gy }, t);
+}
+
+function disband(s, g) {
+  for (const k of Object.keys(g.units)) {
+    const n = g.units[k];
+    if (!n) continue;
+    if (k === 'villager') {
+      for (let i = 0; i < n; i++) {
+        if (g.job && g.job !== 'idle' && s.villagers[g.job] < slots(s)[g.job]) s.villagers[g.job]++;
+        else s.villagers.idle++;
+      }
+    } else s.units[k] = (s.units[k] || 0) + n;
+  }
+  s.field = s.field.filter((x) => x !== g);
+}
+
+function keepSurvivors(s, g, left) {
+  g.units = {};
+  for (const k of Object.keys(left)) if (left[k] > 0) g.units[k] = left[k];
+  if (!Object.keys(g.units).length) s.field = s.field.filter((x) => x !== g);
+}
+
+function fieldArrive(s, g, t, speed) {
+  withEx(s, (b) => revealSegment(b, g.x0, g.y0, g.x1, g.y1, groupVision(g)));
+  g.pending = false;
+  g.x0 = g.x1; g.y0 = g.y1; g.t0 = g.t1;
+  const o = g.order || {};
+  g.order = null;
+  if (o.type === 'home') { disband(s, g); return; }
+  if (o.type === 'gather') {
+    const d = depositById(s, o.id);
+    if (d && depLeft(s, d) > 0) g.work = { type: 'gather', id: d.id };
+    else goHome(s, g, t);
+    return;
+  }
+  if (o.type === 'chop') {
+    if (canChop(s, o.i, o.j)) g.work = { type: 'chop', i: o.i, j: o.j, end: t + FIELD.chopMs };
+    else goHome(s, g, t);
+    return;
+  }
+  if (o.type === 'boar') { fightBoar(s, g, o.id, t, speed); return; }
+  if (o.type === 'camp') fightCamp(s, g, t, speed);
+}
+
+function chopDone(s, g, t) {
+  const w = g.work;
+  g.work = null;
+  if (canChop(s, w.i, w.j)) {
+    s.terr.cl.push(tileIndex(w.i, w.j));
+    addRes(s, { wood: FIELD.chopWood });
+  }
+  goHome(s, g, t);
+}
+
+function depleted(s, id, t) {
+  const d = depositById(s, id);
+  s.terr.dep[id] = 0;
+  for (const g of [...s.field]) if (g.work && g.work.type === 'gather' && g.work.id === id) goHome(s, g, t);
+  if (d) pushLog(s, t, 'dep', `${WILD.deposits[d.kind].name} is helemaal ontgonnen.`);
+}
+
+function fightBoar(s, g, id, t, speed) {
+  const boar = territory(s.terr.seed).boars.find((b) => b.id === id);
+  if (!boar || !boarAlive(s, id, t)) return;
+  const r = resolveBattle({ attUnits: g.units, attSmithy: bLevel(s, 'smithy'), groups: [{ key: 'boar', units: { boar: 1 } }] });
+  if (r.attWins) {
+    s.terr.boar[id] = t + Math.round((WILD.boar.respawnHours * 3600000) / speed);
+    addRes(s, WILD.boar.loot);
+    pushLog(s, t, 'boar', `Everzwijn gevangen: +${resText(WILD.boar.loot)}.`);
+  } else {
+    pushLog(s, t, 'boar-lost', 'Een everzwijn heeft je groep verjaagd. Stuur een sterkere groep!');
+  }
+  keepSurvivors(s, g, r.attLeft);
+}
+
+function fightCamp(s, g, t, speed) {
+  if (!campAlive(s, t)) return;
+  const n = Math.max(1, campSize(s));
+  const r = resolveBattle({ attUnits: g.units, attSmithy: bLevel(s, 'smithy'), groups: [{ key: 'camp', units: { barbarian: n } }], baseDef: 15 });
+  if (r.attWins) {
+    const c = s.terr.camp;
+    c.down = t + Math.round((WILD.camp.respawnHours * 3600000) / speed);
+    c.loss = 0;
+    if (c.next < c.down) c.next = c.down + Math.round(((WILD.raid.minHours * 3600000) / speed) / 2);
+    const loot = scaleRes(WILD.camp.loot, ageMult(s));
+    addRes(s, loot);
+    pushLog(s, t, 'camp', `Barbarenkamp verwoest! Buit: ${resText(loot)}. De overvallen stoppen voorlopig.`);
+  } else {
+    s.terr.camp.loss = (s.terr.camp.loss || 0) + (r.groupsLost[0].units.barbarian || 0);
+    pushLog(s, t, 'camp-lost', `Je aanval op het barbarenkamp mislukte (${n} barbaren).`);
+  }
+  keepSurvivors(s, g, r.attLeft);
+}
+
+export function towerDefense(s) {
+  let d = 0;
+  for (const b of findType(s, 'tower')) d += BUILDINGS.tower.defense * b.level;
+  return d;
+}
+
+export function townBaseDef(s) {
+  return COMBAT.ageDef * age(s) + COMBAT.villagerDef * totalVillagers(s);
+}
+
+function barbarianRaid(s, t, speed) {
+  const c = s.terr.camp;
+  const iv = Math.round(((WILD.raid.minHours + (WILD.raid.maxHours - WILD.raid.minHours) * wildRand(s, 100 + c.raids)) * 3600000) / speed);
+  if (!campAlive(s, t)) { c.next = c.down + iv; return; }
+  const n = raidSize(s);
+  c.raids++;
+  c.next = t + iv;
+  const r = resolveBattle({
+    attUnits: { barbarian: n }, groups: [{ key: 'home', units: { ...s.units } }], defSmithy: bLevel(s, 'smithy'),
+    wall: bLevel(s, 'wall'), towerDef: towerDefense(s), baseDef: townBaseDef(s),
+  });
+  s.units = {};
+  for (const [k, v] of Object.entries(r.groupsLeft[0].units)) if (v > 0) s.units[k] = v;
+  if (r.attWins) {
+    const prot = protectAmount(s);
+    const avail = {};
+    for (const k of RES) avail[k] = Math.max(0, s.res[k] - prot);
+    const loot = computeLoot(avail, (r.attLeft.barbarian || 0) * WILD.raid.carry);
+    for (const k of RES) s.res[k] -= loot[k];
+    pushLog(s, t, 'raid-lost', `${n} barbaren overvielen je stad en stalen ${resText(loot) || 'niets'}. Verwoest hun kamp of bouw je verdediging uit!`);
+  } else {
+    pushLog(s, t, 'raid-won', `Je stad sloeg een overval van ${n} barbaren af!`);
+  }
+}
+
+// ---------- acties in het veld ----------
+
+function clampToTerr(x, y) {
+  return { x: Math.min(T_MAX - 0.6, Math.max(T_MIN + 0.6, x)), y: Math.min(T_MAX - 0.6, Math.max(T_MIN + 0.6, y)) };
+}
+
+// Stuur een eenheid (of groep) vanuit de stad het veld in.
+// spec = { villager: 'wood' } (een dorpeling van die taak) of { units: { spear: 3 } }
+export function doFieldSend(s, spec, from, to, target, now) {
+  if (!s.terr) throw new GameError('Je gebied is nog niet klaar.');
+  if (s.field.length >= FIELD.maxGroups) throw new GameError(`Je hebt al ${FIELD.maxGroups} groepen op pad.`);
+  const units = {};
+  let job = null;
+  if (spec && spec.villager !== undefined) {
+    job = spec.villager;
+    if (job === 'idle' ? s.villagers.idle < 1 : !(RES.includes(job) && s.villagers[job] > 0)) {
+      job = s.villagers.idle > 0 ? 'idle' : RES.reduce((b, r) => (s.villagers[r] > (b ? s.villagers[b] : 0) ? r : b), null);
+    }
+    if (!job) throw new GameError('Je hebt geen dorpeling vrij.');
+    s.villagers[job]--;
+    units.villager = 1;
+  } else {
+    for (const k of ARMY_UNITS) {
+      const n = Math.floor(Number(spec && spec.units && spec.units[k]) || 0);
+      if (n <= 0) continue;
+      if ((s.units[k] || 0) < n) throw new GameError(`Je hebt niet genoeg ${UNITS[k].name.toLowerCase()}s thuis.`);
+      units[k] = n;
+    }
+    if (!Object.keys(units).length) throw new GameError('Kies wie er op pad gaat.');
+    for (const k of Object.keys(units)) { s.units[k] -= units[k]; if (!s.units[k]) delete s.units[k]; }
+  }
+  // vertrekken vanuit de stad (een plek binnen de bebouwde kom, anders aan het stadscentrum)
+  const k = ringForAge(age(s));
+  const door = tcDoor();
+  let start = { x: door.gx, y: door.gy };
+  if (from && Number.isFinite(from.x) && Number.isFinite(from.y) && ringOf(Math.floor(from.x), Math.floor(from.y)) <= k + 1) start = { x: from.x, y: from.y };
+  const g = { id: s.nextId++, units, job, x0: start.x, y0: start.y, x1: start.x, y1: start.y, t0: now, t1: now, pending: false, order: null, work: null };
+  s.field.push(g);
+  doFieldOrder(s, g.id, to, target, now);
+  return g;
+}
+
+// Geef een groep in het veld een nieuwe opdracht: lopen, aanvallen, verzamelen, kappen of naar huis.
+export function doFieldOrder(s, id, to, target, now) {
+  const g = (s.field || []).find((x) => x.id === id);
+  if (!g) throw new GameError('Die groep bestaat niet meer.');
+  const pos = groupPos(g, now);
+  // wat de groep onderweg al zag, blijft ontdekt
+  if (g.pending) withEx(s, (b) => revealSegment(b, g.x0, g.y0, pos.x, pos.y, groupVision(g)));
+  g.work = null;
+  g.order = null;
+  g.x1 = pos.x; g.y1 = pos.y; g.pending = false;
+  const terr = territory(s.terr.seed);
+  const seen = exploredNow(s, now);
+  const known = (x, y) => {
+    const i = Math.floor(x); const j = Math.floor(y);
+    if (!inTerr(i, j)) return false;
+    const k = tileIndex(i, j);
+    return ((seen[k >> 3] >> (k & 7)) & 1) === 1;
+  };
+  const tt = target && target.type;
+  let dest;
+  if (tt === 'home') {
+    const d = tcDoor();
+    dest = { x: d.gx, y: d.gy };
+    g.order = { type: 'home' };
+  } else if (tt === 'boar') {
+    const boar = terr.boars.find((b) => b.id === Number(target.id));
+    if (!boar || !known(boar.x, boar.y)) throw new GameError('Dat everzwijn heb je nog niet ontdekt.');
+    checkCanFight(g);
+    if (!boarAlive(s, boar.id, now)) throw new GameError('Dat everzwijn is er niet meer.');
+    dest = { x: boar.x - 0.4, y: boar.y + 0.4 };
+    g.order = { type: 'boar', id: boar.id };
+  } else if (tt === 'camp') {
+    if (!terr.camp || !known(terr.camp.x, terr.camp.y)) throw new GameError('Dat kamp heb je nog niet ontdekt.');
+    checkCanFight(g);
+    if (!campAlive(s, now)) throw new GameError('Het kamp ligt in puin.');
+    dest = { x: terr.camp.x - 0.8, y: terr.camp.y + 0.8 };
+    g.order = { type: 'camp' };
+  } else if (tt === 'dep') {
+    const d = terr.deposits.find((x) => x.id === Number(target.id));
+    if (!d || !known(d.x, d.y)) throw new GameError('Die bron heb je nog niet ontdekt.');
+    if (!isVillagerGroup(g)) throw new GameError('Enkel dorpelingen kunnen verzamelen.');
+    if (depLeft(s, d) <= 0) throw new GameError('Die bron is uitgeput.');
+    dest = { x: d.x + 0.5, y: d.y + 0.5 };
+    g.order = { type: 'gather', id: d.id };
+  } else if (tt === 'tree') {
+    const i = Math.floor(Number(target.i)); const j = Math.floor(Number(target.j));
+    if (!isVillagerGroup(g)) throw new GameError('Enkel dorpelingen kunnen bomen kappen.');
+    if (!canChop(s, i, j)) throw new GameError('Die boom kan je (nog) niet kappen: kap het bos vanaf de rand van je stad.');
+    dest = { x: i + 0.85, y: j + 0.85 };
+    g.order = { type: 'chop', i, j };
+  } else {
+    if (!to || !Number.isFinite(Number(to.x)) || !Number.isFinite(Number(to.y))) throw new GameError('Kies een plek.');
+    dest = clampToTerr(Number(to.x), Number(to.y));
+    g.order = { type: 'move' };
+  }
+  setPath(g, pos, dest, now);
+  return g;
+}
+
+function checkCanFight(g) {
+  if (isVillagerGroup(g)) throw new GameError('Dorpelingen vechten niet. Stuur soldaten.');
+  if (attackPowerOf(g.units) <= 0) throw new GameError('Deze groep kan niet vechten (verkenners vechten niet).');
+}
+
+function attackPowerOf(units) {
+  let a = 0;
+  for (const k of Object.keys(units)) a += (UNITS[k] && UNITS[k].atk ? UNITS[k].atk : 0) * units[k];
+  return a;
 }
 
 export function canAfford(res, cost, mult = 1) {
@@ -285,7 +743,7 @@ export function scaleCost(cost, n) {
 export function occupied(s, ignoreId = null) {
   const grid = new Map();
   for (const b of s.buildings) {
-    if (b.x < 0 || b.id === ignoreId) continue;
+    if (!isPlaced(b) || b.id === ignoreId) continue;
     const size = BUILDINGS[b.type].size;
     for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) grid.set(`${b.x + dx},${b.y + dy}`, b);
   }
@@ -295,7 +753,8 @@ export function occupied(s, ignoreId = null) {
 export function canPlaceAt(s, type, x, y) {
   const size = BUILDINGS[type].size;
   if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
-  if (x < 0 || y < 0 || x + size > TOWN_GRID || y + size > TOWN_GRID) return false;
+  const cl = clearedSet(s);
+  for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
   const grid = occupied(s);
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (grid.has(`${x + dx},${y + dy}`)) return false;
   return true;
@@ -357,7 +816,7 @@ export function doUpgrade(s, bid, now, speed) {
 
 export function checkTrain(s, unit, n, awayPop = 0) {
   const u = UNITS[unit];
-  if (!u) return 'Onbekende eenheid.';
+  if (!u || u.wild || !u.building) return 'Onbekende eenheid.';
   if (!Number.isInteger(n) || n < 1 || n > 500) return 'Ongeldig aantal.';
   if (age(s) < u.age) return 'Vereist een later tijdperk.';
   const lvl = bLevel(s, u.building);
@@ -383,7 +842,7 @@ export function doTrain(s, unit, n, now, speed, awayPop = 0) {
 
 export function doAssign(s, alloc, rally) {
   const sl = slots(s);
-  const total = totalVillagers(s) - harvesting(s);
+  const total = homeVillagers(s);
   let sum = 0;
   const next = {};
   for (const r of RES) {
@@ -444,7 +903,7 @@ export function townScore(s) {
 export function publicSummary(s) {
   return {
     age: age(s),
-    buildings: s.buildings.filter((b) => b.level > 0 && b.x >= 0).length,
+    buildings: s.buildings.filter((b) => b.level > 0 && isPlaced(b)).length,
     wall: bLevel(s, 'wall'),
     monument: bLevel(s, 'monument'),
     score: townScore(s),
