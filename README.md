@@ -29,6 +29,10 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
   roverskampen met kampvuren, en legers die zichtbaar over de kaart marcheren.
 - **Vondsten**: af en toe verschijnt er rond je stad een verdwaald schaap, een eik vol brandhout, rotsblokken of een goudader.
   Klik een dorpeling aan en dan de vondst: hij haalt de buit op en gaat daarna terug aan zijn werk.
+- **Eigen gebied met oorlogsmist**: rond je stad ligt wildernis die enkel van jou is. Tik op een dorpeling of soldaat
+  en dan op de grond: hij loopt er in echte tijd naartoe en de mist verdwijnt. Kap bomen om je bouwgrond uit te breiden
+  (die groeit ook mee met elk tijdperk), ontgin goudaders en rotswanden, jaag op everzwijnen en verwoest het
+  barbarenkamp dat af en toe je stad overvalt.
 - **Economie**: voedsel, hout, steen en goud. Dorpelingen werken op werkplekken (boerderijen, kampen, mijnen).
   Opslag, bevolking (huizen) en 4 tijdperken.
 - **14 gebouwen** met elk meerdere niveaus, **7 soorten troepen** (speerdrager, zwaardvechter, boogschutter,
@@ -152,6 +156,7 @@ public/                 statische website (Cloudflare Pages)
   shared/sim.js         simulatie van een stad (gedeeld met de server)
   shared/battle.js      gevechtsformules
   shared/worldgen.js    terreingenerator (seed → kaart)
+  shared/territory.js   eigen gebied rond een stad: bomen, meren, bronnen, everzwijnen, kamp en mist
   admin.html            spelleiderspagina
 functions/api/[[path]].js   alle /api-routes (Pages Functions)
 functions/lib/          sessies, database, verwerking van legers en gevechten
