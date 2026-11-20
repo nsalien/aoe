@@ -155,12 +155,102 @@ export const UNITS = {
 UNITS.boar = { name: 'Everzwijn', type: 'inf', atk: 22, def: { inf: 10, cav: 8, rng: 8 }, carry: 0, pop: 0, cost: {}, wild: true };
 UNITS.barbarian = { name: 'Barbaar', type: 'inf', atk: 15, def: { inf: 9, cav: 7, rng: 7 }, carry: 25, pop: 0, cost: {}, wild: true };
 
-export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram'];
+// ---------- volkeren ----------
+// Elk volk heeft een eigen bouwstijl en twee eigen eenheden. Die train je in het kasteel: het stadscentrum
+// vanaf het IJzertijdperk (niveau 3). Speciale eigenschappen (zie battle.js):
+//   bonus { inf|cav|rng|unique: x }  extra aanval (en wat extra verdediging) tegen dat soort vijand
+//   tough x    verliest x minder manschappen     defMult x  sterker als verdediger
+//   walls n    telt als n stormrammen tegen muren  fear x  verlaagt de vijandelijke verdediging
+export const CASTLE_LEVEL = 3;
+export const CIVS = {
+  egypt: {
+    name: 'Egyptenaren', short: 'Egypte', color: '#d9a441', units: ['chariot', 'camel'],
+    desc: 'Zandstenen tempels met platte daken, obelisken en palmen langs de Nijl.',
+  },
+  greek: {
+    name: 'Grieken', short: 'Griekenland', color: '#3f7fd9', units: ['hoplite', 'peltast'],
+    desc: 'Witte marmeren zuilen, frontons en rode pannendaken.',
+  },
+  yamato: {
+    name: 'Yamato', short: 'Yamato', color: '#c0392b', units: ['samurai', 'yabusame'],
+    desc: 'Pagodes met gebogen daken, donker hout en rode poorten.',
+  },
+  babylon: {
+    name: 'Babyloniërs', short: 'Babylon', color: '#2b6cb0', units: ['lionguard', 'stonethrower'],
+    desc: 'Blauw geglazuurde baksteen, gouden leeuwen en een trapvormige ziggurat.',
+  },
+  persia: {
+    name: 'Perzen', short: 'Perzië', color: '#1fa3a3', units: ['elephant', 'immortal'],
+    desc: 'Paleizen met turquoise koepels en sierlijke bogen.',
+  },
+};
+export const CIV_IDS = Object.keys(CIVS);
+
+const castle = (civ, o) => ({ building: 'tc', queue: 'castle', bl: CASTLE_LEVEL, age: CASTLE_LEVEL, civ, unique: true, ...o });
+Object.assign(UNITS, {
+  chariot: castle('egypt', {
+    name: 'Strijdwagen', type: 'cav', cost: { wood: 90, gold: 75 }, time: 360, pop: 2,
+    atk: 60, def: { inf: 32, cav: 30, rng: 40 }, speed: 18, carry: 90, bonus: { rng: 0.6 },
+    desc: 'Razendsnel. Rijdt boogschutters omver: +60% aanval tegen schutters.',
+  }),
+  camel: castle('egypt', {
+    name: 'Kamelenruiter', type: 'cav', cost: { food: 80, gold: 60 }, time: 300, pop: 2,
+    atk: 42, def: { inf: 22, cav: 52, rng: 24 }, speed: 15, carry: 70, bonus: { cav: 0.8 },
+    desc: 'Paarden schrikken van kamelen: +80% aanval tegen ruiterij.',
+  }),
+  hoplite: castle('greek', {
+    name: 'Hopliet', type: 'inf', cost: { food: 70, gold: 45 }, time: 260, pop: 1,
+    atk: 30, def: { inf: 48, cav: 58, rng: 30 }, speed: 8, carry: 40, tough: 0.4,
+    desc: 'Falanx: schild aan schild, verliest 40% minder manschappen.',
+  }),
+  peltast: castle('greek', {
+    name: 'Peltast', type: 'rng', cost: { food: 40, wood: 45 }, time: 200, pop: 1,
+    atk: 30, def: { inf: 24, cav: 20, rng: 34 }, speed: 11, carry: 30, bonus: { inf: 0.5 },
+    desc: 'Lichte speerwerper: +50% aanval tegen voetvolk.',
+  }),
+  samurai: castle('yamato', {
+    name: 'Samoerai', type: 'inf', cost: { food: 80, gold: 60 }, time: 280, pop: 1,
+    atk: 50, def: { inf: 34, cav: 26, rng: 26 }, speed: 9, carry: 50, bonus: { unique: 1.0 },
+    desc: 'Meester van het zwaard: dubbele aanval tegen de elite van andere volkeren.',
+  }),
+  yabusame: castle('yamato', {
+    name: 'Yabusame', type: 'rng', cost: { wood: 60, gold: 70 }, time: 300, pop: 2,
+    atk: 36, def: { inf: 22, cav: 22, rng: 30 }, speed: 17, carry: 140,
+    desc: 'Boogschutter te paard en snelle plunderaar: draagt bijzonder veel buit.',
+  }),
+  lionguard: castle('babylon', {
+    name: 'Leeuwenwacht', type: 'inf', cost: { food: 75, gold: 55 }, time: 280, pop: 1,
+    atk: 40, def: { inf: 42, cav: 42, rng: 42 }, speed: 8, carry: 45, defMult: 1.5,
+    desc: 'Paleiswacht van Babylon: 50% sterker wanneer ze je stad verdedigen.',
+  }),
+  stonethrower: castle('babylon', {
+    name: 'Stenenwerper', type: 'rng', cost: { wood: 200, gold: 120 }, time: 600, pop: 3, siege: true,
+    atk: 55, def: { inf: 12, cav: 8, rng: 40 }, speed: 5, carry: 0, walls: 2,
+    desc: 'Slingert keien over de muur: telt als twee stormrammen tegen muren.',
+  }),
+  elephant: castle('persia', {
+    name: 'Oorlogsolifant', type: 'cav', cost: { food: 200, gold: 120 }, time: 600, pop: 3,
+    atk: 95, def: { inf: 60, cav: 58, rng: 40 }, speed: 7, carry: 120, fear: 0.3,
+    desc: 'Een reus die angst zaait: verlaagt de vijandelijke verdediging (tot -30%).',
+  }),
+  immortal: castle('persia', {
+    name: 'Onsterfelijke', type: 'inf', cost: { food: 70, gold: 60 }, time: 280, pop: 1,
+    atk: 38, def: { inf: 36, cav: 34, rng: 44 }, speed: 9, carry: 45, tough: 0.3,
+    desc: 'Elitegarde die nooit lijkt te slinken: verliest 30% minder manschappen.',
+  }),
+});
+UNITS.ram.walls = 1;
+
+export const UNIQUE_UNITS = CIV_IDS.flatMap((c) => CIVS[c].units);
+export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram', ...UNIQUE_UNITS];
 
 // Eenheden die je zelf door je gebied stuurt (echte tijd: dit is je eigen terrein, er zijn geen andere spelers).
 export const FIELD = {
-  speed: { villager: 1.1, spear: 1.1, sword: 1.0, archer: 1.1, scout: 2.4, rider: 2.0, knight: 1.6, ram: 0.6 }, // tegels per seconde
-  vision: { villager: 2.6, scout: 5, rider: 3.6, knight: 3.4 }, // tegels; anders 3
+  speed: {
+    villager: 1.1, spear: 1.1, sword: 1.0, archer: 1.1, scout: 2.4, rider: 2.0, knight: 1.6, ram: 0.6,
+    chariot: 2.2, camel: 1.8, hoplite: 1.0, peltast: 1.3, samurai: 1.1, yabusame: 2.1, lionguard: 1.0, stonethrower: 0.6, elephant: 0.9, immortal: 1.1,
+  }, // tegels per seconde
+  vision: { villager: 2.6, scout: 5, rider: 3.6, knight: 3.4, chariot: 3.6, camel: 3.6, yabusame: 4, elephant: 3.8 }, // tegels; anders 3
   maxGroups: 8,
   chopMs: 12000, // bos kappen duurt 12 echte seconden per boom
   chopWood: 25,

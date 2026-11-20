@@ -3,25 +3,47 @@ import { UNITS, COMBAT, RES } from './rules.js';
 
 const TYPES = ['inf', 'cav', 'rng'];
 
-export function attackPower(units, smithy = 0) {
+// samenstelling van een leger: aandeel voetvolk, ruiterij, schutters en eenheden van een volk
+export function composition(units) {
+  const c = { inf: 0, cav: 0, rng: 0, unique: 0 };
+  let n = 0;
+  for (const k of Object.keys(units || {})) {
+    const u = UNITS[k]; const v = units[k] || 0;
+    if (!u || v <= 0) continue;
+    c[u.type] += v; if (u.unique) c.unique += v; n += v;
+  }
+  if (n) for (const t of Object.keys(c)) c[t] /= n;
+  return c;
+}
+
+// bonus van een eenheid tegen een tegenstander met deze samenstelling (0 = geen)
+const bonusVs = (u, comp) => (u.bonus && comp ? Object.keys(u.bonus).reduce((a, t) => a + u.bonus[t] * (comp[t] || 0), 0) : 0);
+
+export function attackPower(units, smithy = 0, foe = null) {
   const byType = { inf: 0, cav: 0, rng: 0 };
+  let fear = 0;
   for (const k of Object.keys(units || {})) {
     const u = UNITS[k];
     if (!u || !u.atk) continue;
-    byType[u.type] += u.atk * (units[k] || 0);
+    const a = u.atk * (units[k] || 0) * (1 + bonusVs(u, foe));
+    byType[u.type] += a;
+    if (u.fear) fear += u.fear * a;
   }
+  const raw = byType.inf + byType.cav + byType.rng;
   const mult = 1 + COMBAT.smithyBonus * smithy;
-  const total = (byType.inf + byType.cav + byType.rng) * mult;
-  return { total, byType };
+  const total = raw * mult;
+  return { total, byType, fear: raw ? fear / raw : 0 };
 }
 
-export function unitDefense(units, shares) {
+// verdediging; foe = samenstelling van de aanvaller (voor bonussen tegen dat soort vijand)
+export function unitDefense(units, shares, foe = null) {
   let d = 0;
   for (const k of Object.keys(units || {})) {
     const u = UNITS[k];
     if (!u || !u.def) continue;
     let per = 0;
     for (const t of TYPES) per += shares[t] * u.def[t];
+    per *= (u.defMult || 1) * (1 + bonusVs(u, foe) * 0.5);
     d += per * (units[k] || 0);
   }
   return d;
@@ -31,10 +53,14 @@ function survivors(units, loss) {
   const out = {};
   for (const k of Object.keys(units || {})) {
     const n = units[k] || 0;
-    if (n > 0) out[k] = Math.max(0, Math.round(n * (1 - loss)));
+    const tough = (UNITS[k] && UNITS[k].tough) || 0;
+    if (n > 0) out[k] = Math.max(0, Math.round(n * (1 - loss * (1 - tough))));
   }
   return out;
 }
+
+// hoeveel 'stormrammen' een leger telt tegen muren
+const wallBreakers = (units) => Object.keys(units || {}).reduce((a, k) => a + ((UNITS[k] && UNITS[k].walls) || 0) * (units[k] || 0), 0);
 
 export function subtractUnits(a, b) {
   const out = {};
@@ -46,16 +72,19 @@ export const countUnits = (u) => Object.values(u || {}).reduce((a, b) => a + (b 
 
 // groups: [{ key, units }] - de eigen troepen van de verdediger en eventuele ondersteuning
 export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, wall = 0, towerDef = 0, baseDef = 0 }) {
-  const att = attackPower(attUnits, attSmithy);
+  const defAll = {};
+  for (const g of groups) for (const k of Object.keys(g.units || {})) defAll[k] = (defAll[k] || 0) + (g.units[k] || 0);
+  const att = attackPower(attUnits, attSmithy, composition(defAll));
   const A = att.total;
   const shares = { inf: 1, cav: 0, rng: 0 };
   if (A > 0) for (const t of TYPES) shares[t] = att.byType[t] / (att.byType.inf + att.byType.cav + att.byType.rng);
-  const rams = attUnits.ram || 0;
+  const rams = wallBreakers(attUnits);
   const wallEff = Math.max(0, wall - rams / COMBAT.ramsPerWallLevel);
+  const attComp = composition(attUnits);
   let du = 0;
-  for (const g of groups) du += unitDefense(g.units, shares);
+  for (const g of groups) du += unitDefense(g.units, shares, attComp);
   const D = (du * (1 + COMBAT.smithyBonus * defSmithy) + baseDef + towerDef + COMBAT.wallFlat * wallEff)
-    * (1 + COMBAT.wallBonus * wallEff);
+    * (1 + COMBAT.wallBonus * wallEff) * (1 - Math.min(0.3, att.fear));
 
   const attWins = A > D;
   let attLoss;
@@ -73,7 +102,7 @@ export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, 
   let wallDamage = 0;
   let monumentDamage = 0;
   if (attWins) {
-    const pts = Math.floor((attLeft.ram || 0) / COMBAT.ramsPerWallLevel);
+    const pts = Math.floor(wallBreakers(attLeft) / COMBAT.ramsPerWallLevel);
     wallDamage = Math.min(pts, COMBAT.maxWallDamage, wall);
     if (pts - wallDamage >= 1 && wall - wallDamage <= 0) monumentDamage = 1;
   }

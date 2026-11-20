@@ -385,3 +385,55 @@ test('alles blijft gelijk tussen browser en server (stapsgewijs rekenen)', () =>
   assert.deepEqual(a.terr, b.terr);
   assert.deepEqual(a.res, b.res);
 });
+
+// ---------- volkeren ----------
+import { CIVS, CIV_IDS, UNITS as U2 } from '../public/shared/rules.js';
+
+test('elk volk heeft twee eigen eenheden die enkel in zijn kasteel getraind worden', () => {
+  assert.equal(CIV_IDS.length, 5);
+  for (const c of CIV_IDS) {
+    assert.equal(CIVS[c].units.length, 2);
+    for (const k of CIVS[c].units) { assert.equal(U2[k].civ, c); assert.equal(U2[k].queue, 'castle'); }
+  }
+  const s = newTownState(0, 'greek');
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  s.buildings.push({ id: 50, type: 'house', x: 1, y: 1, level: 3 }, { id: 51, type: 'house', x: 2, y: 1, level: 3 });
+  assert.match(checkTrain(s, 'hoplite', 1), /kasteel/);
+  s.buildings.find((b) => b.type === 'tc').level = 3;
+  assert.equal(checkTrain(s, 'hoplite', 1), null);
+  assert.match(checkTrain(s, 'samurai', 1), /ander volk/);
+  doTrain(s, 'hoplite', 2, 0, 1);
+  assert.equal(s.queues.castle[0].unit, 'hoplite');
+  assert.ok(!s.queues.tc, 'dorpelingen en kasteel hebben elk hun eigen wachtrij');
+});
+
+test('bestaande steden krijgen een vast volk', () => {
+  const a = newTownState(0); const b = newTownState(0);
+  ensureTerritory(a, 17); ensureTerritory(b, 17);
+  assert.ok(CIV_IDS.includes(a.civ));
+  assert.equal(a.civ, b.civ);
+  const c = newTownState(0, 'persia'); ensureTerritory(c, 17);
+  assert.equal(c.civ, 'persia', 'een gekozen volk blijft');
+});
+
+test('speciale eigenschappen werken in gevechten', () => {
+  const vsCav = { groups: [{ key: 'own', units: { knight: 20 } }] };
+  const camel = resolveBattle({ attUnits: { camel: 20 }, ...vsCav });
+  const rider = resolveBattle({ attUnits: { rider: 20 }, ...vsCav });
+  assert.ok(camel.A > 20 * U2.camel.atk * 1.7, 'kamelen krijgen bonus tegen ruiterij');
+  assert.ok(camel.A / U2.camel.atk > rider.A / U2.rider.atk);
+  // falanx: minder verliezen dan gewone speerdragers bij hetzelfde verliespercentage
+  const foe = { groups: [{ key: 'own', units: { spear: 30 } }] };
+  const hop = resolveBattle({ attUnits: { hoplite: 40 }, ...foe });
+  assert.ok(hop.attWins);
+  assert.ok(hop.attLeft.hoplite > Math.round(40 * (1 - hop.attLoss)), 'hoplieten verliezen minder');
+  // stenenwerpers tellen dubbel tegen muren
+  const st = resolveBattle({ attUnits: { stonethrower: 6, knight: 200 }, groups: [{ key: 'own', units: { spear: 5 } }], wall: 2 });
+  const rm = resolveBattle({ attUnits: { ram: 6, knight: 200 }, groups: [{ key: 'own', units: { spear: 5 } }], wall: 2 });
+  assert.ok(st.wallDamage > rm.wallDamage);
+  // leeuwenwacht verdedigt sterker, olifanten verlagen de verdediging
+  const att = { attUnits: { sword: 50 } };
+  assert.ok(resolveBattle({ ...att, groups: [{ key: 'own', units: { lionguard: 30 } }] }).D > resolveBattle({ ...att, groups: [{ key: 'own', units: { immortal: 30 } }] }).D * 1.2);
+  const def = { groups: [{ key: 'own', units: { spear: 40 } }] };
+  assert.ok(resolveBattle({ attUnits: { elephant: 10 }, ...def }).D < resolveBattle({ attUnits: { knight: 10 }, ...def }).D);
+});
