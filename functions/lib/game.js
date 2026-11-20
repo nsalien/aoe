@@ -1,12 +1,13 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
-  advance, addResources, addUnits, bLevel, findType, totalVillagers, protectAmount, age, GameError,
+  advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
+  towerDefense, townBaseDef,
 } from '../../public/shared/sim.js';
 import {
   resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits,
 } from '../../public/shared/battle.js';
 import {
-  RES, BUILDINGS, UNITS, COMBAT, CAMP, campUnits, campLoot, campBaseDef, unitValue,
+  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue,
 } from '../../public/shared/rules.js';
 
 export class ConflictError extends Error {}
@@ -52,6 +53,7 @@ export async function mutateTown(db, world, id, t, fn) {
   for (let i = 0; i < 4; i++) {
     const town = await loadTown(db, id);
     if (!town) throw new GameError('Stad niet gevonden.', 404);
+    ensureTerritory(town.state, town.id);
     advance(town.state, gameTime(world, t), world.speed);
     const result = await fn(town.state, town);
     try {
@@ -81,16 +83,6 @@ async function addKillPts(db, playerId, value) {
 export function travelMs(world, from, to, speed) {
   const dist = Math.hypot(from.x - to.x, from.y - to.y);
   return Math.max(10000, Math.round((dist / speed) * 3600000 / world.speed));
-}
-
-function towerDefense(s) {
-  let d = 0;
-  for (const b of findType(s, 'tower')) d += BUILDINGS.tower.defense * b.level;
-  return d;
-}
-
-function townBaseDef(s) {
-  return COMBAT.ageDef * age(s) + COMBAT.villagerDef * totalVillagers(s);
 }
 
 function floorRes(res) {
@@ -361,6 +353,7 @@ async function scoutCamp(db, world, m, t) {
 async function scoutTown(db, world, m, t) {
   const def = await loadTown(db, m.target_id);
   if (!def) { await sendBack(db, m, m.units, {}, t); return; }
+  ensureTerritory(def.state, def.id);
   advance(def.state, gameTime(world, t), world.speed);
   const s = def.state;
   const supRows = (await db.prepare('SELECT units FROM support WHERE host_town = ?').bind(m.target_id).all()).results;

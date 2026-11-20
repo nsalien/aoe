@@ -9,7 +9,7 @@ import {
 } from './game.js';
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary,
-  townScore, totalVillagers, unitsPop,
+  townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -160,6 +160,7 @@ route('GET', '/state', { auth: true }, async (ctx) => {
   const { db, world, player, now } = ctx;
   const townRow = await db.prepare('SELECT * FROM towns WHERE player_id = ?').bind(player.id).first();
   const state = JSON.parse(townRow.state);
+  ensureTerritory(state, townRow.id);
   advance(state, gameTime(world, now), world.speed);
   const team = await db.prepare('SELECT * FROM teams WHERE id = ?').bind(player.team_id).first();
   const marches = (await db.prepare(
@@ -208,6 +209,7 @@ route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
     'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.team_id, p.last_seen FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results.map((r) => {
     const s = JSON.parse(r.state);
+    ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     return {
       id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id,
@@ -233,6 +235,7 @@ route('GET', '/team', { auth: true }, async ({ db, world, player, now }) => {
   ).bind(player.team_id).all()).results;
   const members = rows.map((r) => {
     const s = JSON.parse(r.state);
+    ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     const res = {};
     for (const k of RES) res[k] = Math.floor(s.res[k]);
@@ -248,11 +251,12 @@ route('GET', '/team', { auth: true }, async ({ db, world, player, now }) => {
 route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
   const t = gameTime(world, now);
   const rows = (await db.prepare(
-    'SELECT t.state, t.name AS town, p.name, p.team_id, p.kill_pts FROM towns t JOIN players p ON p.id = t.player_id',
+    'SELECT t.id, t.state, t.name AS town, p.name, p.team_id, p.kill_pts FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results;
   const teams = (await db.prepare('SELECT id, name, color FROM teams').all()).results;
   const players = rows.map((r) => {
     const s = JSON.parse(r.state);
+    ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     const build = townScore(s);
     return { name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts };
@@ -301,6 +305,20 @@ route('POST', '/harvest', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   const job = typeof body.job === 'string' ? body.job : null;
   return townAction(ctx, (s) => doHarvest(s, int(body.nodeId), job, ctx.now));
+});
+
+// eenheden in je eigen gebied besturen (verkennen, aanvallen, verzamelen, bos kappen, naar huis)
+route('POST', '/field', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  const to = body.to && { x: Number(body.to.x), y: Number(body.to.y) };
+  const target = body.target && typeof body.target === 'object' ? body.target : null;
+  return townAction(ctx, (s) => {
+    if (body.action === 'send') {
+      const from = body.from && { x: Number(body.from.x), y: Number(body.from.y) };
+      return doFieldSend(s, body.spec || {}, from, to, target, ctx.now);
+    }
+    return doFieldOrder(s, int(body.id), to, target, ctx.now);
+  });
 });
 
 route('POST', '/trade', { auth: true, active: true }, async (ctx) => {

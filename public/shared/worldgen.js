@@ -31,7 +31,7 @@ function valueNoise(x, y, seed) {
   return a + (b - a) * xf + (c - a) * yf + (a - b - c + d) * xf * yf;
 }
 
-function fbm(x, y, seed, oct) {
+export function fbm(x, y, seed, oct) {
   let v = 0; let amp = 0.5; let f = 1; let norm = 0;
   for (let i = 0; i < oct; i++) {
     v += amp * valueNoise(x * f, y * f, seed + i * 101);

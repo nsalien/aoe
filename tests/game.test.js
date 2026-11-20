@@ -222,3 +222,148 @@ test('oude steden zonder vondsten worden netjes bijgewerkt', () => {
   assert.ok(s.nextNode > s.t);
   assert.throws(() => doHarvest(s, 999, null, 0), /niet meer/);
 });
+
+// ---------- eigen gebied ----------
+import {
+  ensureTerritory, doFieldSend, doFieldOrder, canChop, isBuildable as tileBuildable, depLeft, campSize, raidSize,
+} from '../public/shared/sim.js';
+import { territory, exHas, exDecode, T_MIN } from '../public/shared/territory.js';
+import { WILD, FIELD } from '../public/shared/rules.js';
+
+function terrTown(seed = 5) {
+  const s = newTownState(0);
+  s.res = { food: 500, wood: 500, stone: 500, gold: 500 };
+  ensureTerritory(s, seed);
+  advance(s, 1000, 1);
+  return s;
+}
+const arrive = (s, g) => advance(s, g.t1 + 1, 1);
+
+test('het bouwvierkant groeit mee met het tijdperk', () => {
+  const s = terrTown();
+  assert.equal(canPlaceAt(s, 'house', -1, 3), false);
+  s.buildings.find((b) => b.type === 'tc').level = 2;
+  assert.equal(canPlaceAt(s, 'house', -1, 3), true);
+  assert.equal(canPlaceAt(s, 'house', -2, 3), false);
+});
+
+test('het gebied rond de stad is ontdekt, de wildernis nog niet', () => {
+  const s = terrTown();
+  const b = exDecode(s.terr.ex);
+  assert.ok(exHas(b, 0, 0) && exHas(b, -4, 5));
+  assert.equal(exHas(b, T_MIN + 1, T_MIN + 1), false);
+});
+
+test('een dorpeling verkent de mist en komt daarna terug aan het werk', () => {
+  const s = terrTown();
+  const before = s.villagers.wood;
+  const g = doFieldSend(s, { villager: 'wood' }, null, { x: -14, y: 6 }, null, s.t);
+  assert.equal(s.villagers.wood, before - 1);
+  assert.equal(totalVillagers(s), 6, 'de verkenner telt nog mee als dorpeling');
+  arrive(s, g);
+  assert.ok(exHas(exDecode(s.terr.ex), -14, 6), 'het doel is ontdekt');
+  assert.ok(exHas(exDecode(s.terr.ex), -10, 6), 'de weg ernaartoe ook');
+  doFieldOrder(s, g.id, null, { type: 'home' }, s.t);
+  arrive(s, g);
+  assert.equal(s.field.length, 0);
+  assert.equal(s.villagers.wood, before, 'terug aan het werk');
+});
+
+test('bos kappen geeft hout en nieuwe bouwgrond', () => {
+  const s = terrTown();
+  const terr = territory(s.terr.seed);
+  const tree = terr.trees.find((t) => canChop(s, t.i, t.j));
+  assert.ok(tree, 'er is een boom aan de rand');
+  assert.equal(tileBuildable(s, tree.i, tree.j), false);
+  const wood = s.res.wood;
+  const g = doFieldSend(s, { villager: 'food' }, null, null, { type: 'tree', i: tree.i, j: tree.j }, s.t);
+  arrive(s, g);
+  assert.ok(g.work && g.work.type === 'chop');
+  advance(s, g.work.end + 1, 1);
+  assert.ok(tileBuildable(s, tree.i, tree.j), 'de tegel is nu bouwgrond');
+  assert.ok(s.res.wood >= wood + FIELD.chopWood - 1);
+  assert.throws(() => doFieldSend(s, { villager: 'food' }, null, null, { type: 'tree', i: T_MIN + 1, j: T_MIN + 1 }, s.t), /kappen|Kies/);
+});
+
+test('een wilde bron ontginnen nadat je ze ontdekt hebt', () => {
+  const s = terrTown();
+  const d = territory(s.terr.seed).deposits.find((x) => x.kind === 'gold');
+  assert.throws(() => doFieldSend(s, { villager: 'wood' }, null, null, { type: 'dep', id: d.id }, s.t), /ontdekt/);
+  const scout = doFieldSend(s, { villager: 'wood' }, null, { x: d.x, y: d.y }, null, s.t);
+  arrive(s, scout);
+  doFieldOrder(s, scout.id, null, { type: 'dep', id: d.id }, s.t);
+  arrive(s, scout);
+  assert.equal(scout.work.type, 'gather');
+  const gold = s.res.gold;
+  advance(s, s.t + 3600000, 1);
+  assert.ok(s.res.gold > gold, 'goud komt binnen');
+  assert.ok(depLeft(s, d) < WILD.deposits.gold.amount);
+  advance(s, s.t + 200 * 3600000, 1);
+  assert.equal(depLeft(s, d), 0, 'uitgeput');
+  assert.ok(!s.field.some((g) => g.work), 'de dorpeling stopt');
+});
+
+test('everzwijn verslaan levert voedsel op', () => {
+  const s = terrTown();
+  s.units = { spear: 12 };
+  const boar = territory(s.terr.seed).boars[0];
+  const g = doFieldSend(s, { units: { spear: 12 } }, null, { x: boar.x, y: boar.y }, null, s.t);
+  arrive(s, g);
+  const food = s.res.food;
+  doFieldOrder(s, g.id, null, { type: 'boar', id: boar.id }, s.t);
+  arrive(s, g);
+  assert.ok(s.res.food >= food + WILD.boar.loot.food - 1);
+  assert.ok(s.terr.log.some((l) => l.kind === 'boar'));
+  assert.throws(() => doFieldOrder(s, g.id, null, { type: 'boar', id: boar.id }, s.t), /niet meer/);
+});
+
+test('een klein groepje jaagt een everzwijn neer; dorpelingen jagen niet', () => {
+  const s = terrTown();
+  s.units = { spear: 3 };
+  const boar = territory(s.terr.seed).boars[0];
+  const g = doFieldSend(s, { units: { spear: 3 } }, null, { x: boar.x, y: boar.y }, null, s.t);
+  arrive(s, g);
+  doFieldOrder(s, g.id, null, { type: 'boar', id: boar.id }, s.t);
+  arrive(s, g);
+  assert.ok(s.terr.log.some((l) => l.kind === 'boar'), 'gevangen');
+  assert.ok((s.field.find((x) => x.id === g.id) || { units: {} }).units.spear >= 2, 'hooguit één speerdrager verloren');
+  const v = doFieldSend(s, { villager: 'food' }, null, { x: boar.x, y: boar.y }, null, s.t);
+  assert.throws(() => doFieldOrder(s, v.id, null, { type: 'boar', id: boar.id }, s.t), /Dorpelingen vechten niet/);
+});
+
+test('barbarenkamp verwoesten stopt de overvallen even', () => {
+  const s = terrTown();
+  s.units = { sword: 60 };
+  const camp = territory(s.terr.seed).camp;
+  const g = doFieldSend(s, { units: { sword: 60 } }, null, { x: camp.x, y: camp.y }, null, s.t);
+  arrive(s, g);
+  doFieldOrder(s, g.id, null, { type: 'camp' }, s.t);
+  arrive(s, g);
+  assert.ok(s.terr.camp.down > s.t, 'kamp ligt in puin');
+  assert.ok(s.terr.camp.next >= s.terr.camp.down, 'geen overval zolang het kamp plat ligt');
+});
+
+test('barbaren overvallen een onverdedigde stad', () => {
+  const s = terrTown();
+  s.units = {};
+  advance(s, s.terr.camp.next + 1, 1);
+  const log = s.terr.log.find((l) => l.kind === 'raid-lost' || l.kind === 'raid-won');
+  assert.ok(log, 'er was een overval');
+  assert.equal(s.terr.camp.raids, 1);
+  assert.ok(raidSize(s) >= 3 && campSize(s) >= 5);
+});
+
+test('wilde dieren en barbaren kan je niet trainen', () => {
+  const s = terrTown();
+  assert.match(checkTrain(s, 'boar', 1), /Onbekende/);
+  assert.match(checkTrain(s, 'barbarian', 1), /Onbekende/);
+});
+
+test('alles blijft gelijk tussen browser en server (stapsgewijs rekenen)', () => {
+  const a = terrTown(9); const b = terrTown(9);
+  for (const s of [a, b]) doFieldSend(s, { villager: 'wood' }, null, { x: 20, y: -10 }, null, s.t);
+  advance(a, 80 * 3600000, 1);
+  for (let t = 3600000; t <= 80 * 3600000; t += 3600000) advance(b, t, 1);
+  assert.deepEqual(a.terr, b.terr);
+  assert.deepEqual(a.res, b.res);
+});

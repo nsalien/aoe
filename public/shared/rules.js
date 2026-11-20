@@ -110,7 +110,10 @@ export const BASE_PROTECT = 300;
 
 // Eenheden. def = verdediging tegen voetvolk (inf), ruiterij (cav) en schutters (rng).
 export const UNITS = {
-  villager: { name: 'Dorpeling', building: 'tc', bl: 1, age: 1, cost: { food: 50 }, time: 120, pop: 1 },
+  villager: {
+    name: 'Dorpeling', building: 'tc', bl: 1, age: 1, cost: { food: 50 }, time: 120, pop: 1,
+    type: 'inf', atk: 3, def: { inf: 6, cav: 4, rng: 5 }, carry: 10,
+  },
   spear: {
     name: 'Speerdrager', type: 'inf', building: 'barracks', bl: 1, age: 1, cost: { food: 40, wood: 25 }, time: 150,
     atk: 12, def: { inf: 20, cav: 45, rng: 18 }, speed: 9, carry: 40, pop: 1,
@@ -148,7 +151,35 @@ export const UNITS = {
   },
 };
 
+// wilde tegenstanders in je eigen gebied (niet trainbaar)
+UNITS.boar = { name: 'Everzwijn', type: 'inf', atk: 22, def: { inf: 10, cav: 8, rng: 8 }, carry: 0, pop: 0, cost: {}, wild: true };
+UNITS.barbarian = { name: 'Barbaar', type: 'inf', atk: 15, def: { inf: 9, cav: 7, rng: 7 }, carry: 25, pop: 0, cost: {}, wild: true };
+
 export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram'];
+
+// Eenheden die je zelf door je gebied stuurt (echte tijd: dit is je eigen terrein, er zijn geen andere spelers).
+export const FIELD = {
+  speed: { villager: 1.1, spear: 1.1, sword: 1.0, archer: 1.1, scout: 2.4, rider: 2.0, knight: 1.6, ram: 0.6 }, // tegels per seconde
+  vision: { villager: 2.6, scout: 5, rider: 3.6, knight: 3.4 }, // tegels; anders 3
+  maxGroups: 8,
+  chopMs: 12000, // bos kappen duurt 12 echte seconden per boom
+  chopWood: 25,
+  clearReach: 3, // tot zoveel ringen voorbij het bouwvierkant kan je bos kappen
+  gatherEff: 0.8, // wilde bronnen: 80% van een gewone werkplek (de weg is langer)
+};
+
+// De wildernis: everzwijnen, een barbarenkamp en wilde bronnen.
+export const WILD = {
+  boar: { name: 'Everzwijn', loot: { food: 200 }, respawnHours: 10 },
+  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 160, wood: 160, stone: 90, gold: 90 } },
+  raid: { firstHours: 30, minHours: 20, maxHours: 40, warnMs: 90000, carry: 25 },
+  deposits: {
+    gold: { name: 'Goudader', res: 'gold', amount: 500 },
+    stone: { name: 'Rotswand', res: 'stone', amount: 600 },
+    wood: { name: 'Oud eikenbos', res: 'wood', amount: 800 },
+    food: { name: 'Bessenstruiken', res: 'food', amount: 600 },
+  },
+};
 
 // Vondsten: kleine extraatjes die af en toe rond je stad opduiken en die een dorpeling kan oogsten.
 export const BONUS = {
