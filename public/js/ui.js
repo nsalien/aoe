@@ -1,12 +1,12 @@
 // HTML-sjablonen voor panelen, vensters en de bovenbalk.
 import * as A from './art.js';
 import {
-  RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, levelCost, levelTime,
+  RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, levelCost, levelTime,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
-  canAfford, protectAmount, totalVillagers, marketRate, maxBuilds,
+  canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, harvesting, checkHarvest,
 } from '../shared/sim.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
 import { icon } from './icons.js';
@@ -136,7 +136,8 @@ export function townOverviewHtml(app, live) {
   const d = app.data;
   const sl = slots(live);
   const r = rates(live, d.world.speed);
-  const total = totalVillagers(live);
+  const away = harvesting(live);
+  const total = totalVillagers(live) - away;
   const alloc = app.pendingAlloc || live.villagers;
   const assigned = RES.reduce((a, k) => a + alloc[k], 0);
   const idle = total - assigned;
@@ -148,7 +149,8 @@ export function townOverviewHtml(app, live) {
     <div><h2>${esc(d.town.name)}</h2><div class="lvl">${AGES[a].name}</div>
     <div class="small muted">Positie (${d.town.x}, ${d.town.y}) · <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></div></div></div>`;
 
-  html += `<div class="card"><h3>${icon('people')} Dorpelingen <span class="right">${total} totaal · ${idle} vrij</span></h3>`;
+  html += bonusCardHtml(app, live);
+  html += `<div class="card"><h3>${icon('people')} Dorpelingen <span class="right">${total + away} totaal · ${idle} vrij${away ? ` · ${away} op pad` : ''}</span></h3>`;
   for (const k of RES) {
     html += `<div class="vrow"><img src="${ICON[k]}" alt="">
       <div class="nm">${RES_NAMES[k]}<small>${alloc[k]}/${sl[k]} plaatsen · +${fmt(r[k])}/u</small></div>
@@ -194,6 +196,22 @@ export function townOverviewHtml(app, live) {
     <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd></dl>
     <div class="actions"><button class="btn" data-action="selectWall">Stadsmuur bekijken</button></div></div>`;
   return html;
+}
+
+// vondsten rond de stad die je kan laten oogsten
+function bonusCardHtml(app, live) {
+  const nodes = live.nodes || [];
+  if (!nodes.length && !(live.harvests || []).length) return '';
+  let html = `<div class="card bonus-card"><h3>${icon('star')} Vondsten <span class="right">${nodes.length} rond je stad</span></h3>
+    <p class="small muted" style="margin:0 0 6px">Klik op een dorpeling en dan op de vondst, of gebruik de knop. De dorpeling komt daarna terug naar zijn werk.</p>`;
+  for (const n of nodes) {
+    const def = BONUS.kinds[n.kind];
+    const hv = (live.harvests || []).find((h) => h.node === n.id);
+    const err = n.claimed ? null : checkHarvest(live, n.id);
+    html += `<div class="row bonus-row"><img src="${ICON[n.res]}" alt="" class="ico"><span class="grow"><b>${def.name}</b><br><span class="small muted">+${fmt(n.amount)} ${RES_NAMES[n.res].toLowerCase()}</span></span>
+      ${hv ? `<span class="small timer" data-end="${hv.end}"></span>` : `<button class="btn small primary" data-action="harvest" data-id="${n.id}" ${!app.canAct || err ? `disabled title="${esc(err || '')}"` : ''}>Oogsten</button>`}</div>`;
+  }
+  return html + '</div>';
 }
 
 export function unitsText(units) {
@@ -600,6 +618,10 @@ export function helpHtml(w) {
     <li>Elke grondstof heeft <b>werkplekken</b>: bouw boerderijen, houthakkerskampen, steengroeves en goudmijnen.</li>
     <li>Bouw <b>huizen</b> voor meer bevolking en een <b>opslagplaats</b> zodat je niets verspilt.</li>
     <li>Breng je stadscentrum naar een nieuw <b>tijdperk</b> om nieuwe gebouwen en troepen te ontgrendelen.</li></ul>
+    <h3>Vondsten</h3>
+    <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
+    (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,
+    haalt de buit op en gaat daarna terug aan zijn vorige taak. Vondsten blijven liggen tot je ze ophaalt (maximaal 4 tegelijk).</p>
     <h3>2. Vredestijd (eerste weken)</h3>
     <p>Spelers kunnen elkaar nog niet aanvallen. Train wel al troepen en versla de <b>roverskampen</b> op de kaart: dat levert buit en punten op. Kampen dicht bij het midden zijn sterker.</p>
     <h3>3. Oorlogsweek</h3>

@@ -3,8 +3,9 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES } from '../shared/rules.js';
-import { canPlaceAt, totalVillagers } from '../shared/sim.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES } from '../shared/rules.js';
+import { canPlaceAt, totalVillagers, tcDoor } from '../shared/sim.js';
+import { ICON } from './ui.js';
 
 const N = TOWN_GRID;
 const R = 9;
@@ -81,6 +82,16 @@ export class TownView {
     this.onPlace = null;
     this.onCancelPlace = null;
     this.onCelebrate = null;
+    this.onHarvest = null; // (vondst, gekozen dorpeling) => void
+    this.onVillagerSelect = null; // (dorpeling | null) => void
+    this.onHarvested = null; // (vondst) => void
+    this.selVillager = null;
+    this.pendingFrom = null;
+    this.harvestFrom = new Map();
+    this.prevHarvests = null;
+    this.nodeSheep = new Map();
+    this.resImg = {};
+    for (const r of RES) { const img = new Image(); img.src = ICON[r]; this.resImg[r] = img; }
     this.cam.onClick = (sx, sy, e) => this.click(sx, sy, e);
     this.cam.onHover = (sx, sy) => { this.hoverTile = sx < 0 ? null : this.screenGrid(sx, sy); };
     this.cam.onRightClick = () => { if (this.placing && this.onCancelPlace) this.onCancelPlace(); };
@@ -102,8 +113,36 @@ export class TownView {
 
   setState(state) {
     this.state = state;
+    this.trackHarvests();
     this.syncWalkers();
     this.detectUpgrades();
+  }
+
+  // nieuwe en afgewerkte oogsttochten opvolgen
+  trackHarvests() {
+    const s = this.state;
+    const hs = s.harvests || [];
+    const prev = this.prevHarvests;
+    const door = tcDoor();
+    for (const hv of hs) {
+      if (prev && prev.has(hv.id)) continue;
+      const from = this.pendingFrom && this.pendingFrom.node === hv.node ? this.pendingFrom : null;
+      if (from && from.walker) this.walkers = this.walkers.filter((w) => w !== from.walker);
+      this.harvestFrom.set(hv.id, from ? { gx: from.gx, gy: from.gy } : { gx: door.gx, gy: door.gy });
+      if (from) this.pendingFrom = null;
+    }
+    if (prev) {
+      for (const [id, info] of prev) {
+        if (hs.some((h) => h.id === id)) continue;
+        this.harvestFrom.delete(id);
+        if (!info.node || (s.nodes || []).some((n) => n.id === info.node.id)) continue;
+        const p = toWorld(door.gx, door.gy);
+        this.particles.sparkle(p.x, p.y - 10, 16);
+        this.particles.text(p.x, p.y - 34, `+${info.node.amount} ${RES_NAMES[info.node.res].toLowerCase()}`);
+        if (this.onHarvested) this.onHarvested(info.node);
+      }
+    }
+    this.prevHarvests = new Map(hs.map((hv) => [hv.id, { hv, node: (s.nodes || []).find((n) => n.id === hv.node) }]));
   }
 
   // feest als een gebouw klaar is of een nieuw tijdperk begint
@@ -486,6 +525,91 @@ export class TownView {
     }
   }
 
+  // waar is de dorpeling die een vondst gaat halen? (heen, werken, terug met de buit)
+  harvesterPos(hv, now) {
+    const node = (this.state.nodes || []).find((n) => n.id === hv.node);
+    if (!node) return null;
+    const door = tcDoor();
+    const from = this.harvestFrom.get(hv.id) || door;
+    const at = { gx: node.gx + 0.38, gy: node.gy + 0.32 };
+    const D = hv.end - hv.start;
+    const walk = Math.max(1, (D - BONUS.gatherMs) / 2);
+    const el = Math.max(0, now - hv.start);
+    const lerp = (a, b, f) => ({ gx: a.gx + (b.gx - a.gx) * f, gy: a.gy + (b.gy - a.gy) * f });
+    if (el < walk) return { ...lerp(from, at, el / walk), phase: 'out', node };
+    if (el < walk + BONUS.gatherMs) return { ...at, phase: 'work', node };
+    return { ...lerp(at, door, Math.min(1, (el - walk - BONUS.gatherMs) / walk)), phase: 'back', node };
+  }
+
+  drawHarvester(ctx, hv, pos, t, emit) {
+    const p = toWorld(pos.gx, pos.gy);
+    const work = pos.phase === 'work';
+    A.person(ctx, p.x, p.y + (work ? Math.sin(t * 0.015) * 0.7 : 0), {
+      s: 0.95, walking: !work, phase: t * 0.012, body: '#8b6a43', hat: '#d8ae52',
+      weapon: pos.phase === 'back' ? null : 'tool', carry: pos.phase === 'back' ? CARRY[pos.node.res] : null,
+    });
+    if (work && emit) {
+      const n = toWorld(pos.node.gx, pos.node.gy);
+      if (pos.node.kind === 'stone' || pos.node.kind === 'gold') this.particles.sparks(n.x + 6, n.y - 8, 3);
+      else this.particles.dust(n.x, n.y, 1);
+    }
+  }
+
+  drawNode(ctx, n, t, emit) {
+    const p = toWorld(n.gx, n.gy);
+    const pulse = 0.5 + Math.sin(t * 0.004 + n.id) * 0.5;
+    if (!n.claimed) {
+      ctx.strokeStyle = `rgba(255,220,110,${0.35 + pulse * 0.4})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, 17 + pulse * 3, 8.5 + pulse * 1.5, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = `rgba(255,230,140,${0.08 + pulse * 0.08})`; ctx.fill();
+    }
+    let top = 30;
+    if (n.kind === 'sheep') {
+      let sh = this.nodeSheep.get(n.id);
+      if (!sh) { sh = { gx: n.gx, gy: n.gy, tx: null, ty: null, wait: 1e9, ph: n.id, dir: n.id % 2 ? 1 : -1 }; this.nodeSheep.set(n.id, sh); }
+      this.drawSheep(ctx, sh, t);
+      top = 24;
+    } else if (n.kind === 'tree') {
+      A.broadleaf(ctx, p.x - 3, p.y, 1.45, 0.75);
+      // stapeltje brandhout
+      for (let i = 0; i < 3; i++) {
+        const lx = p.x + 10; const ly = p.y + 3 - i * 3.2;
+        ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(lx - 6 + i, ly); ctx.lineTo(lx + 5 - i, ly - 2); ctx.stroke();
+        ctx.fillStyle = '#ddb882'; ctx.beginPath(); ctx.arc(lx + 5 - i, ly - 2, 1.4, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.lineCap = 'butt';
+      top = 62;
+    } else if (n.kind === 'stone') {
+      A.rock(ctx, p.x - 7, p.y + 1, 2.3);
+      A.rock(ctx, p.x + 8, p.y + 2, 1.7);
+      A.rock(ctx, p.x + 1, p.y + 7, 1.3);
+      top = 28;
+    } else {
+      A.rock(ctx, p.x - 3, p.y + 2, 2.3);
+      A.rock(ctx, p.x + 9, p.y + 4, 1.5);
+      ctx.fillStyle = '#f2c230';
+      for (const [dx, dy, r] of [[-7, -7, 1.9], [-1, -10, 1.5], [4, -5, 1.7], [9, 1, 1.2]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      const tw = Math.sin(t * 0.006 + n.id);
+      if (tw > 0.6) {
+        ctx.strokeStyle = `rgba(255,255,220,${(tw - 0.6) * 2.5})`; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(p.x - 1, p.y - 14); ctx.lineTo(p.x - 1, p.y - 6); ctx.moveTo(p.x - 5, p.y - 10); ctx.lineTo(p.x + 3, p.y - 10); ctx.stroke();
+      }
+      top = 28;
+    }
+    if (!n.claimed) {
+      // zwevend icoontje: "hier valt iets te halen"
+      const by = p.y - top - 12 + Math.sin(t * 0.004 + n.id) * 2.5;
+      ctx.fillStyle = 'rgba(255,250,235,0.95)';
+      ctx.strokeStyle = 'rgba(120,80,20,0.8)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(p.x, by, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p.x - 3, by + 8); ctx.lineTo(p.x, by + 12); ctx.lineTo(p.x + 3, by + 8); ctx.fill();
+      const img = this.resImg[n.res];
+      if (img && img.complete) ctx.drawImage(img, p.x - 7, by - 7, 14, 14);
+    }
+  }
+
   drawSheep(ctx, s, t) {
     const p = toWorld(s.gx, s.gy);
     const moving = s.tx !== null && s.wait <= 0;
@@ -611,9 +735,57 @@ export class TownView {
       if (canPlaceAt(this.state, this.placing, x, y) && this.onPlace) this.onPlace(this.placing, x, y, e && e.shiftKey);
       return;
     }
+    const w = this.cam.screenToWorld(sx, sy);
+    const node = this.pickNode(w);
+    if (node) {
+      const v = this.selVillager;
+      this.pendingFrom = v ? { node: node.id, gx: v.gx, gy: v.gy, walker: v } : null;
+      this.selVillager = null;
+      if (this.onHarvest) this.onHarvest(node, v);
+      return;
+    }
+    const v = this.pickWalker(w);
+    if (v) {
+      this.selVillager = v;
+      if (this.onVillagerSelect) this.onVillagerSelect(v);
+      return;
+    }
+    if (this.selVillager) {
+      this.selVillager = null;
+      if (this.onVillagerSelect) this.onVillagerSelect(null);
+    }
     const b = this.pick(sx, sy);
     this.selected = b ? b.id : null;
     if (this.onSelect) this.onSelect(b);
+  }
+
+  pickNode(w) {
+    let best = null; let bd = Infinity;
+    for (const n of this.state.nodes || []) {
+      if (n.claimed) continue;
+      const p = toWorld(n.gx, n.gy);
+      const top = n.kind === 'tree' ? 62 : 30;
+      const tol = Math.max(18, 14 / this.cam.zoom);
+      if (Math.abs(w.x - p.x) < tol && w.y < p.y + 10 && w.y > p.y - top) {
+        const d = Math.abs(w.x - p.x) + Math.abs(w.y - (p.y - top / 2));
+        if (d < bd) { bd = d; best = n; }
+      }
+    }
+    return best;
+  }
+
+  pickWalker(w) {
+    let best = null; let bd = Infinity;
+    const tol = Math.max(9, 13 / this.cam.zoom);
+    for (const v of this.walkers) {
+      if (!(v.wait <= 0 || v.phase === 'work' || v.job === 'idle')) continue;
+      const p = toWorld(v.gx, v.gy);
+      if (Math.abs(w.x - p.x) < tol && w.y < p.y + 5 && w.y > p.y - 22) {
+        const d = Math.abs(w.x - p.x) + Math.abs(w.y - (p.y - 9));
+        if (d < bd) { bd = d; best = v; }
+      }
+    }
+    return best;
   }
 
   // ---------- tekenen ----------
@@ -648,7 +820,16 @@ export class TownView {
     this.drawShadows(ctx, segs, wallLevel, light);
 
     const items = [];
-    for (const d of this.decor) items.push({ depth: d.gx + d.gy, kind: 'decor', d });
+    const nodes = s.nodes || [];
+    for (const d of this.decor) {
+      if (d.kind === 'tree' && nodes.some((n) => Math.hypot(n.gx - d.gx, n.gy - d.gy) < 1)) continue;
+      items.push({ depth: d.gx + d.gy, kind: 'decor', d });
+    }
+    for (const n of nodes) items.push({ depth: n.gx + n.gy, kind: 'node', n });
+    for (const hv of s.harvests || []) {
+      const pos = this.harvesterPos(hv, now);
+      if (pos) items.push({ depth: pos.gx + pos.gy, kind: 'harvester', hv, pos });
+    }
     for (const b of s.buildings) {
       if (b.x < 0) continue;
       const size = BUILDINGS[b.type].size;
@@ -670,6 +851,8 @@ export class TownView {
       else if (it.kind === 'building') this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, emit);
       else if (it.kind === 'walker') this.drawWalker(ctx, it.w, t);
       else if (it.kind === 'sheep') this.drawSheep(ctx, it.sh, t);
+      else if (it.kind === 'node') this.drawNode(ctx, it.n, t, emit);
+      else if (it.kind === 'harvester') this.drawHarvester(ctx, it.hv, it.pos, t, emit);
       else { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, t); }
     }
 
@@ -870,6 +1053,14 @@ export class TownView {
 
   drawWalker(ctx, w, t) {
     const p = toWorld(w.gx, w.gy);
+    if (w === this.selVillager) {
+      const pulse = 0.6 + Math.sin(t * 0.008) * 0.3;
+      ctx.strokeStyle = `rgba(255,225,90,${pulse})`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, 8, 4, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffe28a';
+      const ay = p.y - 30 + Math.sin(t * 0.008) * 2;
+      ctx.beginPath(); ctx.moveTo(p.x - 4, ay); ctx.lineTo(p.x + 4, ay); ctx.lineTo(p.x, ay + 5); ctx.closePath(); ctx.fill();
+    }
     const walking = !!w.target && w.wait <= 0;
     const tool = w.phase === 'work';
     let y = p.y;

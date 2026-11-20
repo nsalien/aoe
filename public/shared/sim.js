@@ -3,7 +3,7 @@
 // dezelfde code om grondstoffen en timers vloeiend te laten doortellen.
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
-  TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
+  TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
 
 export class GameError extends Error {
@@ -30,7 +30,9 @@ export function newTownState(t) {
 export const age = (s) => s.buildings.find((b) => b.type === 'tc').level;
 export const findType = (s, type) => s.buildings.filter((b) => b.type === type);
 export const bLevel = (s, type) => findType(s, type).reduce((m, b) => Math.max(m, b.level), 0);
-export const totalVillagers = (s) => RES.reduce((a, r) => a + s.villagers[r], s.villagers.idle);
+// dorpelingen die even een vondst gaan oogsten, tellen nog altijd mee
+export const harvesting = (s) => (s.harvests ? s.harvests.length : 0);
+export const totalVillagers = (s) => RES.reduce((a, r) => a + s.villagers[r], s.villagers.idle) + harvesting(s);
 
 export function slots(s) {
   const out = { ...TC_SLOTS };
@@ -126,23 +128,137 @@ function finishUnit(s, key) {
   if (!q.length) delete s.queues[key];
 }
 
-// Breng de stad naar tijdstip t (ms). Verwerkt voltooide bouw- en trainingsopdrachten in volgorde.
+// ---------- vondsten (bonusgrondstoffen rond de stad) ----------
+
+// deterministisch "toeval": server en browser berekenen exact dezelfde vondsten
+function bonusRand(s, k) {
+  let h = (s.nodeSeed * 374761393 + s.nodeSeq * 668265263 + k * 982451653) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+function bonusInterval(s, speed, k) {
+  const min = BONUS.minMinutes + (BONUS.maxMinutes - BONUS.minMinutes) * bonusRand(s, k);
+  return Math.round((min * 60000) / speed);
+}
+
+export function ensureBonus(s, speed = 1) {
+  if (s.nodes) return;
+  s.nodes = [];
+  s.harvests = [];
+  s.nodeSeq = 0;
+  s.nodeSeed = Math.abs(Math.floor(s.t)) % 1000003;
+  s.nextNode = s.t + Math.round((BONUS.firstMinutes * 60000) / speed);
+}
+
+// de deur van het stadscentrum (vertrek- en aankomstpunt van dorpelingen)
+export const tcDoor = () => ({ gx: TC_POS.x + 1, gy: TC_POS.y + 2.35 });
+
+function bonusSpot(s) {
+  const N = TOWN_GRID; const mid = N / 2;
+  for (let tr = 0; tr < 30; tr++) {
+    const side = Math.floor(bonusRand(s, 10 + tr * 3) * 4);
+    const along = -1.2 + bonusRand(s, 11 + tr * 3) * (N + 2.4);
+    const off = 0.7 + bonusRand(s, 12 + tr * 3) * 1.1;
+    if (Math.abs(along - mid) < 1.3) continue; // niet op de wegen
+    let gx; let gy;
+    if (side === 0) { gx = along; gy = -off; } else if (side === 1) { gx = N + off; gy = along; } else if (side === 2) { gx = along; gy = N + off; } else { gx = -off; gy = along; }
+    if (s.nodes.some((n) => Math.hypot(n.gx - gx, n.gy - gy) < 1.4)) continue;
+    return { gx: Math.round(gx * 100) / 100, gy: Math.round(gy * 100) / 100 };
+  }
+  return null;
+}
+
+function spawnBonus(s, t, speed) {
+  if (s.nodes.length < BONUS.maxNodes) {
+    const spot = bonusSpot(s);
+    if (spot) {
+      let r = bonusRand(s, 1);
+      let kind = BONUS.order[BONUS.order.length - 1];
+      for (let i = 0; i < BONUS.order.length; i++) { if (r < BONUS.weights[i]) { kind = BONUS.order[i]; break; } r -= BONUS.weights[i]; }
+      const def = BONUS.kinds[kind];
+      const amount = Math.round(def.amount * (1 + BONUS.ageBonus * (age(s) - 1)) * (0.85 + bonusRand(s, 2) * 0.3));
+      s.nodes.push({ id: s.nextId++, kind, res: def.res, amount, gx: spot.gx, gy: spot.gy, at: t, claimed: false });
+    }
+  }
+  s.nodeSeq++;
+  s.nextNode = t + bonusInterval(s, speed, 3);
+}
+
+function finishHarvest(s, hv) {
+  const node = s.nodes.find((n) => n.id === hv.node);
+  if (node) {
+    const cap = capacity(s);
+    const r = node.res;
+    s.res[r] = Math.max(s.res[r], Math.min(cap, s.res[r] + node.amount));
+    s.nodes = s.nodes.filter((n) => n !== node);
+  }
+  s.harvests = s.harvests.filter((x) => x !== hv);
+  // de dorpeling gaat terug naar zijn vorige taak
+  if (hv.job !== 'idle' && s.villagers[hv.job] < slots(s)[hv.job]) s.villagers[hv.job]++;
+  else s.villagers.idle++;
+}
+
+export function harvestTime(node) {
+  const d = tcDoor();
+  const walk = (Math.hypot(node.gx - d.gx, node.gy - d.gy) / BONUS.walkTilesPerSec) * 1000;
+  return Math.round(2 * walk + BONUS.gatherMs);
+}
+
+export function checkHarvest(s, nodeId) {
+  const node = (s.nodes || []).find((n) => n.id === nodeId);
+  if (!node) return 'Die vondst is er niet meer.';
+  if (node.claimed) return 'Er is al een dorpeling onderweg.';
+  if (harvesting(s) >= BONUS.maxHarvesters) return `Er zijn al ${BONUS.maxHarvesters} dorpelingen op pad.`;
+  if (totalVillagers(s) - harvesting(s) < 1) return 'Je hebt geen dorpeling vrij.';
+  return null;
+}
+
+// Stuur een dorpeling naar een vondst. job = de taak van de aangeklikte dorpeling (of leeg: zelf kiezen).
+export function doHarvest(s, nodeId, job, now) {
+  const err = checkHarvest(s, nodeId);
+  if (err) throw new GameError(err);
+  const node = s.nodes.find((n) => n.id === nodeId);
+  let from = null;
+  if (job === 'idle' && s.villagers.idle > 0) from = 'idle';
+  else if (RES.includes(job) && s.villagers[job] > 0) from = job;
+  else if (s.villagers.idle > 0) from = 'idle';
+  else {
+    from = RES.reduce((best, r) => (s.villagers[r] > (best ? s.villagers[best] : 0) ? r : best), null);
+  }
+  if (!from) throw new GameError('Je hebt geen dorpeling vrij.');
+  s.villagers[from]--;
+  node.claimed = true;
+  const hv = { id: s.nextId++, node: node.id, job: from, start: now, end: now + harvestTime(node) };
+  s.harvests.push(hv);
+  return hv;
+}
+
+// Breng de stad naar tijdstip t (ms). Verwerkt voltooide opdrachten, vondsten en oogsten in volgorde.
 export function advance(s, t, speed = 1) {
   if (t <= s.t) return s;
+  ensureBonus(s, speed);
   for (let guard = 0; guard < 20000; guard++) {
     let next = Infinity;
     let job = null;
     let qkey = null;
-    for (const b of s.builds) if (b.end < next) { next = b.end; job = b; qkey = null; }
+    let hv = null;
+    let spawn = false;
+    for (const b of s.builds) if (b.end < next) { next = b.end; job = b; }
     for (const key of Object.keys(s.queues)) {
       const head = s.queues[key][0];
       if (!head) continue;
       const tt = head.start + (head.done + 1) * head.dur;
       if (tt < next) { next = tt; job = null; qkey = key; }
     }
+    for (const h of s.harvests) if (h.end < next) { next = h.end; job = null; qkey = null; hv = h; }
+    if (s.nextNode < next) { next = s.nextNode; job = null; qkey = null; hv = null; spawn = true; }
     if (next > t) break;
     accrue(s, next, speed);
-    if (job) finishBuild(s, job);
+    if (spawn) spawnBonus(s, next, speed);
+    else if (hv) finishHarvest(s, hv);
+    else if (job) finishBuild(s, job);
     else finishUnit(s, qkey);
   }
   accrue(s, t, speed);
@@ -267,7 +383,7 @@ export function doTrain(s, unit, n, now, speed, awayPop = 0) {
 
 export function doAssign(s, alloc, rally) {
   const sl = slots(s);
-  const total = totalVillagers(s);
+  const total = totalVillagers(s) - harvesting(s);
   let sum = 0;
   const next = {};
   for (const r of RES) {

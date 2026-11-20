@@ -499,3 +499,10 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* vondsten */
+.bonus-card { border-color: #e2bf6a; background: linear-gradient(180deg, rgba(255, 249, 222, 0.92), rgba(255, 241, 200, 0.75)); }
+.bonus-row { padding: 4px 0; border-top: 1px dashed #e0c98f; }
+.bonus-row:first-of-type { border-top: 0; }
+.bonus-row .ico { width: 26px; height: 26px; }
+.bonus-row b { font-size: 13px; }

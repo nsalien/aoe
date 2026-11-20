@@ -167,3 +167,58 @@ test('wereld is deterministisch en startgebieden zijn bebouwbaar', () => {
   assert.ok(camps.length >= 30);
   assert.ok(camps.filter((c) => c.level === 1).length >= 12);
 });
+
+// ---------- vondsten ----------
+import { ensureBonus, doHarvest, harvestTime, checkHarvest, harvesting } from '../public/shared/sim.js';
+import { BONUS } from '../public/shared/rules.js';
+
+test('vondsten verschijnen deterministisch en nooit meer dan het maximum', () => {
+  const a = newTownState(1000);
+  const b = newTownState(1000);
+  advance(a, 1000 + 24 * H, 1);
+  advance(b, 1000 + 7 * H, 1);
+  advance(b, 1000 + 24 * H, 1);
+  assert.deepEqual(a.nodes, b.nodes, 'zelfde vondsten, ook als je in stappen rekent');
+  assert.equal(a.nodes.length, BONUS.maxNodes);
+  for (const n of a.nodes) {
+    assert.ok(BONUS.kinds[n.kind]);
+    const outside = n.gx < 0 || n.gy < 0 || n.gx > 12 || n.gy > 12;
+    assert.ok(outside, 'vondsten liggen rond de stad, niet op bouwgrond');
+  }
+});
+
+test('een dorpeling oogst een vondst en gaat daarna terug aan het werk', () => {
+  const s = newTownState(0);
+  advance(s, 2 * H, 1);
+  assert.ok(s.nodes.length > 0);
+  const node = s.nodes[0];
+  const before = { ...s.villagers };
+  const resBefore = s.res[node.res];
+  const hv = doHarvest(s, node.id, 'wood', s.t);
+  assert.equal(s.villagers.wood, before.wood - 1, 'de houthakker legt zijn werk even neer');
+  assert.equal(totalVillagers(s), 6, 'de dorpeling telt nog mee');
+  assert.equal(harvesting(s), 1);
+  assert.match(checkHarvest(s, node.id), /onderweg/);
+  assert.throws(() => doAssign(s, { food: 3, wood: 3, stone: 0, gold: 0 }), /dorpelingen/, 'wie op pad is, kan je niet verdelen');
+  advance(s, hv.end, 1);
+  assert.equal(s.villagers.wood, before.wood, 'terug aan het werk');
+  assert.ok(!s.nodes.some((n) => n.id === node.id), 'vondst is weg');
+  assert.ok(s.res[node.res] >= Math.min(capacity(s), resBefore + node.amount) - 1, 'grondstoffen ontvangen');
+  assert.equal(harvesting(s), 0);
+});
+
+test('oogsten duurt langer naarmate de vondst verder ligt', () => {
+  const near = harvestTime({ gx: 6, gy: 13 });
+  const far = harvestTime({ gx: -1.5, gy: -1.5 });
+  assert.ok(far > near);
+  assert.ok(near >= BONUS.gatherMs);
+});
+
+test('oude steden zonder vondsten worden netjes bijgewerkt', () => {
+  const s = newTownState(0);
+  delete s.nodes;
+  ensureBonus(s, 1);
+  assert.deepEqual(s.nodes, []);
+  assert.ok(s.nextNode > s.t);
+  assert.throws(() => doHarvest(s, 999, null, 0), /niet meer/);
+});
