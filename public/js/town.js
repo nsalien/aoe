@@ -10,13 +10,17 @@ import {
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
+import * as NAT from './nature.js';
+import * as FIG from './figures.js';
+import { fbm } from '../shared/worldgen.js';
 
 const N = TOWN_GRID;
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
 const BAKE = FX.LOW_POWER ? 0.9 : 1.25;
 
 const SPRITE_H = { tc: 120, tower: 115, monument: 130, barracks: 70, house: 60, workshop: 60, smithy: 70 };
-const CARRY = { food: '#d9534f', wood: '#8b5a2b', stone: '#b9b4a8', gold: '#f2c230' };
+// gereedschap per soort werk
+const TOOL = { food: 'hoe', wood: 'axe', stone: 'pick', gold: 'pick' };
 
 // hoogte (px) per gebouw en niveau voor de slagschaduw, en de halve breedte van het grondvlak
 const SHADOW = {
@@ -26,23 +30,6 @@ const SHADOW = {
   stable: [[0, 26, 29, 32], 0.34], smithy: [[0, 36, 38, 40, 42, 44], 0.34], market: [[0, 12, 12, 12], 0.3],
   tower: [[0, 60, 76, 104], 0.26], workshop: [[0, 32, 36], 0.36], monument: [[0, 50, 62, 74, 86, 98], 0.8],
 };
-
-function treeSprites() {
-  const out = [];
-  for (let i = 0; i < 8; i++) {
-    const make = (k) => {
-      const cv = document.createElement('canvas');
-      cv.width = 60 * k; cv.height = 70 * k;
-      const c = cv.getContext('2d');
-      c.scale(k, k);
-      const s = 1.05 + (i % 4) * 0.12;
-      if (i < 4) A.conifer(c, 30, 64, s, i / 4); else A.broadleaf(c, 30, 64, s, (i - 4) / 4);
-      return cv;
-    };
-    out.push({ cv: make(2), small: make(1), w: 60, h: 70, ax: 30, ay: 64 });
-  }
-  return out;
-}
 
 // convex omhulsel (monotone chain) voor schaduwvormen
 function hull(pts) {
@@ -97,7 +84,7 @@ export class TownView {
     this.walkers = [];
     this.sheep = [];
     this.ducks = [];
-    this.trees = treeSprites();
+    this.trees = Array.from({ length: NAT.TREE_COUNT }, (_, k) => NAT.treeSprite(k));
     this.particles = new FX.Particles();
     this.birds = new FX.Birds(wb);
     this.clouds = new FX.Clouds({ x0: wb.x0 - 200, x1: wb.x1, y0: wb.y0 - 100, y1: wb.y1 - 200 }, FX.LOW_POWER ? 4 : 7);
@@ -217,6 +204,16 @@ export class TownView {
     this.treeKey = key;
     const set = clearedSet(s);
     this.visTrees = this.terr.trees.filter((t) => !isBuildable(s, t.i, t.j, set));
+    // boomsoort: naaldbossen en loofbossen in grote vlekken, hier en daar een herfstboom
+    const sd = this.seed;
+    for (const t of this.visTrees) {
+      if (t.kind !== undefined && t.kindSeed === sd) continue;
+      const zone = fbm(t.i / 9, t.j / 9, sd + 301, 2);
+      const h = hashInt(t.i, t.j, sd + 302);
+      const list = h < 0.06 ? NAT.AUTUMN : zone < 0.42 ? (h < 0.8 ? NAT.CONIFERS : NAT.LEAFY) : zone > 0.56 ? (h < 0.85 ? NAT.LEAFY : NAT.CONIFERS) : (h < 0.5 ? NAT.LEAFY : NAT.CONIFERS);
+      t.kind = list[Math.floor(hashInt(t.j, t.i, sd + 303) * list.length)];
+      t.kindSeed = sd;
+    }
     const mid = N / 2;
     this.forestEdge = [...this.visTrees].sort((a, b) => Math.hypot(a.gx - mid, a.gy - mid) - Math.hypot(b.gx - mid, b.gy - mid)).slice(0, 12);
     const occ = new Set();
@@ -299,24 +296,79 @@ export class TownView {
     const pd = this.pond;
     const inPond = (x, y) => Math.hypot(x - pd.x, (y - pd.y) / 0.8) < pd.r + 0.6;
 
-    // tegels: gras (donkerder naar het bos toe), bosgrond, zand en meren
+    // bodemkleur: zachte overgangen (geen zichtbare tegels), donkere bosgrond, droge plekjes in de wei
     this.lakeWaves = [];
     const lakes = [];
     for (let j = T_MIN; j < T_MAX; j++) {
       for (let i = T_MIN; i < T_MAX; i++) {
-        const tile = terr.tiles[tileIndex(i, j)];
-        const n = hashInt(Math.floor(i / 3), Math.floor(j / 3), sd) * 0.6 + hashInt(i, j, sd + 1) * 0.4;
-        const ring = ringOf(i, j);
-        let col = A.mix('#7db64a', '#97c75c', n);
-        if (ring > 0) col = A.mix(col, '#5f9138', Math.min(0.5, ring / 12));
-        if (tile === TILE.FOREST) col = A.mix(col, '#4a782c', 0.4);
-        if (tile === TILE.SAND || tile === TILE.WATER) col = A.mix(col, '#c9b77e', 0.35);
-        if (tile === TILE.WATER && !inPond(i + 0.5, j + 0.5)) {
-          lakes.push([i + 0.5, j + 0.5]);
-          if (hashInt(i, j, sd + 2) < 0.35) this.lakeWaves.push({ gx: i + 0.5, gy: j + 0.5, p: hashInt(i, j, sd + 3) * 6.28 });
+        if (terr.tiles[tileIndex(i, j)] !== TILE.WATER || inPond(i + 0.5, j + 0.5)) continue;
+        lakes.push([i + 0.5, j + 0.5]);
+        if (hashInt(i, j, sd + 2) < 0.35) this.lakeWaves.push({ gx: i + 0.5, gy: j + 0.5, p: hashInt(i, j, sd + 3) * 6.28 });
+      }
+    }
+    const tileAt = (i, j) => (i < T_MIN || j < T_MIN || i >= T_MAX || j >= T_MAX ? -1 : terr.tiles[tileIndex(i, j)]);
+    const forestD = new Float32Array(T_W * T_W);
+    for (let j = T_MIN; j < T_MAX; j++) {
+      for (let i = T_MIN; i < T_MAX; i++) {
+        let n = 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const t = tileAt(i + di, j + dj); n += t === TILE.FOREST ? 1 : t === -1 ? 0.6 : 0; }
+        forestD[tileIndex(i, j)] = n / 9;
+      }
+    }
+    const fAt = (gx, gy) => {
+      const x = Math.min(T_MAX - 1.001, Math.max(T_MIN, gx - 0.5)); const y = Math.min(T_MAX - 1.001, Math.max(T_MIN, gy - 0.5));
+      const i = Math.floor(x); const j = Math.floor(y); const fx = x - i; const fy = y - j;
+      const v = (a, b) => forestD[tileIndex(Math.min(T_MAX - 1, a), Math.min(T_MAX - 1, b))];
+      return (v(i, j) * (1 - fx) + v(i + 1, j) * fx) * (1 - fy) + (v(i, j + 1) * (1 - fx) + v(i + 1, j + 1) * fx) * fy;
+    };
+    {
+      const RS = FX.LOW_POWER ? 3 : 4;
+      const NW = T_W * RS;
+      const base = document.createElement('canvas');
+      base.width = NW; base.height = NW;
+      const bc = base.getContext('2d');
+      const img = bc.createImageData(NW, NW);
+      const px = img.data;
+      const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+      const C0 = hex('#6aa940'); const C1 = hex('#a0cc5e'); const DRY = hex('#bcc56e'); const OUT = hex('#5b8c36');
+      const FOR = hex('#3c6628'); const MOSS = hex('#5d6f2c'); const SAND = hex('#cdbb85');
+      const lerp = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
+      const c = [0, 0, 0];
+      for (let v = 0; v < NW; v++) {
+        for (let u = 0; u < NW; u++) {
+          const gx = T_MIN + (u + 0.5) / RS; const gy = T_MIN + (v + 0.5) / RS;
+          const n1 = fbm(gx / 7, gy / 7, sd + 11, 3); const n2 = fbm(gx / 2.3, gy / 2.3, sd + 12, 2); const n3 = fbm(gx / 4.5 + 9, gy / 4.5, sd + 13, 2);
+          c[0] = C0[0]; c[1] = C0[1]; c[2] = C0[2];
+          lerp(c, C1, Math.min(1, Math.max(0, (n1 - 0.3) * 2.2 + (n2 - 0.5) * 0.6)));
+          if (n3 > 0.58) lerp(c, DRY, Math.min(0.5, (n3 - 0.58) * 2.4));
+          const i = Math.floor(gx); const j = Math.floor(gy);
+          lerp(c, OUT, Math.min(0.3, ringOf(i, j) / 45));
+          const f = fAt(gx, gy);
+          if (f > 0) { lerp(c, FOR, Math.min(0.78, f * 0.9)); lerp(c, MOSS, f * n2 * 0.4); }
+          const t = terr.tiles[tileIndex(i, j)];
+          if (t === TILE.SAND || t === TILE.WATER) lerp(c, SAND, 0.4);
+          const o = (v * NW + u) * 4;
+          px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2]; px[o + 3] = 255;
         }
-        const p = toWorld(i + 0.5, j + 0.5);
-        A.diamond(g, p.x, p.y, A.TW + 1, A.TH + 1, col);
+      }
+      bc.putImageData(img, 0, 0);
+      g.save();
+      g.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+      g.imageSmoothingEnabled = true;
+      g.drawImage(base, T_MIN, T_MIN, T_W, T_W);
+      g.restore();
+    }
+    // fijne korrel in het gras (anders oogt de grond te glad)
+    {
+      const n = FX.LOW_POWER ? 9000 : 22000;
+      for (const [col, from] of [['rgba(25,55,12,0.16)', 0], ['rgba(255,255,205,0.10)', 1], ['rgba(70,100,25,0.14)', 2]]) {
+        g.fillStyle = col;
+        for (let k = from; k < n; k += 3) {
+          const i = T_MIN + hashInt(k, 61, sd) * T_W; const j = T_MIN + hashInt(k, 62, sd) * T_W;
+          if (terr.tiles[tileIndex(Math.floor(i), Math.floor(j))] === TILE.WATER) continue;
+          const p = toWorld(i, j);
+          g.fillRect(p.x, p.y, 1.8, 0.9);
+        }
       }
     }
     // grote, zachte kleurvlekken voor een natuurlijke look
@@ -349,14 +401,24 @@ export class TownView {
     blob(deep, 0.74, '#387fb5');
     const roads = [[mid, mid, mid, T_MAX], [mid, mid, mid, T_MIN], [mid, mid, T_MAX, mid], [mid, mid, T_MIN, mid]];
     g.lineCap = 'round';
-    for (const [w, col] of [[1.05, 'rgba(120,90,45,0.55)'], [0.82, '#c0a067'], [0.5, '#cdb07a']]) {
+    for (const [w, col] of [[1.3, 'rgba(95,80,40,0.22)'], [0.98, '#a88a58'], [0.8, '#bfa06b'], [0.36, 'rgba(226,206,160,0.35)']]) {
       g.strokeStyle = col; g.lineWidth = w;
       for (const [x0, y0, x1, y1] of roads) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
     }
-    g.strokeStyle = 'rgba(110,80,40,0.35)'; g.lineWidth = 0.05;
+    // karrensporen, licht golvend, met een grasstrookje ertussen buiten de stad
     for (const [x0, y0, x1, y1] of roads) {
       const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
-      for (const o of [-0.18, 0.18]) { g.beginPath(); g.moveTo(x0 + vx * o, y0 + vy * o); g.lineTo(x1 + vx * o, y1 + vy * o); g.stroke(); }
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      for (const [o, col, w] of [[-0.19, 'rgba(105,78,42,0.42)', 0.075], [0.19, 'rgba(105,78,42,0.42)', 0.075], [0, 'rgba(105,150,55,0.22)', 0.1]]) {
+        g.strokeStyle = col; g.lineWidth = w;
+        g.beginPath();
+        for (let t = o === 0 ? 4.5 : 3.2; t <= len; t += 0.25) {
+          const wob = (fbm(t * 0.7, o * 9 + x1 * 0.1 + y1 * 0.13, sd + 40, 2) - 0.5) * 0.12;
+          const x = x0 + ((x1 - x0) / len) * t + vx * (o + wob); const y = y0 + ((y1 - y0) / len) * t + vy * (o + wob);
+          if (t <= (o === 0 ? 4.5 : 3.2)) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.stroke();
+      }
     }
     const grad = g.createRadialGradient(mid, mid, 0.5, mid, mid, 3.3);
     grad.addColorStop(0, '#c9b088'); grad.addColorStop(0.8, '#c2a674'); grad.addColorStop(1, 'rgba(194,166,116,0)');
@@ -395,6 +457,21 @@ export class TownView {
         g.fillStyle = 'rgba(255,255,255,0.18)'; g.beginPath(); g.ellipse(p.x - 1, p.y - 0.7, 2, 0.9, 0, 0, Math.PI * 2); g.fill();
       }
     }
+    // rafelige wegranden: plukjes zand en gras die over de rand gaan
+    for (const [x0, y0, x1, y1] of roads) {
+      const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      for (let t = 3.4; t < len; t += 0.17) {
+        for (const side of [-1, 1]) {
+          const h = hashInt(Math.round(t * 10), side + x1 * 3 + y1 * 7, sd + 44);
+          const off = side * (0.44 + (h - 0.5) * 0.14);
+          const gx = x0 + ((x1 - x0) / len) * t + vx * off; const gy = y0 + ((y1 - y0) / len) * t + vy * off;
+          const p = toWorld(gx, gy);
+          if (h < 0.55) { g.fillStyle = h < 0.25 ? 'rgba(168,138,88,0.75)' : 'rgba(190,160,108,0.6)'; g.beginPath(); g.ellipse(p.x, p.y, 3 + h * 5, 1.4 + h * 2, 0, 0, Math.PI * 2); g.fill(); }
+          else if (h > 0.78) NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null);
+        }
+      }
+    }
     // kiezels langs de wegen
     for (let k = 0; k < 500; k++) {
       const along = T_MIN + hashInt(k, 31, sd) * T_W;
@@ -406,31 +483,72 @@ export class TownView {
       g.fillStyle = hashInt(k, 33, sd) < 0.5 ? 'rgba(140,125,100,0.8)' : 'rgba(205,190,160,0.8)';
       g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.8, 0, 0, Math.PI * 2); g.fill();
     }
-    // grassprietjes, klaver en bloemen
+    // gras, bloemenweitjes, steentjes en een rijke bosbodem
     this.flowerSpots = [];
-    const blades = FX.LOW_POWER ? 2200 : 4200;
-    for (let k = 0; k < blades; k++) {
-      const i = T_MIN + hashInt(k, 3, sd) * T_W;
-      const j = T_MIN + hashInt(k, 4, sd) * T_W;
-      const tile = terr.tiles[tileIndex(Math.floor(i), Math.floor(j))];
-      if (tile === TILE.WATER || tile === TILE.SAND || inPond(i, j)) continue;
-      if (Math.hypot(i - mid, j - mid) < 3.3) continue;
-      if (Math.abs(i - mid) < 0.5 || Math.abs(j - mid) < 0.5) continue;
-      const p = toWorld(i, j);
+    const onRoad = (i, j) => (Math.abs(i - mid) < 0.62 || Math.abs(j - mid) < 0.62);
+    const okGround = (i, j) => {
+      const t = terr.tiles[tileIndex(Math.floor(i), Math.floor(j))];
+      return t !== TILE.WATER && t !== TILE.SAND && !inPond(i, j) && Math.hypot(i - mid, j - mid) > 3.4 && !onRoad(i, j);
+    };
+    const tufts = FX.LOW_POWER ? 4200 : 9500;
+    for (let k = 0; k < tufts; k++) {
+      const i = T_MIN + hashInt(k, 3, sd) * T_W; const j = T_MIN + hashInt(k, 4, sd) * T_W;
+      if (!okGround(i, j)) continue;
       const r = hashInt(k, 5, sd);
-      if (r < 0.06) {
-        const col = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43'][k % 5];
-        for (let q = 0; q < 3; q++) {
-          g.fillStyle = col;
-          g.beginPath(); g.arc(p.x + (q - 1) * 2.5, p.y - (q % 2) * 1.5, 1.3, 0, Math.PI * 2); g.fill();
+      const forest = fAt(i, j) > 0.45;
+      const p = toWorld(i, j);
+      NAT.tuft(g, p.x, p.y, 0.75 + r * 0.55, forest || r < 0.45 ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', r > 0.82 ? 'rgba(232,240,170,0.7)' : null);
+    }
+    const FLOWERS = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43', '#f2f2f2', '#7fb0f0'];
+    const meadows = FX.LOW_POWER ? 45 : 90;
+    for (let k = 0; k < meadows; k++) {
+      const ci = T_MIN + hashInt(k, 71, sd) * T_W; const cj = T_MIN + hashInt(k, 72, sd) * T_W;
+      if (!okGround(ci, cj) || fAt(ci, cj) > 0.35) continue;
+      const col = FLOWERS[k % FLOWERS.length]; const col2 = FLOWERS[(k + 3) % FLOWERS.length];
+      const n = 6 + Math.floor(hashInt(k, 73, sd) * 12);
+      for (let q = 0; q < n; q++) {
+        const a = hashInt(k, 80 + q, sd) * Math.PI * 2; const d = Math.sqrt(hashInt(k, 120 + q, sd)) * 1.1;
+        const i = ci + Math.cos(a) * d; const j = cj + Math.sin(a) * d;
+        if (!okGround(i, j)) continue;
+        const p = toWorld(i, j);
+        NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
+      }
+      if (ringOf(Math.floor(ci), Math.floor(cj)) <= 6) this.flowerSpots.push(toWorld(ci, cj));
+    }
+    for (let k = 0; k < (FX.LOW_POWER ? 160 : 300); k++) {
+      const i = T_MIN + hashInt(k, 91, sd) * T_W; const j = T_MIN + hashInt(k, 92, sd) * T_W;
+      if (!okGround(i, j)) continue;
+      const p = toWorld(i, j);
+      NAT.pebble(g, p.x, p.y, 0.45 + hashInt(k, 93, sd) * 0.6, hashInt(k, 94, sd) < 0.5 ? '#9c978b' : '#b3ad9f');
+    }
+    // bosbodem: gevallen blad, varens, struikjes, paddenstoelen en een omgevallen stam
+    const LEAVES = ['rgba(150,95,35,0.55)', 'rgba(190,130,45,0.5)', 'rgba(95,85,35,0.5)', 'rgba(120,60,30,0.45)'];
+    for (let j = T_MIN; j < T_MAX; j++) {
+      for (let i = T_MIN; i < T_MAX; i++) {
+        if (terr.tiles[tileIndex(i, j)] !== TILE.FOREST || ringOf(i, j) === 0 || onRoad(i + 0.5, j + 0.5)) continue;
+        for (let q = 0; q < 7; q++) {
+          const p = toWorld(i + hashInt(i * 7 + q, j, sd + 101), j + hashInt(i, j * 7 + q, sd + 102));
+          g.fillStyle = LEAVES[q % 4]; g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.7, q, 0, Math.PI * 2); g.fill();
         }
-        if (k % 4 === 0 && ringOf(Math.floor(i), Math.floor(j)) <= 6) this.flowerSpots.push(p);
-      } else if (r < 0.12) {
-        g.fillStyle = 'rgba(60,110,30,0.25)'; g.beginPath(); g.ellipse(p.x, p.y, 5, 2.5, 0, 0, Math.PI * 2); g.fill();
-      } else {
-        g.strokeStyle = r < 0.55 ? 'rgba(55,105,28,0.5)' : 'rgba(175,215,115,0.5)';
-        g.lineWidth = 0.9;
-        g.beginPath(); g.moveTo(p.x - 2, p.y); g.lineTo(p.x - 3, p.y - 4); g.moveTo(p.x, p.y); g.lineTo(p.x, p.y - 5); g.moveTo(p.x + 2, p.y); g.lineTo(p.x + 3, p.y - 4); g.stroke();
+        const r1 = hashInt(i, j, sd + 103); const r2 = hashInt(i, j, sd + 104); const r3 = hashInt(i, j, sd + 105);
+        if (r1 < 0.6) { const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6); NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34'); }
+        if (r2 < 0.3) { const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2); NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28'); }
+        if (r3 < 0.06) { const p = toWorld(i + 0.5, j + 0.6); NAT.mushroom(g, p.x, p.y, 1); NAT.mushroom(g, p.x + 3, p.y + 1, 0.75); }
+        if (r3 > 0.975) { const p = toWorld(i + 0.5, j + 0.5); NAT.log(g, p.x, p.y, 0.9); }
+      }
+    }
+    // riet en waterlelies bij de meertjes
+    for (const [x, y] of lakes) {
+      const i = Math.floor(x); const j = Math.floor(y);
+      const h = hashInt(i, j, sd + 111);
+      const dry = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => tileAt(i + dx, j + dy) !== TILE.WATER);
+      if (dry.length && h < 0.55) {
+        const [dx, dy] = dry[Math.floor(h * 10) % dry.length];
+        const p = toWorld(x + dx * 0.62, y + dy * 0.62);
+        NAT.reed(g, p.x, p.y, 0.8 + h * 0.5);
+      } else if (!dry.length && h < 0.14) {
+        const p = toWorld(x + (h - 0.07) * 4, y);
+        NAT.lily(g, p.x, p.y, 1, h < 0.05);
       }
     }
     // riet en waterlelies rond de vijver
@@ -664,9 +782,9 @@ export class TownView {
   drawHarvester(ctx, hv, pos, t, emit) {
     const p = toWorld(pos.gx, pos.gy);
     const work = pos.phase === 'work';
-    facing(ctx, p.x, pos.dir, () => A.person(ctx, p.x, p.y + (work ? Math.sin(t * 0.015) * 0.7 : 0), {
-      s: 0.95, walking: !work, phase: t * 0.012, body: '#8b6a43', hat: '#d8ae52',
-      weapon: pos.phase === 'back' ? null : 'tool', carry: pos.phase === 'back' ? CARRY[pos.node.res] : null,
+    facing(ctx, p.x, pos.dir, () => A.person(ctx, p.x, p.y, {
+      s: 0.95, walking: !work, working: work, phase: work ? t * 0.009 : t * 0.012, body: '#8b6a43', hat: '#d8ae52',
+      weapon: pos.phase === 'back' ? null : 'tool', tool: TOOL[pos.node.res], carry: pos.phase === 'back' ? pos.node.res : null,
     }));
     if (work && emit) {
       const n = toWorld(pos.node.gx, pos.node.gy);
@@ -733,20 +851,8 @@ export class TownView {
   drawSheep(ctx, s, t) {
     const p = toWorld(s.gx, s.gy);
     const moving = s.tx !== null && s.wait <= 0;
-    const bob = moving ? Math.abs(Math.sin(t * 0.012 + s.ph)) * 0.8 : 0;
     const graze = !moving && Math.sin(t * 0.002 + s.ph) > 0.2;
-    const dir = s.dir || 1;
-    ctx.save(); ctx.translate(p.x, p.y); ctx.scale(dir, 1);
-    ctx.fillStyle = 'rgba(20,35,10,0.22)'; ctx.beginPath(); ctx.ellipse(1, 0, 7, 2.4, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#3a3330'; ctx.lineWidth = 1.2;
-    ctx.beginPath(); for (const lx of [-3.5, -1.5, 2, 4]) { ctx.moveTo(lx, -3); ctx.lineTo(lx, -0.3); } ctx.stroke();
-    const wool = s.black ? '#4a4440' : '#f4f1ea';
-    ctx.fillStyle = wool;
-    for (const [bx, by, r] of [[-3, -6, 3.4], [0, -7, 3.8], [3, -6, 3.4], [0, -4.5, 3.5]]) { ctx.beginPath(); ctx.arc(bx, by - bob, r, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.arc(1, -4 - bob, 3.6, 0, Math.PI); ctx.fill();
-    ctx.fillStyle = '#2d2724';
-    ctx.beginPath(); ctx.ellipse(6, graze ? -2.5 : -7 - bob, 2.2, 1.7, graze ? 0.6 : 0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    facing(ctx, p.x, s.dir || 1, () => FIG.sheep(ctx, p.x, p.y, { walking: moving, graze, phase: t * 0.012 + s.ph, black: s.black }));
   }
 
   // ---------- muur ----------
@@ -1337,7 +1443,7 @@ export class TownView {
 
   drawTree(ctx, tr, t, shake) {
     const p = toWorld(tr.gx, tr.gy);
-    const spr = this.trees[tr.v];
+    const spr = this.trees[tr.kind ?? tr.v];
     let sway = Math.sin(t * 0.0012 + tr.gx) * 0.6;
     if (shake) sway += Math.sin(t * 0.05) * 1.6;
     ctx.drawImage(this.treeMip ? spr.small : spr.cv, p.x - spr.ax + sway, p.y - spr.ay, spr.w, spr.h);
@@ -1358,21 +1464,9 @@ export class TownView {
 
   drawBoar(ctx, b, bp, t) {
     const p = toWorld(bp.x, bp.y);
-    const dir = Math.cos(t * 0.00035 + b.id * 1.7) - Math.sin(t * 0.00028 + b.id) * 0.4 >= 0 ? 1 : -1;
-    const step = Math.sin(t * 0.01 + b.id) * 1.2;
-    ctx.save(); ctx.translate(p.x, p.y); ctx.scale(dir * 1.15, 1.15);
-    ctx.fillStyle = 'rgba(15,25,8,0.3)'; ctx.beginPath(); ctx.ellipse(0, 0, 9, 3, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#2b1d14'; ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    for (const [lx, d] of [[-5, step], [-2.5, -step], [3, -step], [5.5, step]]) { ctx.moveTo(lx, -4); ctx.lineTo(lx + d * 0.5, -0.3); }
-    ctx.stroke();
-    ctx.fillStyle = '#4a3426'; ctx.beginPath(); ctx.ellipse(0, -7, 8, 4.6, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#2e2018'; ctx.beginPath(); ctx.ellipse(-1, -10.5, 6.5, 1.8, -0.1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#5a4030'; ctx.beginPath(); ctx.moveTo(6, -10); ctx.lineTo(12.5, -6.5); ctx.lineTo(11, -3.8); ctx.lineTo(5.5, -4); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#c99a86'; ctx.beginPath(); ctx.ellipse(12.4, -5.2, 1.3, 1.6, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#f4efe0'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(10.5, -4.5); ctx.quadraticCurveTo(11.5, -7, 9.8, -8); ctx.stroke();
-    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(8.6, -8.2, 0.8, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    const vx = Math.cos(t * 0.00035 + b.id * 1.7) * 0.55 * 0.00035; const vy = -Math.sin(t * 0.00028 + b.id) * 0.4 * 0.00028;
+    const dir = vx - vy >= 0 ? 1 : -1;
+    facing(ctx, p.x, dir, () => FIG.boar(ctx, p.x, p.y, { s: 1.15, walking: true, phase: t * 0.009 + b.id }));
   }
 
   drawDeposit(ctx, d, t) {
@@ -1440,7 +1534,7 @@ export class TownView {
     A.tent(ctx, p.x + 2, p.y + 8, 1.15, '#4a4038');
     A.fire(ctx, p.x - 6, p.y + 2, 1, t);
     for (const [dx, dy, ph] of [[-30, 6, 0], [28, 6, 2], [10, -16, 4]]) {
-      A.person(ctx, p.x + dx, p.y + dy + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: '#5b4636', hat: '#3a2a1a', weapon: 'sword', team: '#2a2a2a', skin: 1 });
+      A.person(ctx, p.x + dx, p.y + dy + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: '#5b4636', weapon: ph === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (ph % 3) });
     }
     A.flag(ctx, p.x + 40, p.y - 4, 30, '#1c1c1c', t, 1);
     ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(p.x + 47, p.y - 30, 2.2, 0, Math.PI * 2); ctx.fill();
@@ -1466,7 +1560,7 @@ export class TownView {
     const offs = [[0, 0], [0.35, -0.1], [-0.1, 0.35], [0.4, 0.3], [-0.35, 0.05], [0.1, -0.4], [0.5, -0.4], [-0.4, 0.4]];
     for (let i = n - 1; i >= 0; i--) {
       const q = toWorld(offs[i][0], offs[i][1]);
-      facing(ctx, p.x + q.x, raid.dir, () => A.person(ctx, p.x + q.x, p.y + q.y, { s: 1, walking: true, phase: t * 0.014 + i, body: '#5b4636', hat: '#3a2a1a', weapon: i % 2 ? 'sword' : 'spear', team: '#2a2a2a', skin: 1 }));
+      facing(ctx, p.x + q.x, raid.dir, () => A.person(ctx, p.x + q.x, p.y + q.y, { s: 1, walking: true, phase: t * 0.014 + i, body: '#5b4636', weapon: i % 2 ? 'sword' : 'spear', barb: true, skin: 1 + (i % 3) }));
     }
     A.flag(ctx, p.x + 4, p.y - 2, 28, '#7a1b12', t, 0.9);
   }
@@ -1500,7 +1594,7 @@ export class TownView {
     for (const { k, o } of order) {
       const q = toWorld(o[0], o[1]);
       const fx = p.x + q.x;
-      facing(ctx, fx, dir, () => this.drawFigure(ctx, k, fx, p.y + q.y, t, moving, working));
+      facing(ctx, fx, dir, () => this.drawFigure(ctx, k, fx, p.y + q.y, t, moving, working, this.groupTool(g)));
     }
     const total = Object.values(g.units).reduce((a, b) => a + b, 0);
     if (total > figs.length) {
@@ -1517,9 +1611,21 @@ export class TownView {
     }
   }
 
-  drawFigure(ctx, kind, x, y, t, moving, working) {
+  // welk gereedschap neemt een dorpeling in het veld mee?
+  groupTool(g) {
+    const w = g.work || g.order;
+    if (!w) return 'axe';
+    if (w.type === 'chop') return 'axe';
+    if (w.type === 'gather') {
+      const d = this.terr.deposits.find((x) => x.id === w.id);
+      return d ? TOOL[WILD.deposits[d.kind].res] : 'axe';
+    }
+    return 'axe';
+  }
+
+  drawFigure(ctx, kind, x, y, t, moving, working, toolKind) {
     if (kind === 'villager') {
-      A.person(ctx, x, y + (working ? Math.sin(t * 0.015) * 0.7 : 0), { s: 0.95, walking: moving, phase: t * 0.012, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool' });
+      A.person(ctx, x, y, { s: 0.95, walking: moving, working: working && !moving, phase: working && !moving ? t * 0.009 + x : t * 0.012, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: toolKind });
       return;
     }
     this.drawSoldier(ctx, { kind, gx: x * 0.01, gy: y * 0.01, walking: moving }, x, y, t);
@@ -1781,12 +1887,12 @@ export class TownView {
       ctx.beginPath(); ctx.moveTo(p.x - 4, ay); ctx.lineTo(p.x + 4, ay); ctx.lineTo(p.x, ay + 5); ctx.closePath(); ctx.fill();
     }
     const walking = !!w.target && w.wait <= 0;
-    const tool = w.phase === 'work';
-    let y = p.y;
-    if (tool) y += Math.sin(t * 0.012 + w.gx) * 0.6;
-    facing(ctx, p.x, w.dir || 1, () => A.person(ctx, p.x, y, {
-      s: 0.9, walking, phase: w.t * 0.012, body: w.job === 'idle' ? '#a08560' : '#8b6a43', hat: w.job === 'idle' ? null : '#d8ae52',
-      weapon: tool || w.phase === 'out' ? 'tool' : null, carry: w.phase === 'back' ? CARRY[w.job] : null, skin: w.skin,
+    const working = w.phase === 'work' && w.wait > 0 && w.job !== 'idle';
+    const idle = w.job === 'idle';
+    facing(ctx, p.x, w.dir || 1, () => A.person(ctx, p.x, p.y, {
+      s: 0.9, walking, working, phase: working ? w.t * 0.009 + w.gx : w.t * 0.012, skin: w.skin,
+      body: idle ? '#a08560' : ['#8b6a43', '#7a5a3a', '#6f7f4a', '#8a5a4a'][w.skin % 4], hat: idle ? null : '#d8ae52',
+      weapon: idle || w.phase === 'back' ? null : 'tool', tool: TOOL[w.job], carry: w.phase === 'back' && !idle ? w.job : null,
     }));
   }
 
@@ -1801,7 +1907,7 @@ export class TownView {
     if (b.level === 0) {
       const p = job ? Math.min(1, Math.max(0, (now - job.start) / (job.end - job.start))) : 0;
       A.scaffold(ctx, c.x, c.y, size, p);
-      A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', phase: t * 0.01 });
+      facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
       A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team), c.x, c.y);
