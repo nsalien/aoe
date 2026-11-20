@@ -6,6 +6,12 @@ const TAU = Math.PI * 2;
 function disc(c, x, y, r, col) {
   c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
 }
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const t = amt < 0 ? 0 : 255; const p = Math.abs(amt);
+  const f = (c) => Math.round(c + (t - c) * p);
+  return `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
 function rnd(seed) {
   let s = seed >>> 0 || 1;
   return () => { s = Math.imul(s ^ (s >>> 15), 2246822507) ^ Math.imul(s ^ (s >>> 13), 3266489909); s ^= s >>> 16; return (s >>> 0) / 4294967296; };
@@ -36,24 +42,40 @@ function trunk(c, x, y, s, h, col = '#6b4423') {
   c.fillStyle = 'rgba(255,230,190,0.18)'; c.fillRect(x - 1.3 * s, y - h * s, 0.6 * s, h * s);
 }
 
-// loofkruin uit overlappende bollen: donker onder, licht boven, wat bladstructuur
+// loofkruin: donkere rand, drie tinten en honderden blaadjes (licht van linksboven)
 function canopy(c, x, y, s, blobs, pal, seed) {
   const [dark, mid, light] = pal;
-  for (const [dx, dy, r] of blobs) disc(c, x + (dx + 1.2) * s, y + (dy + 1.6) * s, r * s, dark);
+  const deep = shade(dark, -0.4);
+  for (const [dx, dy, r] of blobs) disc(c, x + (dx + 0.7) * s, y + (dy + 1) * s, (r + 0.9) * s, deep);
+  for (const [dx, dy, r] of blobs) disc(c, x + (dx + 1.1) * s, y + (dy + 1.5) * s, r * s, dark);
   for (const [dx, dy, r] of blobs) disc(c, x + dx * s, y + dy * s, r * s * 0.94, mid);
-  c.globalAlpha = 0.85;
-  for (const [dx, dy, r] of blobs) disc(c, x + (dx - r * 0.28) * s, y + (dy - r * 0.32) * s, r * s * 0.5, light);
-  c.globalAlpha = 1;
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity; let area = 0;
+  for (const [dx, dy, r] of blobs) { x0 = Math.min(x0, dx - r); y0 = Math.min(y0, dy - r); x1 = Math.max(x1, dx + r); y1 = Math.max(y1, dy + r); area += r * r; }
+  const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const span = Math.max(x1 - x0, y1 - y0) / 2;
+  c.save();
+  c.beginPath();
+  for (const [dx, dy, r] of blobs) { c.moveTo(x + (dx + r * 1.02) * s, y + dy * s); c.arc(x + dx * s, y + dy * s, r * 1.02 * s, 0, TAU); }
+  c.clip();
+  const g = c.createLinearGradient(x + x0 * s, y + y0 * s, x + x1 * s, y + y1 * s);
+  g.addColorStop(0, 'rgba(255,255,215,0.28)'); g.addColorStop(0.45, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,25,0,0.38)');
+  c.fillStyle = g; c.fillRect(x + (x0 - 2) * s, y + (y0 - 2) * s, (x1 - x0 + 4) * s, (y1 - y0 + 4) * s);
   const R = rnd(seed);
-  for (const [dx, dy, r] of blobs) {
-    for (let k = 0; k < 5; k++) {
-      const a = R() * TAU; const d = R() * r * 0.8;
-      const px = x + (dx + Math.cos(a) * d) * s; const py = y + (dy + Math.sin(a) * d) * s;
-      const top = Math.sin(a) < -0.2 && Math.cos(a) < 0.3;
-      c.fillStyle = top ? 'rgba(255,255,210,0.28)' : 'rgba(10,35,10,0.22)';
-      c.beginPath(); c.ellipse(px, py, 1.3 * s, 0.8 * s, a, 0, TAU); c.fill();
-    }
+  const n = Math.round(area * 1.6);
+  const total = blobs.reduce((t, b) => t + b[2] * b[2], 0);
+  for (let k = 0; k < n; k++) {
+    let pick = R() * total; let bl = blobs[0];
+    for (const b of blobs) { pick -= b[2] * b[2]; if (pick <= 0) { bl = b; break; } }
+    const a = R() * TAU; const d = Math.sqrt(R()) * bl[2];
+    const px = bl[0] + Math.cos(a) * d; const py = bl[1] + Math.sin(a) * d;
+    const lit = ((px - cx) + (py - cy)) / span;
+    const v = R();
+    c.fillStyle = lit < -0.35 ? (v < 0.6 ? light : mid) : lit > 0.4 ? (v < 0.65 ? dark : deep) : (v < 0.4 ? light : v < 0.8 ? mid : dark);
+    c.globalAlpha = 0.75 + v * 0.25;
+    c.beginPath(); c.ellipse(x + px * s, y + py * s, 1.35 * s, 0.8 * s, R() * TAU, 0, TAU); c.fill();
+    if (lit < -0.2 && v > 0.85) { c.fillStyle = 'rgba(255,255,220,0.7)'; c.fillRect(x + px * s, y + py * s - 0.4 * s, 0.7 * s, 0.5 * s); }
   }
+  c.globalAlpha = 1;
+  c.restore();
 }
 
 function oak(c, x, y, s, pal, seed) {
@@ -108,6 +130,15 @@ function conifer(c, x, y, s, pal, tiers, width, height) {
     c.beginPath(); c.moveTo(x - w, yb); c.lineTo(x, yt); c.lineTo(x - w * 0.15, yb); c.closePath(); c.fill();
     c.globalAlpha = 1;
     c.fillStyle = 'rgba(0,20,10,0.25)'; c.fillRect(x + w * 0.25, yt, w, yb - yt + 2 * s);
+    // naalden
+    const R = rnd(i * 97 + Math.round(w * 13));
+    c.lineWidth = 0.55 * s;
+    for (let k = 0; k < 46; k++) {
+      const u = R() * 2 - 1; const vv = R();
+      const px = x + u * w * (1 - vv * 0.85); const py = yb - vv * (yb - yt) * 0.95;
+      c.strokeStyle = u < -0.15 ? (R() < 0.6 ? light : mid) : (R() < 0.6 ? dark : shade(dark, -0.35));
+      c.beginPath(); c.moveTo(px, py); c.lineTo(px + (u < 0 ? -1.4 : 1.4) * s, py + 1.3 * s); c.stroke();
+    }
     c.restore();
   }
 }
@@ -127,20 +158,30 @@ const KINDS = [
   (c, x, y) => conifer(c, x, y, 1.0, LEAF.spruce, 5, 10.5, 37),
   (c, x, y) => conifer(c, x, y, 0.95, LEAF.pine, 3, 14, 24),
 ];
-export const TREE_COUNT = KINDS.length;
+// groepjes (achteraan kleinere bomen) voor dichte bossen
+const CLUMPS = [
+  (c, x, y, k) => { oak(c, x - 12, y - 7, 0.8, LEAF.oakD, k + 1); oak(c, x + 11, y - 9, 0.75, LEAF.oak, k + 2); oak(c, x, y, 1.05, LEAF.oak, k); },
+  (c, x, y) => { conifer(c, x - 11, y - 6, 0.85, LEAF.pine, 4, 12, 30); conifer(c, x + 10, y - 9, 0.8, LEAF.spruce, 5, 10, 36); conifer(c, x, y, 1.05, LEAF.pine, 4, 13, 31); },
+  (c, x, y, k) => { conifer(c, x - 11, y - 8, 0.85, LEAF.spruce, 5, 10, 36); roundTree(c, x + 11, y - 6, 0.8, LEAF.oakY, k + 3); oak(c, x, y, 1.0, LEAF.oakY, k); },
+  (c, x, y, k) => { birch(c, x - 10, y - 7, 0.85, LEAF.birch, k + 4); oak(c, x + 10, y - 8, 0.8, LEAF.oakD, k + 5); roundTree(c, x, y, 1.0, LEAF.oak, k); },
+];
+const ALL = [...KINDS.map((f) => [f, false]), ...CLUMPS.map((f) => [f, true])];
+export const TREE_COUNT = ALL.length;
 export const CONIFERS = [8, 9, 10, 11];
 export const LEAFY = [0, 1, 2, 4, 6, 7, 0, 1, 2, 7];
 export const AUTUMN = [3, 5];
+export const CLUMP = { leafy: [12, 15], conifer: [13], mixed: [14] };
 
 // één boom als sprite in twee resoluties (scherp dichtbij, licht veraf)
 export function treeSprite(kind) {
-  const W = 64; const H = 84; const ax = 32; const ay = 78;
+  const [draw, big] = ALL[kind];
+  const W = big ? 100 : 64; const H = big ? 98 : 84; const ax = W / 2; const ay = big ? 90 : 78;
   const make = (k) => {
     const cv = document.createElement('canvas');
     cv.width = W * k; cv.height = H * k;
     const c = cv.getContext('2d');
     c.scale(k, k);
-    KINDS[kind](c, ax, ay, 9000 + kind * 31);
+    draw(c, ax, ay, 9000 + kind * 31);
     return cv;
   };
   return { cv: make(2), small: make(1), w: W, h: H, ax, ay };
@@ -218,4 +259,105 @@ export function reed(c, x, y, s) {
 export function lily(c, x, y, s, bloom) {
   c.fillStyle = '#4f8f3a'; c.beginPath(); c.ellipse(x, y, 2.8 * s, 1.4 * s, 0, 0.35, TAU - 0.15); c.lineTo(x, y); c.fill();
   if (bloom) { disc(c, x + 0.4 * s, y - 0.6 * s, 0.9 * s, '#f5c6d6'); disc(c, x + 0.4 * s, y - 0.7 * s, 0.4 * s, '#f6d046'); }
+}
+
+// ---------- naadloze bodemtexturen (per pixel, één keer bij het opstarten) ----------
+
+function hashP(x, y, p, seed) {
+  x = ((x % p) + p) % p; y = ((y % p) + p) % p;
+  let h = (x * 374761393 + y * 668265263 + seed * 982451653) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function vnoise(x, y, p, seed) {
+  const xi = Math.floor(x); const yi = Math.floor(y);
+  const fx = x - xi; const fy = y - yi;
+  const sx = fx * fx * (3 - 2 * fx); const sy = fy * fy * (3 - 2 * fy);
+  const a = hashP(xi, yi, p, seed); const b = hashP(xi + 1, yi, p, seed);
+  const c = hashP(xi, yi + 1, p, seed); const d = hashP(xi + 1, yi + 1, p, seed);
+  return (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
+}
+// periodieke ruis: naadloos herhaalbaar over 'size' pixels
+function tnoise(x, y, size, seed, oct, cells = 4) {
+  let v = 0; let amp = 0.5; let norm = 0; let p = cells;
+  for (let i = 0; i < oct; i++) {
+    v += amp * vnoise((x / size) * p, (y / size) * p, p, seed + i * 31);
+    norm += amp; amp *= 0.5; p *= 2;
+  }
+  return v / norm;
+}
+
+// grijswaardentextuur (128 = neutraal) om met 'overlay' over de bodemkleur te leggen
+export function groundTexture(kind, size = 256) {
+  const cv = document.createElement('canvas');
+  cv.width = size; cv.height = size;
+  const c = cv.getContext('2d');
+  const img = c.createImageData(size, size);
+  const d = img.data;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const o = (y * size + x) * 4;
+      const fine = hashP(x, y, size, 7) - 0.5;
+      let v;
+      if (kind === 'grass') {
+        const n = tnoise(x, y, size, 11, 5, 4);
+        const m = tnoise(x, y, size, 21, 3, 16);
+        v = 128 + (n - 0.5) * 70 + (m - 0.5) * 46 + fine * 34;
+      } else if (kind === 'forest') {
+        const n = tnoise(x, y, size, 41, 5, 6);
+        v = 124 + (n - 0.5) * 80 + fine * 40;
+      } else if (kind === 'dirt') {
+        const n = tnoise(x, y, size, 51, 5, 8);
+        const m = tnoise(x, y, size, 61, 2, 32);
+        v = 128 + (n - 0.5) * 60 + (m > 0.68 ? 26 : m < 0.3 ? -22 : 0) + fine * 30;
+      } else if (kind === 'grain') { // fijne materiaalkorrel voor gebouwen
+        const n = tnoise(x, y, size, 81, 3, 24);
+        v = 128 + (n - 0.5) * 60 + fine * 46;
+      } else { // water: zachte golfjes
+        const n = tnoise(x, y * 2.5, size, 71, 3, 6);
+        const w = Math.sin((y / size) * Math.PI * 2 * 14 + n * 9);
+        v = 128 + w * 16 + (n - 0.5) * 30;
+      }
+      v = Math.max(0, Math.min(255, v));
+      d[o] = v; d[o + 1] = v; d[o + 2] = v; d[o + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  // kleine details die naadloos doorlopen over de randen
+  const R = rnd(kind.length * 977 + size);
+  const wrap = (fn) => { for (const ox of [-size, 0, size]) for (const oy of [-size, 0, size]) { c.save(); c.translate(ox, oy); fn(); c.restore(); } };
+  if (kind === 'grass') {
+    const n = (size * size) / 26;
+    const blades = [];
+    for (let k = 0; k < n; k++) blades.push([R() * size, R() * size, R(), R()]);
+    wrap(() => {
+      for (const [x, y, a, b] of blades) {
+        c.strokeStyle = a < 0.55 ? 'rgba(0,0,0,0.32)' : 'rgba(255,255,255,0.28)';
+        c.lineWidth = 0.8;
+        c.beginPath(); c.moveTo(x, y); c.lineTo(x + (b - 0.5) * 2.4, y - 2.5 - a * 2.5); c.stroke();
+      }
+    });
+  } else if (kind === 'forest') {
+    const leaves = [];
+    for (let k = 0; k < (size * size) / 30; k++) leaves.push([R() * size, R() * size, R() * TAU, R()]);
+    wrap(() => {
+      for (const [x, y, a, b] of leaves) {
+        c.fillStyle = b < 0.4 ? 'rgba(0,0,0,0.35)' : b < 0.8 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.4)';
+        c.beginPath(); c.ellipse(x, y, 1.9, 0.9, a, 0, TAU); c.fill();
+      }
+      c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = 0.6;
+      for (let k = 0; k < 40; k++) { const [x, y, a] = leaves[k]; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * 6, y + Math.sin(a) * 3); c.stroke(); }
+    });
+  } else if (kind === 'dirt') {
+    const stones = [];
+    for (let k = 0; k < (size * size) / 90; k++) stones.push([R() * size, R() * size, 0.6 + R() * 1.4]);
+    wrap(() => {
+      for (const [x, y, r] of stones) {
+        c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(x + 0.4, y + 0.5, r, r * 0.6, 0, 0, TAU); c.fill();
+        c.fillStyle = 'rgba(255,255,255,0.35)'; c.beginPath(); c.ellipse(x, y, r * 0.85, r * 0.5, 0, 0, TAU); c.fill();
+      }
+    });
+  }
+  return cv;
 }

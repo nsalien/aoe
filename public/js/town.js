@@ -210,7 +210,10 @@ export class TownView {
       if (t.kind !== undefined && t.kindSeed === sd) continue;
       const zone = fbm(t.i / 9, t.j / 9, sd + 301, 2);
       const h = hashInt(t.i, t.j, sd + 302);
-      const list = h < 0.06 ? NAT.AUTUMN : zone < 0.42 ? (h < 0.8 ? NAT.CONIFERS : NAT.LEAFY) : zone > 0.56 ? (h < 0.85 ? NAT.LEAFY : NAT.CONIFERS) : (h < 0.5 ? NAT.LEAFY : NAT.CONIFERS);
+      const forest = this.terr.tiles[tileIndex(t.i, t.j)] === TILE.FOREST;
+      const clump = forest && hashInt(t.i, t.j, sd + 304) < 0.55;
+      const list = clump ? (zone < 0.42 ? NAT.CLUMP.conifer : zone > 0.56 ? NAT.CLUMP.leafy : NAT.CLUMP.mixed)
+        : h < 0.06 ? NAT.AUTUMN : zone < 0.42 ? (h < 0.8 ? NAT.CONIFERS : NAT.LEAFY) : zone > 0.56 ? (h < 0.85 ? NAT.LEAFY : NAT.CONIFERS) : (h < 0.5 ? NAT.LEAFY : NAT.CONIFERS);
       t.kind = list[Math.floor(hashInt(t.j, t.i, sd + 303) * list.length)];
       t.kindSeed = sd;
     }
@@ -289,7 +292,25 @@ export class TownView {
     g.scale(BAKE, BAKE);
     g.translate(W / 2, 0);
     g.translate(-origin.x, -origin.y);
+    const WM = g.getTransform(); // wereldruimte
+    const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
     const mid = N / 2;
+    // naadloze texturen (één keer per sessie)
+    if (!this.tex) {
+      const ts = FX.LOW_POWER ? 128 : 256;
+      this.tex = { grass: NAT.groundTexture('grass', ts), forest: NAT.groundTexture('forest', ts), dirt: NAT.groundTexture('dirt', ts), water: NAT.groundTexture('water', ts) };
+    }
+    // textuur over een vorm leggen; de vorm wordt in tegelruimte opgebouwd, de textuur ligt in wereldpixels
+    const texture = (kind, alpha, shape) => {
+      g.save();
+      g.setTransform(WM); g.transform(...ISO);
+      g.beginPath(); shape();
+      g.setTransform(WM);
+      g.globalCompositeOperation = 'overlay'; g.globalAlpha = alpha;
+      g.fillStyle = g.createPattern(this.tex[kind], 'repeat');
+      g.fill('nonzero');
+      g.restore();
+    };
     this.pond = terr.pond;
     this.near = terr.near;
     this.pasture = terr.pasture;
@@ -358,6 +379,15 @@ export class TownView {
       g.drawImage(base, T_MIN, T_MIN, T_W, T_W);
       g.restore();
     }
+    texture('grass', 0.62, () => g.rect(T_MIN, T_MIN, T_W, T_W));
+    texture('forest', 0.75, () => {
+      for (let j = T_MIN; j < T_MAX; j++) {
+        for (let i = T_MIN; i < T_MAX; i++) {
+          if (forestD[tileIndex(i, j)] < 0.45) continue;
+          g.moveTo(i + 0.5 + 0.9, j + 0.5); g.arc(i + 0.5, j + 0.5, 0.9, 0, Math.PI * 2);
+        }
+      }
+    });
     // fijne korrel in het gras (anders oogt de grond te glad)
     {
       const n = FX.LOW_POWER ? 9000 : 22000;
@@ -396,6 +426,7 @@ export class TownView {
     const deep = lakes.filter(([x, y]) => [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dy]) => wet.has(`${x - 0.5 + dx},${y - 0.5 + dy}`)));
     blob(lakes, 1.02, 'rgba(160,140,90,0.55)');
     blob(lakes, 0.9, '#d9c890');
+    blob(lakes, 0.84, 'rgba(245,250,255,0.75)');
     blob(lakes, 0.8, '#5a9fce');
     blob(lakes, 0.74, '#3d86bd');
     blob(deep, 0.74, '#387fb5');
@@ -425,7 +456,18 @@ export class TownView {
     g.fillStyle = grad; g.beginPath(); g.arc(mid, mid, 3.3, 0, Math.PI * 2); g.fill();
     g.fillStyle = '#a99a62'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.55, pd.r * 0.8 + 0.55, 0.4, 0, Math.PI * 2); g.fill();
     g.fillStyle = '#dccb92'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.38, pd.r * 0.8 + 0.38, 0.4, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(245,250,255,0.75)'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.1, pd.r * 0.8 + 0.1, 0.4, 0, Math.PI * 2); g.fill();
     g.fillStyle = '#2f6f9e'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(20,50,90,0.35)'; g.beginPath(); g.ellipse(pd.x + 0.2, pd.y + 0.15, pd.r * 0.6, pd.r * 0.45, 0.4, 0, Math.PI * 2); g.fill();
+    texture('dirt', 0.8, () => {
+      g.rect(mid - 0.45, T_MIN, 0.9, T_W); g.rect(T_MIN, mid - 0.45, T_W, 0.9);
+      g.moveTo(mid + 3.3, mid); g.arc(mid, mid, 3.3, 0, Math.PI * 2);
+    });
+    texture('water', 0.5, () => {
+      for (const [x, y] of lakes) { g.moveTo(x + 0.74, y); g.arc(x, y, 0.74, 0, Math.PI * 2); }
+      g.moveTo(pd.x + pd.r, pd.y); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2);
+    });
+    g.setTransform(WM); g.transform(...ISO);
     for (const k of ['stone', 'gold']) {
       const d = this.near[k];
       g.fillStyle = k === 'gold' ? 'rgba(140,110,65,0.45)' : 'rgba(150,145,130,0.45)';
@@ -809,7 +851,8 @@ export class TownView {
       this.drawSheep(ctx, sh, t);
       top = 24;
     } else if (n.kind === 'tree') {
-      A.broadleaf(ctx, p.x - 3, p.y, 1.45, 0.75);
+      const spr = this.trees[1];
+      ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1);
       // stapeltje brandhout
       for (let i = 0; i < 3; i++) {
         const lx = p.x + 10; const ly = p.y + 3 - i * 3.2;
