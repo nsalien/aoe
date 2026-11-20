@@ -324,15 +324,3 @@ export class Flutter {
     }
   }
 }
-
-// vignet aan de schermranden (schermcoördinaten)
-export function vignette(ctx, w, h, strength = 0.35) {
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, `rgba(10,8,4,${strength})`);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
-}
