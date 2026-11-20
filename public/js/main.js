@@ -5,8 +5,8 @@ import { WorldView } from './world.js';
 import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
-import { advance } from '../shared/sim.js';
-import { RES, RES_NAMES, BUILDINGS, BONUS, fmtDuration } from '../shared/rules.js';
+import { advance, groupPos, isVillagerGroup, campAlive, tcDoor } from '../shared/sim.js';
+import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -129,13 +129,14 @@ function startGame(data) {
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
-    town.onVillagerSelect = (v) => {
-      const hint = $('#placeHint');
-      if (!v) { if (!app.placing) hint.hidden = true; return; }
-      const job = v.job === 'idle' ? 'niets aan het doen' : `aan het werk met ${RES_NAMES[v.job].toLowerCase()}`;
-      hint.hidden = false;
-      hint.innerHTML = `Dorpeling gekozen (${job}). Klik op een <b>vondst</b> om te oogsten.<button class="btn small" data-action="cancelVillager">Annuleren</button>`;
+    town.onSelChange = (sel) => {
+      const g = sel && sel.type === 'group' ? sel.id : null;
+      const changed = g !== app.selGroup;
+      app.selGroup = g;
+      renderSelHint();
+      if (changed && app.view === 'town') renderPanel();
     };
+    town.onFieldOrder = fieldOrder;
     town.onHarvested = (node) => toast(`Je dorpeling bracht ${node.amount} ${RES_NAMES[node.res].toLowerCase()} mee!`, 'ok', 'star');
     town.onCelebrate = (b) => {
       celebrateQueue.push(b);
@@ -213,7 +214,10 @@ function computeLive(force) {
     JSON.stringify(s.units), JSON.stringify(s.villagers), s.rally,
     (s.nodes || []).map((n) => `${n.id}${n.claimed ? 'c' : ''}`).join(','),
     (s.harvests || []).map((h) => h.id).join(','),
+    (s.field || []).map((g) => `${g.id}${g.pending ? 'p' : ''}${g.work ? g.work.type : ''}${g.order ? g.order.type : ''}`).join(','),
+    s.terr ? `${s.terr.cl.length}:${s.terr.lid}:${s.terr.camp.down}:${Object.values(s.terr.boar).join('.')}` : '',
   ].join('|');
+  if (s.terr) announceLog(s.terr);
   const changed = sig !== app.sig;
   app.sig = sig;
   if (changed || force) {
@@ -222,6 +226,15 @@ function computeLive(force) {
   }
   town.state = s;
   return false;
+}
+
+// nieuwe gebeurtenissen in je gebied (everzwijn gevangen, overval, ...) als melding tonen
+const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star' };
+function announceLog(terr) {
+  if (app.lastLid == null || terr.lid < app.lastLid) { app.lastLid = terr.lid; return; }
+  if (terr.lid === app.lastLid) return;
+  for (const e of terr.log) if (e.id > app.lastLid) toast(e.text, /lost/.test(e.kind) ? 'err' : 'ok', LOG_ICON[e.kind] || 'star');
+  app.lastLid = terr.lid;
 }
 
 async function poll() {
@@ -317,12 +330,73 @@ function renderPhase() {
 function renderAlert() {
   const el = $('#alert');
   const hostile = app.data.marches.filter((m) => !m.ally && m.status === 'out' && m.arriveAt > app.now()).sort((a, b) => a.arriveAt - b.arriveAt);
+  const raid = raidIncoming();
+  if (!hostile.length && raid) {
+    el.hidden = false;
+    el.dataset.action = 'raidGo';
+    setHTML(el, `${UI.icon('bell')} Barbaren op weg naar je dorp! Aankomst over <span data-end="${raid}">${fmtDuration(raid - app.now())}</span>`);
+    return;
+  }
   if (!hostile.length) { el.hidden = true; return; }
   const m = hostile[0];
   el.hidden = false;
   el.dataset.action = 'alertGo';
   el.dataset.x = m.to.x; el.dataset.y = m.to.y;
   setHTML(el, `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`);
+}
+
+// komt er een overval van het barbarenkamp aan? (tijdstip van aankomst of null)
+function raidIncoming() {
+  const s = app.live;
+  if (!s || !s.terr || s.terr.camp.next == null) return null;
+  const now = app.now();
+  const at = s.terr.camp.next;
+  return campAlive(s, now) && now >= at - WILD.raid.warnMs && now < at ? at : null;
+}
+
+// uitleg bovenaan als je een dorpeling, soldaat of groep gekozen hebt
+function renderSelHint() {
+  if (app.placing) return;
+  const hint = $('#placeHint');
+  const sel = town.sel;
+  const g = sel && sel.type === 'group' ? town.selGroup() : null;
+  if (!sel || (sel.type === 'group' && !g)) { hint.hidden = true; return; }
+  let who; let extra = '';
+  if (sel.type === 'walker') who = `Dorpeling${sel.w.job === 'idle' ? '' : ` (${RES_NAMES[sel.w.job].toLowerCase()})`}`;
+  else if (sel.type === 'soldier') who = UNITS[sel.kind].name;
+  else {
+    who = UI.unitsText(g.units);
+    if (!(g.order && g.order.type === 'home' && g.pending)) extra = `<button class="btn small" data-action="fieldHome" data-id="${g.id}">${UI.icon('home')} Naar huis</button>`;
+  }
+  const villager = sel.type === 'walker' || (g && isVillagerGroup(g));
+  const what = villager
+    ? `Tik op de grond, een boom aan de rand${sel.type === 'walker' ? ', een vondst' : ''} of een bron.`
+    : 'Tik op de grond, een everzwijn of het barbarenkamp.';
+  hint.hidden = false;
+  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}</span></span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
+}
+
+// opdracht voor een groep in het veld (de server controleert alles opnieuw)
+async function fieldOrder(p) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return null; }
+  const before = new Set((app.live.field || []).map((g) => g.id));
+  const r = await act('/field', { action: p.action, id: p.id, spec: p.spec, from: p.from, to: p.to, target: p.target });
+  if (!r) { if (p.action === 'send') town.clearSel(); return null; }
+  if (p.action === 'send') {
+    const g = (app.live.field || []).find((x) => !before.has(x.id));
+    if (g) town.setSel({ type: 'group', id: g.id });
+  }
+  renderSelHint();
+  return r;
+}
+
+function readFieldUnits() {
+  const units = {};
+  for (const i of document.querySelectorAll('[data-field-unit]')) {
+    const n = Math.floor(Number(i.value) || 0);
+    if (n > 0) units[i.dataset.fieldUnit] = n;
+  }
+  return units;
 }
 
 function renderViewTitle() {
@@ -688,6 +762,7 @@ const actions = {
     const err = el.classList.contains('locked') || el.classList.contains('poor') ? el.title.split(': ').slice(1).join(': ') : null;
     if (err) { toast(err, 'err'); return; }
     app.placing = type;
+    town.clearSel();
     town.placing = type;
     town.selected = null;
     app.selBuilding = null;
@@ -700,8 +775,33 @@ const actions = {
   },
   cancelPlace,
   cancelVillager() {
-    town.selVillager = null;
+    town.clearSel();
     $('#placeHint').hidden = true;
+  },
+  fieldPick(el) {
+    const g = (app.live.field || []).find((x) => x.id === Number(el.dataset.id));
+    if (!g) return;
+    town.setSel({ type: 'group', id: g.id });
+    const p = groupPos(g, app.now());
+    town.centerOnPos(p.x, p.y);
+    openPanelMobile(false);
+  },
+  fieldHome(el) { fieldOrder({ action: 'order', id: Number(el.dataset.id), target: { type: 'home' } }); },
+  fieldVillager() {
+    const d = tcDoor();
+    fieldOrder({ action: 'send', spec: { villager: 'idle' }, to: { x: d.gx, y: d.gy + 1.6 } }).then((r) => { if (r) openPanelMobile(false); });
+  },
+  fieldSend() {
+    const units = readFieldUnits();
+    if (!Object.keys(units).length) { toast('Kies hoeveel soldaten er op pad gaan.', 'err'); return; }
+    const d = tcDoor();
+    fieldOrder({ action: 'send', spec: { units }, to: { x: d.gx + 0.8, y: d.gy + 1.8 } }).then((r) => { if (r) openPanelMobile(false); });
+  },
+  raidGo() {
+    if (app.view !== 'town') switchView('town');
+    const c = app.live.terr && app.live.terr.camp;
+    town.centerOn(app.live.buildings.find((b) => b.type === 'tc'));
+    if (c) toast('Hoe sterker je muur, torens en leger thuis, hoe beter je de barbaren afslaat.', '', 'shield');
   },
   harvest(el) { harvestNode(Number(el.dataset.id), null); },
   vill(el) { changeVillagers(el.dataset.res, Number(el.dataset.d)); },
@@ -822,6 +922,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
     else if (app.placing) cancelPlace();
+    else if (town && town.sel) actions.cancelVillager();
     else if (app.selBuilding) actions.deselect();
   }
 });

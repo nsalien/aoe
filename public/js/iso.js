@@ -67,7 +67,8 @@ export class Camera {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      if (this.onRightClick) this.onRightClick();
+      const p = this._pos(e);
+      if (this.onRightClick) this.onRightClick(p.x, p.y);
     });
     c.addEventListener('wheel', (e) => {
       if (!this.enabled) return;
