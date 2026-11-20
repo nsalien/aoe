@@ -5,7 +5,7 @@ import { WorldView } from './world.js';
 import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -172,6 +172,8 @@ function maybeShowIntro() {
 function applyState(data, first = false) {
   const prevPhase = app.data && app.data.world.phase;
   app.data = data;
+  app.serverState = data.town.state;
+  if (fieldQueue.length) setBaseState(data.town.state);
   const off = data.now - Date.now();
   if (first || Math.abs(off - app.offset) > 1500) app.offset = off;
   app.canAct = data.world.phase === 'prep' || data.world.phase === 'war';
@@ -238,7 +240,7 @@ function announceLog(terr) {
 }
 
 async function poll() {
-  if (document.hidden || !app.data) return;
+  if (document.hidden || !app.data || fieldQueue.length) return;
   try {
     const data = await get('/state');
     applyState(data);
@@ -377,17 +379,71 @@ function renderSelHint() {
 }
 
 // opdracht voor een groep in het veld (de server controleert alles opnieuw)
+// Opdrachten voor groepen in het veld voeren we meteen zelf uit (zelfde spelregels als de server), zodat
+// een mannetje direct begint te lopen. De server krijgt het tijdstip mee en rekent exact hetzelfde pad na.
+// Opdrachten gaan één voor één naar de server; wat nog niet bevestigd is, leggen we telkens opnieuw
+// bovenop de laatste toestand van de server.
+const fieldQueue = [];
+let fieldBusy = false;
+
+function applyFieldOp(s, op) {
+  advance(s, Math.min(op.at, app.data.world.warEnd), app.data.world.speed);
+  if (op.action === 'send') return doFieldSend(s, op.spec || {}, op.from, op.to, op.target, op.at);
+  return doFieldOrder(s, op.id, op.to, op.target, op.at);
+}
+
+function setBaseState(state) {
+  let s = state;
+  for (const op of fieldQueue) {
+    if ((s.field || []).some((g) => g.t0 === op.at)) continue; // zit al in de toestand van de server
+    try { const c = structuredClone(s); applyFieldOp(c, op); s = c; } catch { /* de server zal het ook weigeren */ }
+  }
+  app.data.town.state = s;
+}
+
 async function fieldOrder(p) {
   if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return null; }
-  const before = new Set((app.live.field || []).map((g) => g.id));
-  const r = await act('/field', { action: p.action, id: p.id, spec: p.spec, from: p.from, to: p.to, target: p.target });
-  if (!r) { if (p.action === 'send') town.clearSel(); return null; }
-  if (p.action === 'send') {
-    const g = (app.live.field || []).find((x) => !before.has(x.id));
-    if (g) town.setSel({ type: 'group', id: g.id });
+  const op = { action: p.action, id: p.id, spec: p.spec, from: p.from, to: p.to, target: p.target, at: Math.round(app.now()) };
+  let g;
+  try {
+    const s = structuredClone(app.data.town.state);
+    g = applyFieldOp(s, op);
+    app.data.town.state = s;
+  } catch (e) {
+    toast(e.message, 'err');
+    if (p.action === 'send') town.clearSel();
+    return null;
   }
+  fieldQueue.push(op);
+  computeLive(true);
+  if (p.action === 'send' && g) town.setSel({ type: 'group', id: g.id });
   renderSelHint();
-  return r;
+  renderPanel();
+  pumpField();
+  return g;
+}
+
+async function pumpField() {
+  if (fieldBusy) return;
+  fieldBusy = true;
+  while (fieldQueue.length) {
+    const op = fieldQueue[0];
+    try {
+      const r = await post('/field', { action: op.action, id: op.id, spec: op.spec, from: op.from, to: op.to, target: op.target, at: op.at });
+      fieldQueue.shift();
+      app.serverState = r.state;
+      setBaseState(r.state);
+    } catch (e) {
+      fieldQueue.shift();
+      if (app.serverState) setBaseState(app.serverState);
+      toast(e.message, 'err');
+      if (e.status === 401) location.reload();
+    }
+    computeLive(true);
+    renderAll();
+    renderSelHint();
+  }
+  fieldBusy = false;
 }
 
 function readFieldUnits() {
@@ -516,7 +572,8 @@ async function act(path, body, okMsg) {
   try {
     const r = await post(path, body);
     if (r.state) {
-      app.data.town.state = r.state;
+      app.serverState = r.state;
+      setBaseState(r.state);
       computeLive(true);
       renderAll();
     }

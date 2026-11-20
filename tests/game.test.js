@@ -225,7 +225,7 @@ test('oude steden zonder vondsten worden netjes bijgewerkt', () => {
 
 // ---------- eigen gebied ----------
 import {
-  ensureTerritory, doFieldSend, doFieldOrder, canChop, isBuildable as tileBuildable, depLeft, campSize, raidSize,
+  ensureTerritory, doFieldSend, doFieldOrder, canChop, groupPos, isBuildable as tileBuildable, depLeft, campSize, raidSize,
 } from '../public/shared/sim.js';
 import { territory, exHas, exDecode, T_MIN } from '../public/shared/territory.js';
 import { WILD, FIELD } from '../public/shared/rules.js';
@@ -329,6 +329,24 @@ test('een klein groepje jaagt een everzwijn neer; dorpelingen jagen niet', () =>
   assert.ok((s.field.find((x) => x.id === g.id) || { units: {} }).units.spear >= 2, 'hooguit één speerdrager verloren');
   const v = doFieldSend(s, { villager: 'food' }, null, { x: boar.x, y: boar.y }, null, s.t);
   assert.throws(() => doFieldOrder(s, v.id, null, { type: 'boar', id: boar.id }, s.t), /Dorpelingen vechten niet/);
+});
+
+test('browser en server berekenen hetzelfde pad als de server het tijdstip van de klik gebruikt', () => {
+  const base = terrTown();
+  const at = 5000;
+  // browser: meteen bij de klik
+  const c = structuredClone(base);
+  advance(c, at, 1);
+  const gc = doFieldSend(c, { villager: 'food' }, null, { x: -6, y: 4 }, null, at);
+  // server: krijgt de opdracht iets later binnen, met hetzelfde tijdstip
+  const s = structuredClone(base);
+  advance(s, at + 400, 1);
+  const gs = doFieldSend(s, { villager: 'food' }, null, { x: -6, y: 4 }, null, at);
+  assert.equal(gs.id, gc.id);
+  assert.deepEqual(groupPos(gs, at + 2000), groupPos(gc, at + 2000));
+  advance(c, at + 60000, 1); advance(s, at + 60000, 1);
+  assert.deepEqual(s.field, c.field);
+  assert.equal(s.terr.ex, c.terr.ex);
 });
 
 test('barbarenkamp verwoesten stopt de overvallen even', () => {
