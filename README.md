@@ -27,6 +27,8 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
   Alles wordt procedureel getekend met Canvas — er zijn geen afbeeldingsbestanden nodig.
 - **Wereldkaart** met heuvels, bergen, bossen, meren en kust, de gebieden van elk team in hun kleur,
   roverskampen met kampvuren, en legers die zichtbaar over de kaart marcheren.
+- **Vondsten**: af en toe verschijnt er rond je stad een verdwaald schaap, een eik vol brandhout, rotsblokken of een goudader.
+  Klik een dorpeling aan en dan de vondst: hij haalt de buit op en gaat daarna terug aan zijn werk.
 - **Economie**: voedsel, hout, steen en goud. Dorpelingen werken op werkplekken (boerderijen, kampen, mijnen).
   Opslag, bevolking (huizen) en 4 tijdperken.
 - **14 gebouwen** met elk meerdere niveaus, **7 soorten troepen** (speerdrager, zwaardvechter, boogschutter,

@@ -4,8 +4,9 @@ import { TownView } from './town.js';
 import { WorldView } from './world.js';
 import * as UI from './ui.js';
 import * as FX from './fx.js';
+import { setHTML, resetHTML } from './dom.js';
 import { advance } from '../shared/sim.js';
-import { RES, BUILDINGS, fmtDuration } from '../shared/rules.js';
+import { RES, RES_NAMES, BUILDINGS, BONUS, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -127,6 +128,15 @@ function startGame(data) {
     town.onSelect = (b) => { app.selBuilding = b ? b.id : null; renderPanel(); openPanelMobile(!!b); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
+    town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
+    town.onVillagerSelect = (v) => {
+      const hint = $('#placeHint');
+      if (!v) { if (!app.placing) hint.hidden = true; return; }
+      const job = v.job === 'idle' ? 'niets aan het doen' : `aan het werk met ${RES_NAMES[v.job].toLowerCase()}`;
+      hint.hidden = false;
+      hint.innerHTML = `Dorpeling gekozen (${job}). Klik op een <b>vondst</b> om te oogsten.<button class="btn small" data-action="cancelVillager">Annuleren</button>`;
+    };
+    town.onHarvested = (node) => toast(`Je dorpeling bracht ${node.amount} ${RES_NAMES[node.res].toLowerCase()} mee!`, 'ok', 'star');
     town.onCelebrate = (b) => {
       celebrateQueue.push(b);
       clearTimeout(celebrateTimer);
@@ -201,6 +211,8 @@ function computeLive(force) {
     Object.entries(s.queues).map(([k, q]) => `${k}${q.length}:${q[0].done}`).join(','),
     s.buildings.map((b) => b.level).join(''),
     JSON.stringify(s.units), JSON.stringify(s.villagers), s.rally,
+    (s.nodes || []).map((n) => `${n.id}${n.claimed ? 'c' : ''}`).join(','),
+    (s.harvests || []).map((h) => h.id).join(','),
   ].join('|');
   const changed = sig !== app.sig;
   app.sig = sig;
@@ -292,14 +304,14 @@ function renderResBar() {
   for (const r of RES) if (live.res[r] - prev[r] > cap * 0.02) app.bumpUntil[r] = now + 700;
   app.prevRes = { ...live.res };
   const bumps = RES.filter((r) => (app.bumpUntil[r] || 0) > now);
-  $('#resbar').innerHTML = UI.resBarHtml(live, app.data.world.speed, bumps);
+  setHTML($('#resbar'), UI.resBarHtml(live, app.data.world.speed, bumps));
 }
 
 function renderPhase() {
   const p = UI.phaseHtml(app.data.world, app.now());
   const el = $('#phase');
   el.className = `phase ${p.cls}`;
-  el.innerHTML = p.html;
+  setHTML(el, p.html);
 }
 
 function renderAlert() {
@@ -310,7 +322,7 @@ function renderAlert() {
   el.hidden = false;
   el.dataset.action = 'alertGo';
   el.dataset.x = m.to.x; el.dataset.y = m.to.y;
-  el.innerHTML = `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`;
+  setHTML(el, `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`);
 }
 
 function renderViewTitle() {
@@ -320,21 +332,41 @@ function renderViewTitle() {
     : 'De Vallei<small>Wereldkaart · sleep om rond te kijken</small>';
 }
 
-function renderBuildBar() {
+// Panelen niet verversen terwijl je erop klikt of in een veld typt (anders gaan klikken verloren).
+const busy = { panel: false, buildbar: false };
+const pending = { panel: false, buildbar: false };
+function isBusy(id) {
+  if (busy[id]) return true;
+  const a = document.activeElement;
+  return id === 'panel' && a && $('#panel').contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName);
+}
+function flushPending() {
+  if (pending.panel && !isBusy('panel')) renderPanel();
+  if (pending.buildbar && !isBusy('buildbar')) renderBuildBar();
+}
+for (const id of ['panel', 'buildbar']) {
+  document.getElementById(id).addEventListener('pointerdown', () => { busy[id] = true; });
+}
+const release = () => setTimeout(() => { busy.panel = false; busy.buildbar = false; flushPending(); }, 0);
+document.addEventListener('pointerup', release);
+document.addEventListener('pointercancel', release);
+document.getElementById('panel').addEventListener('focusout', () => setTimeout(flushPending, 0));
+
+function renderBuildBar(force = false) {
   const bb = $('#buildbar');
   bb.hidden = app.view !== 'town' || !app.canAct;
   if (bb.hidden) return;
-  const scroll = bb.scrollLeft;
-  bb.innerHTML = UI.buildBarHtml(app.live, app.placing, app.data.team.color);
-  bb.scrollLeft = scroll;
+  if (!force && isBusy('buildbar')) { pending.buildbar = true; return; }
+  pending.buildbar = false;
+  setHTML(bb, UI.buildBarHtml(app.live, app.placing, app.data.team.color));
 }
 
-function renderPanel() {
+function renderPanel(force = false) {
   const panel = $('#panel');
-  const vals = {};
-  for (const el of panel.querySelectorAll('input[id], select[id]')) vals[el.id] = el.value;
-  const focus = document.activeElement && panel.contains(document.activeElement) ? document.activeElement.id : null;
-  const scroll = panel.scrollTop;
+  const key = `${app.view}|${app.selBuilding}|${world && world.selected ? world.selected.kind + world.selected.obj.id : ''}`;
+  const newContext = key !== app.panelKey;
+  if (!newContext && !force && isBusy('panel')) { pending.panel = true; return; }
+  pending.panel = false;
   let html;
   if (app.view === 'town') {
     const b = app.selBuilding && app.live.buildings.find((x) => x.id === app.selBuilding);
@@ -344,17 +376,20 @@ function renderPanel() {
   } else {
     html = UI.worldPanelHtml(app, world.selected);
   }
-  const key = `${app.view}|${app.selBuilding}|${world && world.selected ? world.selected.kind + world.selected.obj.id : ''}`;
-  panel.innerHTML = html;
-  if (key !== app.panelKey) {
+  if (newContext) {
+    // ander gebouw of andere weergave: alles vervangen en zacht laten inschuiven
     app.panelKey = key;
+    resetHTML(panel);
+    setHTML(panel, html);
+    panel.scrollTop = 0;
     panel.classList.remove('enter'); void panel.offsetWidth; panel.classList.add('enter');
+    clearTimeout(app.enterTimer);
+    app.enterTimer = setTimeout(() => panel.classList.remove('enter'), 450);
+  } else {
+    setHTML(panel, html);
   }
-  for (const [id, v] of Object.entries(vals)) { const el = document.getElementById(id); if (el && panel.contains(el)) el.value = v; }
-  if (focus) { const el = document.getElementById(focus); if (el) el.focus(); }
-  panel.scrollTop = scroll;
   updateTimers();
-  if (panel.querySelector('#allyList')) fillAllyList();
+  if (panel.querySelector('#allyList') && !panel.querySelector('#allyList')._filled) fillAllyList();
 }
 
 async function fillAllyList() {
@@ -368,6 +403,7 @@ async function fillAllyList() {
   cur.innerHTML = allies.length
     ? allies.map((m) => `<div class="row"><span class="grow">${UI.esc(m.player)} — ${UI.esc(m.town)}</span><button class="btn small" data-action="sendTo" data-kind="trade" data-id="${m.townId}">Karavaan</button></div>`).join('')
     : 'Je hebt (nog) geen bondgenoot.';
+  cur._filled = true;
 }
 
 function renderLightBtn() {
@@ -419,6 +455,15 @@ async function act(path, body, okMsg) {
   }
 }
 
+async function harvestNode(nodeId, job) {
+  $('#placeHint').hidden = !app.placing;
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const node = (app.live.nodes || []).find((n) => n.id === nodeId);
+  const r = await act('/harvest', { nodeId, job });
+  if (r && node) toast(`Een dorpeling gaat de ${BONUS.kinds[node.kind].name.toLowerCase()} oogsten`, '', 'people');
+  if (!r) town.pendingFrom = null;
+}
+
 async function placeBuilding(type, x, y, keep) {
   const r = await act('/build', { type, x, y }, `${BUILDINGS[type].name} wordt gebouwd`);
   if (!r || !keep) cancelPlace();
@@ -446,14 +491,26 @@ function changeVillagers(res, d) {
   used += step;
   alloc.idle = total - used;
   app.pendingAlloc = alloc;
-  renderPanel();
+  allocSeq++;
+  renderPanel(true);
   clearTimeout(allocTimer);
-  allocTimer = setTimeout(async () => {
-    const a = app.pendingAlloc;
-    const r = await act('/villagers', { food: a.food, wood: a.wood, stone: a.stone, gold: a.gold });
-    app.pendingAlloc = null;
-    if (!r) renderPanel();
-  }, 700);
+  allocTimer = setTimeout(sendAlloc, 600);
+}
+
+// Stuurt de laatste verdeling. Komen er tijdens het versturen nieuwe klikken bij,
+// dan blijven die zichtbaar en worden ze daarna verstuurd.
+let allocSeq = 0;
+let allocBusy = false;
+async function sendAlloc() {
+  if (allocBusy) { allocTimer = setTimeout(sendAlloc, 300); return; }
+  const a = app.pendingAlloc;
+  if (!a) return;
+  const seq = allocSeq;
+  allocBusy = true;
+  const r = await act('/villagers', { food: a.food, wood: a.wood, stone: a.stone, gold: a.gold });
+  allocBusy = false;
+  if (seq === allocSeq || !r) app.pendingAlloc = null;
+  renderPanel(true);
 }
 
 function slotsOf(live) {
@@ -642,6 +699,11 @@ const actions = {
     renderPanel();
   },
   cancelPlace,
+  cancelVillager() {
+    town.selVillager = null;
+    $('#placeHint').hidden = true;
+  },
+  harvest(el) { harvestNode(Number(el.dataset.id), null); },
   vill(el) { changeVillagers(el.dataset.res, Number(el.dataset.d)); },
   upgrade(el) {
     const b = app.live.buildings.find((x) => x.id === Number(el.dataset.id));

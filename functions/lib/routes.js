@@ -8,7 +8,7 @@ import {
   freshCampState,
 } from './game.js';
 import {
-  newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, bLevel, publicSummary,
+  newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary,
   townScore, totalVillagers, unitsPop,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
@@ -294,6 +294,13 @@ route('POST', '/villagers', { auth: true, active: true }, async (ctx) => {
   const alloc = {};
   for (const r of RES) alloc[r] = int(body[r], -1);
   return townAction(ctx, (s) => doAssign(s, alloc, body.rally));
+});
+
+// een dorpeling een vondst (schaap, boom, rotsen, goud) laten oogsten
+route('POST', '/harvest', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  const job = typeof body.job === 'string' ? body.job : null;
+  return townAction(ctx, (s) => doHarvest(s, int(body.nodeId), job, ctx.now));
 });
 
 route('POST', '/trade', { auth: true, active: true }, async (ctx) => {

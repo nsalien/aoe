@@ -150,6 +150,26 @@ export const UNITS = {
 
 export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram'];
 
+// Vondsten: kleine extraatjes die af en toe rond je stad opduiken en die een dorpeling kan oogsten.
+export const BONUS = {
+  kinds: {
+    sheep: { name: 'Verdwaald schaap', res: 'food', amount: 90 },
+    tree: { name: 'Eik vol brandhout', res: 'wood', amount: 90 },
+    stone: { name: 'Losse rotsblokken', res: 'stone', amount: 70 },
+    gold: { name: 'Glinsterende goudader', res: 'gold', amount: 55 },
+  },
+  order: ['sheep', 'tree', 'stone', 'gold'],
+  weights: [0.3, 0.3, 0.22, 0.18],
+  ageBonus: 0.6, // +60% per tijdperk boven het eerste
+  maxNodes: 4, // nooit meer dan zoveel tegelijk
+  maxHarvesters: 3, // zoveel dorpelingen mogen tegelijk op pad
+  firstMinutes: 10, // eerste vondst (spelsnelheid 1)
+  minMinutes: 35, // tijd tussen twee vondsten (spelsnelheid 1)
+  maxMinutes: 100,
+  gatherMs: 6000, // echte seconden: oogsten blijft een snel klikmomentje, ook bij lage spelsnelheid
+  walkTilesPerSec: 0.9,
+};
+
 export const COMBAT = {
   smithyBonus: 0.05,
   wallFlat: 30,
