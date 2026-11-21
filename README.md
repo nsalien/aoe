@@ -43,6 +43,10 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
 - **14 gebouwen** met elk meerdere niveaus, **7 soorten troepen** (speerdrager, zwaardvechter, boogschutter,
   verkenner, ruiter, ridder, stormram) met sterktes en zwaktes.
 - **Gevechten** met muren, torens, smidse-bonussen, plunderen, verkennen, rammen die muren en monumenten slopen.
+- **Veldslagen zelf besturen**: komt je leger aan bij een stad of roverskamp terwijl je online bent, dan kies je tussen zelf besturen
+  of automatisch (zoals in Rome: Total War). Zelf besturen opent een slagveld waar je troepen selecteert (dubbelklik = hele soort),
+  verplaatst en doelwitten kiest. De verdediger krijgt een melding en kan zijn stad zelf verdedigen. Wachttorens schieten op de
+  dichtstbijzijnde vijand en kunnen gesloopt worden; muren houden aanvallers tegen tot er een bres is.
 - **Samenwerken**: versterking sturen naar je bondgenoot, karavanen met grondstoffen, teamchat en wereldchat.
 - **Rapporten**, **ranglijst** (team- en spelerspunten) en een **eindstand** na de oorlog.
 - Werkt op **desktop en gsm**.
