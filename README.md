@@ -29,6 +29,8 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
   roverskampen met kampvuren, en legers die zichtbaar over de kaart marcheren.
 - **Vondsten**: af en toe verschijnt er rond je stad een verdwaald schaap, een eik vol brandhout, rotsblokken of een goudader.
   Klik een dorpeling aan en dan de vondst: hij haalt de buit op en gaat daarna terug aan zijn werk.
+- **Gevechten met levenspunten**: in je eigen gebied zie je elk gevecht mannetje per mannetje, met een levensbalk,
+  slagen, pijlen en sneuvelende strijders. Barbaren vallen meteen aan wie hun dorp nadert.
 - **Vijf volkeren** om uit te kiezen bij het stichten van je rijk: Egyptenaren, Grieken, Yamato, Babyloniërs en Perzen.
   Elk volk heeft een eigen bouwstijl (platte zandstenen daken en obelisken, marmeren zuilen, pagodes, blauwe ziggurat,
   turquoise koepels) en twee elite-eenheden met speciale eigenschappen, te trainen in het kasteel (stadscentrum vanaf het IJzertijdperk).
