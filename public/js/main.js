@@ -484,7 +484,12 @@ function renderSelHint() {
     : 'Tik op de grond, een everzwijn of het barbarenkamp.';
   hint.hidden = false;
   const tip = sel.type === 'soldier' || sel.type === 'walker' || sel.type === 'group' ? ' Dubbelklik om alle van dit type te kiezen.' : '';
-  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}${tip}</span></span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
+  // kunnen ze het barbarenkamp aan? (ook op een gsm, waar je niet over het kamp kan bewegen)
+  const s = town.state;
+  const camp = !villager && s && s.terr && town.terr && town.terr.camp && campAlive(s, app.now()) && town.isExplored(town.terr.camp.x, town.terr.camp.y)
+    ? town.campForecast() : null;
+  const odds = camp ? ` <b style="color:${camp.win ? '#7fd36a' : '#ff8a70'}">Barbarenkamp: ${UI.esc(camp.text)}.</b>` : '';
+  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}${tip}</span>${odds}</span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
 }
 
 // muren plaatsen of grond kopen (aparte modus op de kaart)
