@@ -238,6 +238,7 @@ function terrTown(seed = 5) {
   return s;
 }
 const arrive = (s, g) => advance(s, g.t1 + 1, 1);
+const fightOver = (s) => advance(s, s.t + 5 * 60000, 1); // gevechten duren hooguit enkele minuten
 
 test('het bouwvierkant groeit mee met het tijdperk', () => {
   const s = terrTown();
@@ -312,6 +313,9 @@ test('everzwijn verslaan levert voedsel op', () => {
   const food = s.res.food;
   doFieldOrder(s, g.id, null, { type: 'boar', id: boar.id }, s.t);
   arrive(s, g);
+  assert.ok(s.terr.fights.length === 1 && g.fight, 'het gevecht is bezig');
+  fightOver(s);
+  assert.ok(!g.fight && !s.terr.fights.length, 'het gevecht is voorbij');
   assert.ok(s.res.food >= food + WILD.boar.loot.food - 1);
   assert.ok(s.terr.log.some((l) => l.kind === 'boar'));
   assert.throws(() => doFieldOrder(s, g.id, null, { type: 'boar', id: boar.id }, s.t), /niet meer/);
@@ -325,8 +329,11 @@ test('een klein groepje jaagt een everzwijn neer; dorpelingen jagen niet', () =>
   arrive(s, g);
   doFieldOrder(s, g.id, null, { type: 'boar', id: boar.id }, s.t);
   arrive(s, g);
+  fightOver(s);
   assert.ok(s.terr.log.some((l) => l.kind === 'boar'), 'gevangen');
-  assert.ok((s.field.find((x) => x.id === g.id) || { units: {} }).units.spear >= 2, 'hooguit één speerdrager verloren');
+  const left = s.field.find((x) => x.id === g.id) || { units: {} };
+  assert.ok(left.units.spear >= 2, 'hooguit één speerdrager verloren');
+  assert.ok(left.hp.spear.some((h) => h < 45), 'wie geraakt werd, heeft minder levenspunten');
   const v = doFieldSend(s, { villager: 'food' }, null, { x: boar.x, y: boar.y }, null, s.t);
   assert.throws(() => doFieldOrder(s, v.id, null, { type: 'boar', id: boar.id }, s.t), /Dorpelingen vechten niet/);
 });
@@ -355,8 +362,7 @@ test('barbarenkamp verwoesten stopt de overvallen even', () => {
   const camp = territory(s.terr.seed).camp;
   const g = doFieldSend(s, { units: { sword: 60 } }, null, { x: camp.x, y: camp.y }, null, s.t);
   arrive(s, g);
-  doFieldOrder(s, g.id, null, { type: 'camp' }, s.t);
-  arrive(s, g);
+  fightOver(s);
   assert.ok(s.terr.camp.down > s.t, 'kamp ligt in puin');
   assert.ok(s.terr.camp.next >= s.terr.camp.down, 'geen overval zolang het kamp plat ligt');
 });
@@ -436,4 +442,52 @@ test('speciale eigenschappen werken in gevechten', () => {
   assert.ok(resolveBattle({ ...att, groups: [{ key: 'own', units: { lionguard: 30 } }] }).D > resolveBattle({ ...att, groups: [{ key: 'own', units: { immortal: 30 } }] }).D * 1.2);
   const def = { groups: [{ key: 'own', units: { spear: 40 } }] };
   assert.ok(resolveBattle({ attUnits: { elephant: 10 }, ...def }).D < resolveBattle({ attUnits: { knight: 10 }, ...def }).D);
+});
+
+// ---------- gevechten mannetje per mannetje ----------
+import { runFight, combatants } from '../public/shared/skirmish.js';
+
+
+test('elke eenheid heeft levenspunten; betere eenheden hebben er meer', () => {
+  assert.ok(U2.knight.hp > U2.rider.hp && U2.rider.hp > U2.spear.hp && U2.spear.hp > U2.villager.hp);
+  assert.ok(U2.elephant.hp > U2.knight.hp);
+  const f = { t0: 0, a: combatants({ spear: 3 }), b: combatants({ boar: 1 }) };
+  const end = runFight(f).end;
+  const half = runFight(f, end / 2);
+  assert.ok(half.b[0].hp < U2.boar.hp && half.b[0].hp > 0, 'het everzwijn verliest geleidelijk levens');
+  assert.deepEqual(runFight(f, end / 2), half, 'zelfde verloop in browser en server');
+});
+
+test('barbaren vallen meteen aan wie hun kamp nadert, ook een dorpeling', () => {
+  const s = terrTown();
+  const camp = territory(s.terr.seed).camp;
+  const v = doFieldSend(s, { villager: 'food' }, null, { x: camp.x, y: camp.y }, null, s.t);
+  let seen = false;
+  for (let t = s.t + 200; t <= v.t1 && !seen; t += 200) {
+    advance(s, t, 1);
+    if (v.fight) {
+      seen = true;
+      const p = groupPos(v, s.t);
+      assert.ok(Math.hypot(p.x - camp.x, p.y - camp.y) > FIELD.aggro - 0.2, 'aan de rand van het kamp tegengehouden');
+    }
+  }
+  assert.ok(seen, 'onderweg aangevallen');
+  fightOver(s);
+  assert.ok(!s.field.includes(v), 'de dorpeling heeft het niet overleefd');
+  assert.ok(s.terr.log.some((l) => l.kind === 'camp-lost'));
+});
+
+test('een groep kan zich terugtrekken uit een gevecht', () => {
+  const s = terrTown();
+  s.units = { spear: 4 };
+  const camp = territory(s.terr.seed).camp;
+  const g = doFieldSend(s, { units: { spear: 4 } }, null, { x: camp.x, y: camp.y }, null, s.t);
+  advance(s, g.t1, 1);
+  assert.ok(g.fight);
+  advance(s, s.t + 2500, 1);
+  doFieldOrder(s, g.id, { x: 6, y: 10 }, null, s.t);
+  assert.ok(!g.fight && s.field.includes(g), 'de groep loopt weg');
+  arrive(s, g);
+  assert.ok(!g.fight, 'niet opnieuw aangevallen op de terugweg');
+  assert.ok(Object.values(g.hp).flat().some((h) => h < U2.spear.hp), 'met schrammen');
 });

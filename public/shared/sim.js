@@ -10,6 +10,7 @@ import {
   territory, ringOf, ringForAge, tileIndex, inTerr, T_MIN, T_MAX, TILE, exDecode, exEncode, revealCircle, revealSegment,
 } from './territory.js';
 import { resolveBattle, computeLoot, carryCapacity } from './battle.js';
+import { combatants, runFight, fightEnd, survivorsByGroup } from './skirmish.js';
 
 export class GameError extends Error {
   constructor(msg, status = 400) { super(msg); this.status = status; }
@@ -448,9 +449,14 @@ function nextWildEvent(s, speed) {
   let ev = null;
   const take = (t, e) => { if (!ev || t < ev.t) ev = { t, ...e }; };
   for (const g of s.field) {
-    if (g.pending) take(g.t1, { kind: 'arrive', g });
+    if (g.pending) {
+      take(g.t1, { kind: 'arrive', g });
+      const ta = aggroTime(s, g);
+      if (ta != null) take(ta, { kind: 'ambush', g });
+    }
     if (g.work && g.work.type === 'chop') take(g.work.end, { kind: 'chopped', g });
   }
+  for (const f of s.terr.fights || []) take(f.end, { kind: 'fight', f });
   const gs = gatherers(s);
   if (gs.size) {
     const per = gatherPerHour(s, speed);
@@ -467,6 +473,8 @@ function nextWildEvent(s, speed) {
 
 function applyWildEvent(s, ev, speed) {
   if (ev.kind === 'arrive') fieldArrive(s, ev.g, ev.t, speed);
+  else if (ev.kind === 'ambush') ambush(s, ev.g, ev.t);
+  else if (ev.kind === 'fight') finishFight(s, ev.f, ev.t, speed);
   else if (ev.kind === 'chopped') chopDone(s, ev.g, ev.t);
   else if (ev.kind === 'depleted') depleted(s, ev.id, ev.t);
   else if (ev.kind === 'raid') barbarianRaid(s, ev.t, speed);
@@ -501,12 +509,6 @@ function disband(s, g) {
   s.field = s.field.filter((x) => x !== g);
 }
 
-function keepSurvivors(s, g, left) {
-  g.units = {};
-  for (const k of Object.keys(left)) if (left[k] > 0) g.units[k] = left[k];
-  if (!Object.keys(g.units).length) s.field = s.field.filter((x) => x !== g);
-}
-
 function fieldArrive(s, g, t, speed) {
   withEx(s, (b) => revealSegment(b, g.x0, g.y0, g.x1, g.y1, groupVision(g)));
   g.pending = false;
@@ -525,8 +527,8 @@ function fieldArrive(s, g, t, speed) {
     else goHome(s, g, t);
     return;
   }
-  if (o.type === 'boar') { fightBoar(s, g, o.id, t, speed); return; }
-  if (o.type === 'camp') fightCamp(s, g, t, speed);
+  if (o.type === 'boar' && boarAlive(s, o.id, t)) { engage(s, g, { type: 'boar', id: o.id }, t); return; }
+  if (o.type === 'camp' && campAlive(s, t)) engage(s, g, { type: 'camp', id: 0 }, t);
 }
 
 function chopDone(s, g, t) {
@@ -546,26 +548,107 @@ function depleted(s, id, t) {
   if (d) pushLog(s, t, 'dep', `${WILD.deposits[d.kind].name} is helemaal ontgonnen.`);
 }
 
-function fightBoar(s, g, id, t, speed) {
-  const boar = territory(s.terr.seed).boars.find((b) => b.id === id);
-  if (!boar || !boarAlive(s, id, t)) return;
-  const r = resolveBattle({ attUnits: g.units, attSmithy: bLevel(s, 'smithy'), groups: [{ key: 'boar', units: { boar: 1 } }] });
-  if (r.attWins) {
-    s.terr.boar[id] = t + Math.round((WILD.boar.respawnHours * 3600000) / speed);
-    addRes(s, WILD.boar.loot);
-    pushLog(s, t, 'boar', `Everzwijn gevangen: +${resText(WILD.boar.loot)}.`);
-  } else {
-    pushLog(s, t, 'boar-lost', 'Een everzwijn heeft je groep verjaagd. Stuur een sterkere groep!');
-  }
-  keepSurvivors(s, g, r.attLeft);
+// ---------- gevechten in je gebied (mannetje per mannetje, zie skirmish.js) ----------
+
+// wanneer komt een lopende groep binnen het bereik van het barbarenkamp? (null = niet)
+function aggroTime(s, g) {
+  if (g.fight || !s.terr) return null;
+  const c = territory(s.terr.seed).camp;
+  if (!c) return null;
+  const R = FIELD.aggro;
+  const dx = g.x1 - g.x0; const dy = g.y1 - g.y0;
+  const fx = g.x0 - c.x; const fy = g.y0 - c.y;
+  const c0 = fx * fx + fy * fy - R * R;
+  if (c0 <= 0) return null; // vertrekt binnen het bereik: die mag weg (terugtrekken)
+  const A = dx * dx + dy * dy;
+  if (A === 0) return null;
+  const B = 2 * (fx * dx + fy * dy);
+  const disc = B * B - 4 * A * c0;
+  if (disc < 0) return null;
+  const u = (-B - Math.sqrt(disc)) / (2 * A);
+  if (u < 0 || u > 1) return null;
+  const t = g.t0 + (g.t1 - g.t0) * u;
+  return campAlive(s, t) ? Math.round(t) : null;
 }
 
-function fightCamp(s, g, t, speed) {
-  if (!campAlive(s, t)) return;
-  const n = Math.max(1, campSize(s));
-  const r = resolveBattle({ attUnits: g.units, attSmithy: bLevel(s, 'smithy'), groups: [{ key: 'camp', units: { barbarian: n } }], baseDef: 15 });
-  if (r.attWins) {
-    const c = s.terr.camp;
+// de barbaren stormen hun kamp uit en vallen aan
+function ambush(s, g, t) {
+  const p = groupPos(g, t);
+  withEx(s, (b) => revealSegment(b, g.x0, g.y0, p.x, p.y, groupVision(g)));
+  g.x0 = p.x; g.y0 = p.y; g.x1 = p.x; g.y1 = p.y; g.t0 = t; g.t1 = t;
+  g.pending = false; g.order = null; g.work = null;
+  engage(s, g, { type: 'camp', id: 0 }, t);
+}
+
+const foeSide = (s, foe) => (foe.type === 'boar' ? combatants({ boar: 1 }) : combatants({ barbarian: Math.max(1, campSize(s)) }));
+
+// gevecht beginnen, of aansluiten bij een lopend gevecht tegen dezelfde vijand
+function engage(s, g, foe, t) {
+  const terr = s.terr;
+  if (!terr.fights) terr.fights = [];
+  const mine = combatants(g.units, g.hp, g.id);
+  let f = terr.fights.find((x) => x.foe.type === foe.type && x.foe.id === foe.id);
+  if (f) {
+    const now = runFight(f, t);
+    f.killed = (f.killed || 0) + now.b.filter((u) => u.hp <= 0).length;
+    f.t0 = t;
+    f.a = [...now.a.filter((u) => u.hp > 0).map(({ died, ...u }) => u), ...mine];
+    f.b = now.b.filter((u) => u.hp > 0).map(({ died, ...u }) => u);
+  } else {
+    terr.fid = (terr.fid || 0) + 1;
+    f = { id: terr.fid, foe, t0: t, a: mine, b: foeSide(s, foe), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') };
+    terr.fights.push(f);
+  }
+  f.end = fightEnd(f);
+  g.fight = f.id; g.work = null; g.order = null; g.pending = false;
+}
+
+// een groep trekt zich terug uit een gevecht (met wat er nog van over is)
+function leaveFight(s, g, t) {
+  const f = (s.terr.fights || []).find((x) => x.id === g.fight);
+  g.fight = null;
+  if (!f) return true;
+  const r = runFight(f, t);
+  const sv = survivorsByGroup(r.a.filter((u) => u.g === g.id))[g.id];
+  const rest = r.a.filter((u) => u.g !== g.id && u.hp > 0).map(({ died, ...u }) => u);
+  f.killed = (f.killed || 0) + r.b.filter((u) => u.hp <= 0).length;
+  if (!rest.length) {
+    s.terr.fights = s.terr.fights.filter((x) => x !== f);
+    if (f.foe.type === 'camp') s.terr.camp.loss = (s.terr.camp.loss || 0) + f.killed;
+  } else {
+    f.t0 = t; f.a = rest; f.b = r.b.filter((u) => u.hp > 0).map(({ died, ...u }) => u); f.end = fightEnd(f);
+  }
+  if (!sv) { s.field = s.field.filter((x) => x !== g); return false; }
+  g.units = sv.units; g.hp = sv.hp;
+  return true;
+}
+
+function finishFight(s, f, t, speed) {
+  const r = runFight(f, t);
+  s.terr.fights = s.terr.fights.filter((x) => x !== f);
+  const surv = survivorsByGroup(r.a);
+  let survivors = 0;
+  for (const g of s.field.filter((x) => x.fight === f.id)) {
+    g.fight = null;
+    const sv = surv[g.id];
+    if (!sv) { s.field = s.field.filter((x) => x !== g); continue; }
+    g.units = sv.units; g.hp = sv.hp;
+    survivors += Object.values(sv.units).reduce((a, b) => a + b, 0);
+  }
+  const won = r.b.every((u) => u.hp <= 0);
+  const killed = (f.killed || 0) + r.b.filter((u) => u.hp <= 0).length;
+  if (f.foe.type === 'boar') {
+    if (won) {
+      s.terr.boar[f.foe.id] = t + Math.round((WILD.boar.respawnHours * 3600000) / speed);
+      addRes(s, WILD.boar.loot);
+      pushLog(s, t, 'boar', `Everzwijn gevangen: +${resText(WILD.boar.loot)}.`);
+    } else {
+      pushLog(s, t, 'boar-lost', 'Een everzwijn heeft je groep verslagen. Stuur een sterkere groep!');
+    }
+    return;
+  }
+  const c = s.terr.camp;
+  if (won) {
     c.down = t + Math.round((WILD.camp.respawnHours * 3600000) / speed);
     c.loss = 0;
     if (c.next < c.down) c.next = c.down + Math.round(((WILD.raid.minHours * 3600000) / speed) / 2);
@@ -573,10 +656,10 @@ function fightCamp(s, g, t, speed) {
     addRes(s, loot);
     pushLog(s, t, 'camp', `Barbarenkamp verwoest! Buit: ${resText(loot)}. De overvallen stoppen voorlopig.`);
   } else {
-    s.terr.camp.loss = (s.terr.camp.loss || 0) + (r.groupsLost[0].units.barbarian || 0);
-    pushLog(s, t, 'camp-lost', `Je aanval op het barbarenkamp mislukte (${n} barbaren).`);
+    c.loss = (c.loss || 0) + killed;
+    pushLog(s, t, 'camp-lost', survivors ? `Je groep moest wijken voor de barbaren (${killed} barbaren gesneuveld).`
+      : `De barbaren hebben je groep verslagen${killed ? ` (${killed} barbaren gesneuveld)` : ''}.`);
   }
-  keepSurvivors(s, g, r.attLeft);
 }
 
 export function towerDefense(s) {
@@ -660,6 +743,7 @@ export function doFieldSend(s, spec, from, to, target, now) {
 export function doFieldOrder(s, id, to, target, now) {
   const g = (s.field || []).find((x) => x.id === id);
   if (!g) throw new GameError('Die groep bestaat niet meer.');
+  if (g.fight && !leaveFight(s, g, now)) throw new GameError('Die groep is gesneuveld.');
   const pos = groupPos(g, now);
   // wat de groep onderweg al zag, blijft ontdekt
   if (g.pending) withEx(s, (b) => revealSegment(b, g.x0, g.y0, pos.x, pos.y, groupVision(g)));
