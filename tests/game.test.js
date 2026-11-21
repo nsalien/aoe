@@ -536,3 +536,72 @@ test('meerdere dorpelingen tegelijk op pad sturen', () => {
   assert.equal(g.units.villager, 2);
   assert.equal(s.villagers.food, before - 2);
 });
+
+// ---------- veldslagen die je zelf bestuurt ----------
+import { createBattle, stepTo, giveOrder, battleOutcome, FB } from '../public/shared/fieldbattle.js';
+
+function battleSetup(extra = {}) {
+  return createBattle({
+    kind: 'town', att: { sword: 20, archer: 10, ram: 2 }, defGroups: [{ key: 'home', units: { spear: 12, archer: 8 } }],
+    towers: [{ id: 7, level: 2 }], wall: 3, enclosed: false, now: 1000, ...extra,
+  });
+}
+
+test('veldslag: deterministisch, ook in kleine stukjes', () => {
+  const a = battleSetup(); const b = battleSetup();
+  stepTo(a, 1000 + FB.maxMs + 1000);
+  for (let t = 1000; b.over == null && t < 1000 + FB.maxMs + 2000; t += 700) stepTo(JSON.parse(JSON.stringify(b)) && b, t, 40);
+  stepTo(b, 1000 + FB.maxMs + 1000);
+  assert.equal(a.over, b.over);
+  assert.deepEqual(battleOutcome(a), battleOutcome(b));
+});
+
+test('veldslag: JSON heen en terug verandert het verloop niet (server bewaart tussendoor)', () => {
+  const a = battleSetup();
+  let b = battleSetup();
+  for (let t = 1000; t < 1000 + 60000; t += 1200) { stepTo(a, t); stepTo(b, t, 40); b = JSON.parse(JSON.stringify(b)); }
+  assert.deepEqual(JSON.parse(JSON.stringify(a)).units, b.units);
+});
+
+test('veldslag: torens schieten en kunnen sneuvelen, muren houden aanvallers tegen', () => {
+  const st = createBattle({ kind: 'town', att: { sword: 30, ram: 3 }, defGroups: [{ key: 'home', units: {} }], towers: [{ id: 9, level: 1 }], wall: 1, enclosed: true, now: 0 });
+  const tower = st.units.find((u) => u.k === 'tower');
+  stepTo(st, FB.maxMs + 1000);
+  const o = battleOutcome(st);
+  assert.ok(tower.at >= 0, 'de toren heeft geschoten');
+  assert.equal(o.attWins, true);
+  assert.deepEqual(o.towersLost, [9]);
+  assert.ok(o.wallsBroken >= 1, 'de muur werd doorbroken');
+  assert.ok(st.units.some((u) => u.s === 0 && u.hp < u.hp0 * u.n), 'aanvallers liepen schade op');
+});
+
+test('veldslag: bevelen en terugtrekken', () => {
+  const st = battleSetup();
+  const mine = st.units.filter((u) => u.s === 0 && u.k === 'sword').map((u) => u.id);
+  giveOrder(st, 0, mine, { x: 3, y: 14 });
+  stepTo(st, 1000 + 20000);
+  const sw = st.units.filter((u) => mine.includes(u.id));
+  assert.ok(sw.every((u) => Math.hypot(u.x - 3, u.y - 14) < 3), 'de zwaardvechters liepen naar links en bleven daar');
+  const enemy = st.units.find((u) => u.s === 1 && u.k === 'archer');
+  giveOrder(st, 0, mine, { target: enemy.id });
+  assert.ok(sw.every((u) => u.tg === enemy.id && u.forced));
+  // de verdediger kan aanvallers niet besturen
+  giveOrder(st, 1, mine, { x: 20, y: 2 });
+  assert.ok(sw.every((u) => u.mx == null));
+  // ongeldige bevelen veranderen niets
+  const before = JSON.stringify(st.units);
+  giveOrder(st, 0, mine, { x: NaN, y: 3 });
+  giveOrder(st, 0, mine, { target: 99999 });
+  assert.equal(JSON.stringify(st.units), before);
+  giveOrder(st, 0, null, { retreat: true });
+  assert.equal(st.over, 1);
+  assert.equal(battleOutcome(st).retreat, true);
+});
+
+test('veldslag: grote legers worden samengevoegd tot hooguit maxPerSide figuren', () => {
+  const st = createBattle({ kind: 'camp', att: { spear: 500, archer: 300 }, defGroups: [{ key: 'camp', units: { barbarian: 120 } }], now: 0 });
+  assert.ok(st.units.filter((u) => u.s === 0).length <= FB.maxPerSide + 2);
+  const o = battleOutcome(st);
+  assert.equal(o.attLeft.spear, 500);
+  assert.equal(o.defLeft.camp.barbarian, 120);
+});
