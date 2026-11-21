@@ -262,7 +262,7 @@ const HP = {
   chariot: [90, 11, 1600], camel: [80, 8, 1500], hoplite: [80, 7, 1500], peltast: [40, 7, 1700, true],
   samurai: [75, 11, 1400], yabusame: [70, 8, 1700, true], lionguard: [85, 8, 1500], stonethrower: [100, 14, 3000, true],
   elephant: [250, 18, 2000], immortal: [70, 8, 1500],
-  boar: [75, 7, 1400], barbarian: [40, 5, 1500],
+  boar: [75, 7, 1400], barbarian: [32, 5, 1500],
 };
 for (const [k, [hp, dmg, rate, ranged]] of Object.entries(HP)) Object.assign(UNITS[k], { hp, dmg, rate, ranged: !!ranged });
 

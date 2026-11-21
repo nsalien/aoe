@@ -817,7 +817,7 @@ export function helpHtml(w) {
     slaan om de beurt toe, verliezen bij elke klap levens (de balk boven hun hoofd) en vallen als die leeg is.
     Barbaren vallen <b>meteen aan</b> wie hun dorp nadert, ook dorpelingen. Geef een vechtende groep een andere opdracht om te vluchten.
     Gewonde eenheden genezen zodra ze terug thuis zijn.</p>
-    <p>Boven het barbarenkamp staat hoeveel barbaren er wonen (dat groeit met je tijdperk en na elke overval). Kies je soldaten en wijs het kamp aan:
+    <p>Boven het barbarenkamp staat hoeveel barbaren er wonen: een handvol, iets meer in een later tijdperk. Ongeveer evenveel soldaten volstaan om het te verwoesten. Kies je soldaten en wijs het kamp aan:
     je ziet meteen of je groep <b>sterk genoeg</b> is (op een gsm staat het bovenaan). Stuur je leger liefst samen: wie alleen aankomt, vecht alleen.</p>
     <h3>Je eigen gebied verkennen</h3>
     <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Tik op een <b>dorpeling of soldaat</b> en daarna op de grond:
@@ -826,7 +826,7 @@ export function helpHtml(w) {
     <li><b>Bronnen</b>: in de wildernis liggen goudaders, rotswanden, oude eikenbossen en bessenstruiken. Stuur er een dorpeling heen om ze leeg te halen.</li>
     <li><b>Everzwijnen</b>: stuur een paar soldaten (twee à drie speerdragers volstaan) en tik op het beest voor extra voedsel.</li>
     <li><b>Barbarenkamp</b>: ergens in je gebied woont een bende barbaren die af en toe je stad overvalt en grondstoffen steelt.
-    Vind hun kamp en val het aan met een stevig leger: dat levert buit op en de overvallen stoppen een tijd. Muren en torens helpen ook tegen overvallen.</li></ul>
+    Vind hun kamp en val het aan met een paar soldaten (ongeveer evenveel als er barbaren zijn): dat levert buit op en de overvallen stoppen een tijd. Muren en torens helpen ook tegen overvallen.</li></ul>
     <h3>Vondsten</h3>
     <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
     (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,

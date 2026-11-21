@@ -573,7 +573,8 @@ function gatherAccrue(s, dt, speed) {
   return extra;
 }
 
-export const campSize = (s) => Math.round(5 + 3 * age(s) + Math.min(10, s.terr.camp.raids)) - (s.terr.camp.loss || 0);
+// Het barbarenkamp rond je stad is bedoeld als vrij makkelijke buit: ongeveer evenveel soldaten als barbaren volstaat.
+export const campSize = (s) => 2 + 2 * age(s) + Math.min(3, Math.floor(s.terr.camp.raids / 3)) - (s.terr.camp.loss || 0);
 export const raidSize = (s) => Math.min(40, Math.round(3 + age(s) * 2.5 + s.terr.camp.raids * 1.2));
 export const boarAlive = (s, id, t) => (s.terr.boar[id] || 0) <= t;
 export const campAlive = (s, t) => s.terr.camp.down <= t;
