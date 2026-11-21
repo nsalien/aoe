@@ -817,6 +817,8 @@ export function helpHtml(w) {
     slaan om de beurt toe, verliezen bij elke klap levens (de balk boven hun hoofd) en vallen als die leeg is.
     Barbaren vallen <b>meteen aan</b> wie hun dorp nadert, ook dorpelingen. Geef een vechtende groep een andere opdracht om te vluchten.
     Gewonde eenheden genezen zodra ze terug thuis zijn.</p>
+    <p>Boven het barbarenkamp staat hoeveel barbaren er wonen (dat groeit met je tijdperk en na elke overval). Kies je soldaten en wijs het kamp aan:
+    je ziet meteen of je groep <b>sterk genoeg</b> is (op een gsm staat het bovenaan). Stuur je leger liefst samen: wie alleen aankomt, vecht alleen.</p>
     <h3>Je eigen gebied verkennen</h3>
     <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Tik op een <b>dorpeling of soldaat</b> en daarna op de grond:
     hij loopt er meteen naartoe en de mist verdwijnt waar hij komt. Een groep die je gekozen hebt, krijgt een gouden ring; tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>

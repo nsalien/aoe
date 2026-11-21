@@ -3,7 +3,7 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, landCost, WALL_TILE } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, COMBAT, landCost, WALL_TILE } from '../shared/rules.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
@@ -13,7 +13,7 @@ import { ICON } from './ui.js';
 import * as NAT from './nature.js';
 import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
-import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
+import { runFight, lastSwing, maxHp, combatants } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
@@ -1745,8 +1745,10 @@ export class TownView {
     ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(p.x + 51, p.y - 30, 2.2, 0, Math.PI * 2); ctx.fill();
     A.flag(ctx, p.x - 50, p.y - 4, 28, '#5a1a12', t + 700, 0.9);
     if (!busy) {
-      const n = Math.min(6, Math.max(2, Math.round(campSize(s) / 3)));
-      const spots = [[-30, 8, 0], [26, 8, 2], [8, -14, 4], [-14, 16, 1], [36, -8, 3], [-40, -4, 5]];
+      // zoveel barbaren als er echt wonen (tot 12 figuren; het aantal staat erboven)
+      const n = Math.min(12, Math.max(1, campSize(s)));
+      const spots = [[-30, 8, 0], [26, 8, 2], [8, -14, 4], [-14, 16, 1], [36, -8, 3], [-40, -4, 5],
+        [12, 18, 1], [-22, -12, 2], [44, 6, 4], [-48, 10, 3], [0, 4, 5], [20, -4, 0]];
       for (let i = 0; i < n; i++) {
         const [dx, dy, ph] = spots[i];
         const dir = dx < 0 ? 1 : -1;
@@ -1754,6 +1756,17 @@ export class TownView {
       }
     }
     ctx.drawImage(spr.front, -spr.w / 2, -spr.ay, spr.w, spr.h);
+    if (!busy) {
+      // hoeveel barbaren wonen hier? (altijd zichtbaar, zodat je weet waar je aan begint)
+      const txt = `${Math.max(1, campSize(s))} barbaren`;
+      ctx.font = '700 9px Inter, sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(txt).width + 18;
+      ctx.fillStyle = 'rgba(60,14,8,0.82)'; ctx.beginPath(); ctx.roundRect(-tw / 2, -78, tw, 14, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(240,190,120,0.5)'; ctx.lineWidth = 0.8; ctx.stroke();
+      ctx.fillStyle = '#ffe9c9'; ctx.fillText(txt, 4, -68);
+      ctx.strokeStyle = '#ffe9c9'; ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(-tw / 2 + 5, -74); ctx.lineTo(-tw / 2 + 11, -68); ctx.moveTo(-tw / 2 + 11, -74); ctx.lineTo(-tw / 2 + 5, -68); ctx.stroke();
+    }
   }
 
   // ---------- gevechten ----------
@@ -1781,14 +1794,17 @@ export class TownView {
       if (dl < 0.7) { ax = fx - ux * 0.8; ay = fy - uy * 0.8; }
       const px = -uy; const py = ux;
       const units = [];
+      // de eerste anderhalve seconde stormen beide kanten op elkaar af
+      const charge = Math.max(0, 1 - (now - f.t0) / FIELD.engageMs);
       const place = (list, side, cx, cy) => list.forEach((u, i) => {
         const per = 6;
         const row = Math.floor(i / per); const col = (i % per) - Math.min(per - 1, list.length - 1 - row * per) / 2 + (row % 2) * 0.25;
         const back = side ? 1 : -1;
-        const x = cx + ux * back * row * 0.42 + px * col * 0.44 + ((i * 37) % 7 - 3) * 0.02;
-        const y = cy + uy * back * row * 0.42 + py * col * 0.44 + ((i * 53) % 7 - 3) * 0.02;
+        const gap = row * 0.42 + charge * charge * (side ? 1.6 : 0.6);
+        const x = cx + ux * back * gap + px * col * 0.44 + ((i * 37) % 7 - 3) * 0.02;
+        const y = cy + uy * back * gap + py * col * 0.44 + ((i * 53) % 7 - 3) * 0.02;
         const gone = u.died != null && now - u.died > 4500;
-        units.push({ side, i, k: u.k, hp: u.hp, max: maxHp(u.k), died: u.died, x, y, gone, ux: side ? -ux : ux, uy: side ? -uy : uy });
+        units.push({ side, i, k: u.k, hp: u.hp, max: maxHp(u.k), died: u.died, x, y, gone, charging: charge > 0.05, ux: side ? -ux : ux, uy: side ? -uy : uy });
       });
       place(r.a, 0, ax + ux * 0.1, ay + uy * 0.1);
       place(r.b, 1, fx - ux * 0.1, fy - uy * 0.1);
@@ -1832,7 +1848,7 @@ export class TownView {
     const ls = lastSwing(sc.f, u.side, u.i, u.k, now);
     const swing = ls != null && now - ls < 340 ? Math.sin(((now - ls) / 340) * Math.PI) : 0;
     const q = toWorld(u.x + u.ux * swing * 0.16, u.y + u.uy * swing * 0.16);
-    this.drawFightFigure(ctx, u, q.x, q.y, t, swing > 0, dir, ls != null ? (now - ls) / 340 : 0);
+    this.drawFightFigure(ctx, u, q.x, q.y, t, swing > 0 || u.charging, dir, ls != null ? (now - ls) / 340 : t * 0.004);
     // levensbalk (pas na de eerste treffer, anders wordt het te druk)
     if (u.hp >= u.max) return;
     const tall = u.k === 'elephant' ? 50 : UNITS[u.k] && UNITS[u.k].type === 'cav' ? 38 : u.k === 'boar' ? 22 : 30;
@@ -1995,12 +2011,44 @@ export class TownView {
     }
   }
 
+  // Wat gebeurt er als de gekozen soldaten het barbarenkamp aanvallen? (dezelfde berekening als het echte gevecht)
+  campForecast() {
+    const s = this.state; const sel = this.sel;
+    if (!sel || this.selIsVillager()) return null;
+    const units = {}; const hp = {};
+    const add = (u, h) => {
+      for (const k of Object.keys(u || {})) {
+        if (k === 'villager') continue;
+        const list = (h && h[k]) || [];
+        for (let i = 0; i < u[k]; i++) { units[k] = (units[k] || 0) + 1; (hp[k] || (hp[k] = [])).push(list[i] != null ? list[i] : maxHp(k)); }
+      }
+    };
+    if (sel.type === 'soldier') add({ [sel.kind]: 1 });
+    else if (sel.type === 'soldiers') add({ [sel.kind]: sel.n });
+    else if (sel.type === 'group' || sel.type === 'groups') {
+      const ids = sel.type === 'group' ? [sel.id] : sel.ids;
+      for (const g of s.field || []) if (ids.includes(g.id)) add(g.units, g.hp);
+    }
+    const n = Object.values(units).reduce((a, b) => a + b, 0);
+    if (!n) return null;
+    const foes = Math.max(1, campSize(s));
+    const key = `${JSON.stringify(hp)}|${foes}|${bLevel(s, 'smithy')}`;
+    if (this.forecast && this.forecast.key === key) return this.forecast.v;
+    const r = runFight({ t0: 0, a: combatants(units, hp), b: combatants({ barbarian: foes }), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') });
+    const left = r.a.filter((u) => u.hp > 0).length;
+    const killed = r.b.filter((u) => u.hp <= 0).length;
+    const v = left ? { win: true, text: `kansrijk, ±${left} van je ${n} man overleven` }
+      : { win: false, text: `te sterk voor je ${n} man (±${killed} barbaren neer)` };
+    this.forecast = { key, v };
+    return v;
+  }
+
   // naam en voorraad tonen als je over iets in de wildernis beweegt
   drawHover(ctx) {
     const w = this.hoverW;
     const s = this.state;
     if (!w || !s.terr || this.placing) return;
-    let label = null; let at = null;
+    let label = null; let at = null; let tone = null;
     for (const d of this.terr.deposits) {
       if (depLeft(s, d) <= 0 || !this.isExplored(d.x, d.y)) continue;
       const p = toWorld(d.x, d.y);
@@ -2017,13 +2065,16 @@ export class TownView {
       if (Math.abs(w.x - p.x) < 68 && w.y < p.y + 30 && w.y > p.y - 52) {
         label = campAlive(s, this.now) ? `${WILD.camp.name} · ${Math.max(1, campSize(s))} barbaren` : `${WILD.camp.name} (verwoest)`;
         at = p;
+        const guess = campAlive(s, this.now) ? this.campForecast() : null;
+        if (guess) { label += ` · ${guess.text}`; tone = guess.win ? 'win' : 'lose'; }
       }
     }
     if (!label) return;
     ctx.font = '700 11px Inter, sans-serif'; ctx.textAlign = 'center';
     const tw = ctx.measureText(label).width + 14;
     const y = at.y - 52;
-    ctx.fillStyle = 'rgba(28,20,12,0.85)'; ctx.beginPath(); ctx.roundRect(at.x - tw / 2, y - 14, tw, 18, 7); ctx.fill();
+    ctx.fillStyle = tone === 'win' ? 'rgba(24,70,22,0.9)' : tone === 'lose' ? 'rgba(110,22,14,0.92)' : 'rgba(28,20,12,0.85)';
+    ctx.beginPath(); ctx.roundRect(at.x - tw / 2, y - 14, tw, 18, 7); ctx.fill();
     ctx.fillStyle = '#fff3d6'; ctx.fillText(label, at.x, y - 1);
   }
 
