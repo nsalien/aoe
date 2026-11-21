@@ -49,7 +49,14 @@ Daarom:
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
   (binnen `FIELD.aggro` van het barbarenkamp) en het einde van een gevecht. De browser tekent het verloop met `runFight(f, nu)`.
-  Gevechten op de wereldkaart (legers tussen steden en roverskampen) gebruiken nog `resolveBattle` in `battle.js`.
+- Veldslagen op de wereldkaart: komt een aanval aan terwijl aanvaller of verdediger online is, dan maakt `resolveMarch()` een rij in
+  de tabel `battles` (status `choose`, het leger krijgt status `battle`). Elk kiest `manual` of `auto` (`/battle/mode`). Zonder keuze
+  of als niemand zelf bestuurt: automatisch via `resolveBattle` (`battle.js`). Anders een live slagveld uit `public/shared/fieldbattle.js`
+  (vaste tikken van 100 ms, deterministisch, met torens en muurblokken). De browser (`public/js/battleview.js`) peilt `/battle?id=`
+  elke 1,2 s en rekent tussendoor zelf verder; de server rekent per verzoek hooguit `FB.maxTicksPerCall` tikken. Bevelen gaan via
+  `/battle/order`. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af. Het einde
+  (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override`, zodat buit, rapporten en punten hetzelfde blijven.
+  Een slag wordt eerst 'geclaimd' (versiecontrole) zodat ze nooit twee keer wordt uitgerekend.
 - Volkeren: `CIVS` en de elite-eenheden staan in `rules.js` (eigenschappen zoals `bonus`, `tough`, `defMult`, `walls`, `fear`
   worden in `battle.js` verrekend). Het volk zit in `towns.state.civ`; oude steden krijgen er een in `ensureTerritory()`.
   Bouwstijl per volk: `STYLES` en de kastelen (`TC_CIV`) in `art.js`; elite-figuren in `figures.js` (`uniqueUnit`).
