@@ -26,9 +26,9 @@ export function hitDamage(ka, kb, mult = 1) {
   return Math.max(0.5, (a.dmg || 1) * (1 + bonus) * mult * (FIELD.armorK / (FIELD.armorK + armor)));
 }
 
-// tijdstip van de eerste slag van eenheid i (iedereen stormt eerst even op elkaar af)
-const firstHit = (t0, k, i) => t0 + FIELD.engageMs + ((i * 211) % 600) + (UNITS[k] && UNITS[k].ranged ? -400 : 0);
-const rateOf = (k) => (UNITS[k] && UNITS[k].rate) || 1500;
+// tijdstip van de eerste slag van eenheid i (iedereen stormt eerst op elkaar af; schutters schieten al eerder)
+const firstHit = (t0, k, i) => t0 + FIELD.engageMs + ((i * 211) % 700) + (UNITS[k] && UNITS[k].ranged ? -900 : 0);
+const rateOf = (k) => Math.round(((UNITS[k] && UNITS[k].rate) || 1500) * (FIELD.fightPace || 1));
 
 // Speel een gevecht af tot 'until' (of tot één kant uitgeschakeld is).
 // fight = { t0, a: [...], b: [...], ma?: schademultiplier kant a, mb?: idem kant b }
@@ -46,8 +46,11 @@ export function runFight(fight, until = Infinity, withEvents = false) {
     if (!best || best.next > until) break;
     const foes = alive(best.side ? A : B);
     if (!foes.length) { end = best.next; break; }
-    // doelwit: vijanden worden over de aanvallers verdeeld
-    const target = foes[best.i % foes.length];
+    // doelwit: telkens met minstens twee op dezelfde vijand (zoals echte soldaten die samen iemand aanpakken),
+    // zodat ook de kleinste kant tegenstanders neerhaalt in plaats van iedereen een schrammetje te geven
+    const own = alive(best.side ? B : A).length;
+    const m = Math.max(1, Math.min(foes.length, Math.ceil(own / 2)));
+    const target = foes[best.i % m];
     const dmg = hitDamage(best.u.k, target.k, best.side ? fight.mb || 1 : fight.ma || 1);
     target.hp = Math.max(0, target.hp - dmg);
     if (events) events.push({ t: best.next, side: best.side, i: best.i, target: (best.side ? A : B).indexOf(target), dmg, kill: target.hp <= 0 });
