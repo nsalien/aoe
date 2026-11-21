@@ -10,6 +10,7 @@ import {
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary,
   townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder,
+  doBuyLot, doPlaceWalls, doRemoveWalls,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -307,6 +308,19 @@ route('POST', '/harvest', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   const job = typeof body.job === 'string' ? body.job : null;
   return townAction(ctx, (s) => doHarvest(s, int(body.nodeId), job, ctx.now));
+});
+
+// grond bijkopen (lot van 4 x 4 tegels)
+route('POST', '/land', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  return townAction(ctx, (s) => doBuyLot(s, int(body.li, NaN), int(body.lj, NaN)));
+});
+
+// muren plaatsen of afbreken, tegel per tegel
+route('POST', '/walls', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  const tiles = Array.isArray(body.tiles) ? body.tiles.slice(0, 80).map((t) => (Array.isArray(t) ? [int(t[0], NaN), int(t[1], NaN)] : null)).filter(Boolean) : [];
+  return townAction(ctx, (s) => (body.remove ? doRemoveWalls(s, tiles) : doPlaceWalls(s, tiles)));
 });
 
 // eenheden in je eigen gebied besturen (verkennen, aanvallen, verzamelen, bos kappen, naar huis)

@@ -4,6 +4,7 @@
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
+  LAND, landCost, WALL_TILE,
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
 import {
@@ -301,6 +302,20 @@ export function advance(s, t, speed = 1) {
 
 // De server roept dit op met het stadsnummer als zaad (de browser krijgt de state al zo).
 export function ensureTerritory(s, seed) {
+  if (!s.walls) {
+    s.walls = [];
+    const L = s.buildings.find((b) => b.type === 'wall');
+    if (L && L.level > 0) {
+      const k = ringForAge(age(s));
+      const occ = occupied(s);
+      for (let j = -k; j < TOWN_GRID + k; j++) {
+        for (let i = -k; i < TOWN_GRID + k; i++) {
+          if (ringOf(i, j) !== k || occ.has(`${i},${j}`)) continue;
+          s.walls.push(tileIndex(i, j));
+        }
+      }
+    }
+  }
   // steden van voor de volkeren krijgen een willekeurig (maar vast) volk
   if (!CIVS[s.civ]) s.civ = CIV_IDS[(Math.imul(seed | 0, 2654435761) >>> 0) % CIV_IDS.length];
   if (!s.field) s.field = [];
@@ -308,8 +323,126 @@ export function ensureTerritory(s, seed) {
   s.terr = { seed, ex: '', rv: -1, cl: [], dep: {}, boar: {}, camp: { down: 0, raids: 0, loss: 0, next: null }, log: [], lid: 0 };
 }
 
+// tegels die bouwgrond werden: gekapt bos en gekochte loten (zonder water en de buurt van het barbarendorp)
 export function clearedSet(s) {
-  return new Set(s.terr ? s.terr.cl : []);
+  const set = new Set(s.terr ? s.terr.cl : []);
+  if (s.terr && s.terr.lots && s.terr.lots.length) {
+    const terr = territory(s.terr.seed);
+    for (const [li, lj] of s.terr.lots) {
+      for (let j = lj * LAND.size; j < (lj + 1) * LAND.size; j++) {
+        for (let i = li * LAND.size; i < (li + 1) * LAND.size; i++) {
+          if (!inTerr(i, j) || terr.tiles[tileIndex(i, j)] === TILE.WATER || reservedTile(terr, i, j)) continue;
+          set.add(tileIndex(i, j));
+        }
+      }
+    }
+  }
+  return set;
+}
+
+// grond die je niet kan kopen: rond het barbarendorp en op wilde bronnen
+function reservedTile(terr, i, j) {
+  if (terr.camp && Math.hypot(i + 0.5 - terr.camp.x, j + 0.5 - terr.camp.y) < FIELD.aggro + 0.6) return true;
+  return terr.deposits.some((d) => Math.floor(d.x) === i && Math.floor(d.y) === j);
+}
+
+// ---------- grond bijkopen ----------
+export function checkBuyLot(s, li, lj) {
+  if (!s.terr) return 'Je gebied is nog niet klaar.';
+  if (!Number.isInteger(li) || !Number.isInteger(lj)) return 'Ongeldig stuk grond.';
+  const lots = s.terr.lots || [];
+  if (lots.length >= LAND.max) return `Je kan maximaal ${LAND.max} stukken grond bijkopen.`;
+  if (lots.some(([a, b]) => a === li && b === lj)) return 'Dit stuk grond is al van jou.';
+  const z = LAND.size;
+  const x0 = li * z; const y0 = lj * z;
+  if (!inTerr(x0, y0) || !inTerr(x0 + z - 1, y0 + z - 1)) return 'Dit ligt buiten je gebied.';
+  const terr = territory(s.terr.seed);
+  const cl = clearedSet(s);
+  let fresh = 0; let touches = false; let blocked = 0;
+  for (let j = y0; j < y0 + z; j++) {
+    for (let i = x0; i < x0 + z; i++) {
+      if (reservedTile(terr, i, j)) blocked++;
+      if (!isBuildable(s, i, j, cl)) fresh++;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (isBuildable(s, i + dx, j + dy, cl)) touches = true;
+    }
+  }
+  if (blocked > z) return 'Te dicht bij het barbarendorp of een wilde bron.';
+  if (!fresh) return 'Hier mag je al bouwen.';
+  if (!touches) return 'Een lot moet aansluiten op je bouwgrond.';
+  if (!canAfford(s.res, landCost(lots.length))) return 'Niet genoeg grondstoffen.';
+  return null;
+}
+
+export function doBuyLot(s, li, lj) {
+  const err = checkBuyLot(s, li, lj);
+  if (err) throw new GameError(err);
+  const lots = s.terr.lots || (s.terr.lots = []);
+  pay(s.res, landCost(lots.length));
+  lots.push([li, lj]);
+}
+
+// ---------- muren, tegel per tegel ----------
+export const wallSet = (s) => new Set(s.walls || []);
+
+// tegels die door het stadscentrum tot aan de rand van de bouwgrond+marge lopen zonder muur: is je stad dicht?
+export function wallEnclosed(s) {
+  const walls = wallSet(s);
+  if (!walls.size) return false;
+  const k = ringForAge(age(s));
+  const lim = k + 6;
+  const start = [TC_POS.x, TC_POS.y];
+  const seen = new Set([start.join(',')]);
+  const q = [start];
+  while (q.length) {
+    const [i, j] = q.pop();
+    if (ringOf(i, j) >= lim) return false;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ni = i + dx; const nj = j + dy; const key = `${ni},${nj}`;
+      if (seen.has(key) || (inTerr(ni, nj) && walls.has(tileIndex(ni, nj)))) continue;
+      seen.add(key); q.push([ni, nj]);
+    }
+  }
+  return true;
+}
+
+// muurwaarde in gevechten: volledig als de stad dicht is, anders maar een stukje
+export function effectiveWall(s) {
+  const L = bLevel(s, 'wall');
+  if (!L || !(s.walls || []).length) return 0;
+  return wallEnclosed(s) ? L : Math.round(L * 0.3 * 10) / 10;
+}
+
+export function checkPlaceWalls(s, tiles) {
+  const L = bLevel(s, 'wall');
+  if (!L) return 'Bouw eerst de stadsmuur (niveau 1) via het muurpaneel.';
+  if (!Array.isArray(tiles) || !tiles.length) return 'Kies waar de muur moet komen.';
+  if (tiles.length > WALL_TILE.maxPerOrder) return `Maximaal ${WALL_TILE.maxPerOrder} muurstukken tegelijk.`;
+  const cl = clearedSet(s); const occ = occupied(s); const walls = wallSet(s);
+  const seen = new Set();
+  for (const t of tiles) {
+    const [i, j] = t;
+    if (!Number.isInteger(i) || !Number.isInteger(j)) return 'Ongeldige plaats.';
+    if (!isBuildable(s, i, j, cl)) return 'Muren kan je enkel op je eigen bouwgrond zetten.';
+    if (occ.has(`${i},${j}`)) return 'Daar staat al een gebouw.';
+    if (walls.has(tileIndex(i, j)) || seen.has(`${i},${j}`)) return 'Daar staat al een muur.';
+    seen.add(`${i},${j}`);
+  }
+  if (!canAfford(s.res, WALL_TILE.cost[L], tiles.length)) return 'Niet genoeg grondstoffen voor zoveel muur.';
+  return null;
+}
+
+export function doPlaceWalls(s, tiles) {
+  const err = checkPlaceWalls(s, tiles);
+  if (err) throw new GameError(err);
+  pay(s.res, WALL_TILE.cost[bLevel(s, 'wall')], tiles.length);
+  if (!s.walls) s.walls = [];
+  for (const [i, j] of tiles) s.walls.push(tileIndex(i, j));
+}
+
+export function doRemoveWalls(s, tiles) {
+  const rm = new Set((tiles || []).filter((t) => Array.isArray(t) && inTerr(t[0], t[1])).map(([i, j]) => tileIndex(i, j)));
+  if (!rm.size) throw new GameError('Kies welke muur weg moet.');
+  s.walls = (s.walls || []).filter((x) => !rm.has(x));
 }
 
 export function buildRing(s) {
@@ -681,7 +814,7 @@ function barbarianRaid(s, t, speed) {
   c.next = t + iv;
   const r = resolveBattle({
     attUnits: { barbarian: n }, groups: [{ key: 'home', units: { ...s.units } }], defSmithy: bLevel(s, 'smithy'),
-    wall: bLevel(s, 'wall'), towerDef: towerDefense(s), baseDef: townBaseDef(s),
+    wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
   });
   s.units = {};
   for (const [k, v] of Object.entries(r.groupsLeft[0].units)) if (v > 0) s.units[k] = v;
@@ -716,8 +849,9 @@ export function doFieldSend(s, spec, from, to, target, now) {
       job = s.villagers.idle > 0 ? 'idle' : RES.reduce((b, r) => (s.villagers[r] > (b ? s.villagers[b] : 0) ? r : b), null);
     }
     if (!job) throw new GameError('Je hebt geen dorpeling vrij.');
-    s.villagers[job]--;
-    units.villager = 1;
+    const n = Math.max(1, Math.min(s.villagers[job], 40, Math.floor(Number(spec.n) || 1)));
+    s.villagers[job] -= n;
+    units.villager = n;
   } else {
     for (const k of ARMY_UNITS) {
       const n = Math.floor(Number(spec && spec.units && spec.units[k]) || 0);
@@ -844,6 +978,10 @@ export function canPlaceAt(s, type, x, y) {
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
   const grid = occupied(s);
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (grid.has(`${x + dx},${y + dy}`)) return false;
+  if ((s.walls || []).length) {
+    const walls = wallSet(s);
+    for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (walls.has(tileIndex(x + dx, y + dy))) return false;
+  }
   return true;
 }
 
