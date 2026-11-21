@@ -5,6 +5,7 @@ import { WorldView } from './world.js';
 import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
+import { BattleView, askHtml } from './battleview.js';
 import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
@@ -38,6 +39,7 @@ window.__app = app; // handig bij het debuggen in de console
 let town = null;
 let world = null;
 let authWorld = null;
+let battle = null;
 
 // ---------- meldingen ----------
 function toast(msg, type = '', ic = null) {
@@ -198,6 +200,7 @@ function applyState(data, first = false) {
   // chat
   const chatNew = ['team', 'world'].some((c) => (data.chat[c] || 0) > (app.chat.seen[c] || 0));
   $('#badgeChat').hidden = !chatNew;
+  handleBattles(data, first);
   // inkomende aanvallen
   for (const m of data.marches) {
     if (!m.ally && m.status === 'out' && !app.knownHostile.has(m.id)) {
@@ -206,6 +209,84 @@ function applyState(data, first = false) {
     }
   }
   renderAll();
+}
+
+// ---------- veldslagen ----------
+const knownBattles = new Map();
+const askedBattles = new Set();
+
+function battleView() {
+  if (!battle) {
+    battle = new BattleView({
+      now: () => app.now(), get, post, toast, unitThumb: UI.unitThumb,
+      openReports: () => openModal('reports'),
+      onClose: () => { renderAlert(); setTimeout(refresh, 400); },
+    });
+  }
+  return battle;
+}
+
+function openBattle(id, b = null) {
+  hideAsk();
+  battleView().show(id, b);
+}
+
+function handleBattles(data, first) {
+  for (const b of data.battles || []) {
+    const prev = knownBattles.get(b.id);
+    knownBattles.set(b.id, b.status);
+    const mine = b.role === 'att' ? b.attMode : b.defMode;
+    if (!prev && b.status !== 'done' && b.role === 'def') toast(`${b.title} wordt aangevallen${b.attName ? ` door ${b.attName}` : ''}!`, 'err', 'swords');
+    if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !(battle && battle.open)) { askedBattles.add(b.id); showAsk(b); }
+    // de tegenpartij koos om zelf te besturen: bekijk of neem alsnog het bevel over
+    if (b.status === 'live' && prev && prev !== 'live' && mine !== 'manual' && !(battle && battle.open)) {
+      toast(`De slag bij ${b.title} is begonnen. Klik bovenaan om mee te kijken.`, '', 'swords');
+    }
+    if (b.status === 'live' && mine === 'manual' && !(battle && battle.open) && prev !== 'live') openBattle(b.id);
+  }
+  const ask = $('#battleAsk');
+  if (ask && !ask.hidden) {
+    const b = (data.battles || []).find((x) => x.id === Number(ask.dataset.id));
+    if (!b || b.status !== 'choose') hideAsk();
+  }
+}
+
+function showAsk(b) {
+  let el = $('#battleAsk');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'battleAsk'; el.className = 'bt-ask';
+    document.body.appendChild(el);
+  }
+  el.dataset.id = b.id;
+  el.dataset.until = b.chooseUntil;
+  el.innerHTML = askHtml(b, app.now());
+  el.hidden = false;
+}
+
+function hideAsk() {
+  const el = $('#battleAsk');
+  if (el) el.hidden = true;
+}
+
+async function chooseBattle(id, mode) {
+  hideAsk();
+  try {
+    const r = await post('/battle/mode', { id, mode });
+    if (mode === 'manual') openBattle(id, r.battle);
+    else if (r.battle.status === 'done') { toast(r.battle.result && r.battle.result.attWins === (r.battle.role === 'att') ? 'Gewonnen! Bekijk het rapport.' : 'De slag is uitgevochten. Bekijk het rapport.', '', 'scroll'); refresh(); }
+    else toast('Je troepen vechten de slag zelf uit.', '', 'hourglass');
+    poll();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('#battleAsk [data-bact="choose"]');
+  if (el) chooseBattle(Number(el.dataset.id), el.dataset.mode);
+});
+
+function activeBattle() {
+  return (app.data.battles || []).find((b) => b.status === 'live' || (b.status === 'choose' && (b.role === 'att' ? b.attMode : b.defMode)));
 }
 
 function computeLive(force) {
@@ -289,6 +370,14 @@ function tick() {
     w.phase = 'x';
     refresh();
   }
+  const ask = $('#battleAsk');
+  if (ask && !ask.hidden) {
+    const until = Number(ask.dataset.until);
+    const sec = Math.max(0, Math.ceil((until - now) / 1000));
+    for (const el of ask.querySelectorAll('[data-askend]')) el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    if (now > until + 1500) { hideAsk(); refresh(); }
+  }
+  if (tickN % 5 === 0 && (app.data.battles || []).some((b) => b.status !== 'done') && !(battle && battle.open)) poll();
   // legers die net aankwamen: even later opnieuw ophalen
   if (app.data.marches.some((m) => m.arriveAt <= now && m.arriveAt > now - 1000)) setTimeout(refresh, 1500);
 }
@@ -337,6 +426,14 @@ function renderPhase() {
 
 function renderAlert() {
   const el = $('#alert');
+  const lb = activeBattle();
+  if (lb) {
+    el.hidden = false;
+    el.dataset.action = 'battleGo';
+    el.dataset.id = lb.id;
+    setHTML(el, `${UI.icon('swords')} Veldslag bij ${UI.esc(lb.title)}${lb.status === 'live' ? ' is bezig' : ''} — bekijken`);
+    return;
+  }
   const hostile = app.data.marches.filter((m) => !m.ally && m.status === 'out' && m.arriveAt > app.now()).sort((a, b) => a.arriveAt - b.arriveAt);
   const raid = raidIncoming();
   if (!hostile.length && raid) {
@@ -587,7 +684,9 @@ function openPanelMobile(open) {
 let lastT = performance.now();
 function frame(t) {
   const dt = t - lastT; lastT = t;
-  if (!$('#game').hidden && app.data) {
+  if (battle && battle.open) {
+    // het slagveld tekent zichzelf; de stad hoeft dan niet mee te tekenen
+  } else if (!$('#game').hidden && app.data) {
     const now = app.now();
     if (app.view === 'town') town.draw(t, dt, now);
     else world.draw(t, dt, now);
@@ -991,6 +1090,7 @@ const actions = {
     const t = app.map.towns.find((x) => x.id === Number(el.dataset.id));
     if (t) { world.selected = { kind: 'town', obj: t }; renderPanel(); }
   },
+  battleGo(el) { openBattle(Number(el.dataset.id)); },
   async alertGo(el) {
     switchView('world');
     if (!app.map) await loadMap();
@@ -1021,6 +1121,7 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (battle && battle.open) return; // het slagveld heeft zijn eigen toetsen
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
     else if (app.placing) cancelPlace();

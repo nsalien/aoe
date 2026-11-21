@@ -3,7 +3,7 @@ import * as A from './art.js';
 import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
-  LAND, landCost, WALL_TILE,
+  LAND, landCost, WALL_TILE, TOWER,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
@@ -481,7 +481,15 @@ function buildingInfo(app, live, b) {
     }
     case 'storage': return `<div class="card"><dl class="kv"><dt>Opslag per grondstof</dt><dd>${fmt(capacity(live))}</dd><dt>Verborgen voor plunderaars</dt><dd>${fmt(protectAmount(live))}</dd></dl></div>`;
     case 'smithy': return `<div class="card"><dl class="kv"><dt>Bonus aanval en verdediging</dt><dd>+${5 * L}%</dd></dl></div>`;
-    case 'tower': return `<div class="card"><dl class="kv"><dt>Verdediging</dt><dd>+${80 * L}</dd></dl></div>`;
+    case 'tower': {
+      const n = Math.max(1, L); const nx = Math.min(3, n + 1);
+      const up = L && L < 3 ? ` <span class="muted">→ ${TOWER.dmg[nx]}</span>` : '';
+      const upH = L && L < 3 ? ` <span class="muted">→ ${TOWER.hp[nx]}</span>` : '';
+      return `<div class="card"><dl class="kv"><dt>Schade per pijl</dt><dd>${TOWER.dmg[n]}${up}</dd>
+        <dt>Levens</dt><dd>${TOWER.hp[n]}${upH}</dd><dt>Bereik</dt><dd>${TOWER.range} passen</dd>
+        <dt>Schiet om de</dt><dd>${TOWER.rate / 1000} s</dd><dt>Verdediging (automatisch)</dt><dd>+${80 * L}</dd></dl>
+      <p class="small muted" style="margin:6px 0 0">Tijdens een veldslag schiet de toren op de dichtstbijzijnde vijand. Wordt hij gesloopt, dan verliest hij een niveau.</p></div>`;
+    }
     case 'wall': {
       const n = (live.walls || []).length;
       const closed = n && wallEnclosed(live);
@@ -611,8 +619,9 @@ export function marchesHtml(app) {
     const back = m.status === 'back';
     const label = hostile ? `<b style="color:var(--red)">${nm} van ${esc(m.player)}</b> op ${esc(m.to.name)}`
       : back ? `${m.own ? '' : `${esc(m.player)}: `}Terug van ${esc(m.to.name)}` : `${m.own ? '' : `${esc(m.player)}: `}${nm} → ${esc(m.to.name)}`;
+    const fight = m.status === 'battle' ? ` <b style="color:var(--red)">· veldslag bezig</b>` : '';
     return `<div class="qitem"><span class="qicon">${icon(back ? 'home' : ic)}</span>
-      <div><div class="nm">${label}</div><div class="small muted">${marchCargo(m)}</div>
+      <div><div class="nm">${label}${fight}</div><div class="small muted">${marchCargo(m)}</div>
       ${bar(m.departAt, m.arriveAt)}</div>${timer(m.arriveAt)}</div>`;
   }).join('');
 }
@@ -826,6 +835,15 @@ export function helpHtml(w) {
     <p>Nu mag je vijandelijke steden aanvallen en plunderen. Stuur eerst <b>verkenners</b>. Rammen beschadigen muren en monumenten. Een opslagplaats verbergt een deel van je grondstoffen.</p>
     <h3>4. Bondgenoten</h3>
     <p>Je wordt automatisch aan een bondgenoot gekoppeld. Stuur elkaar <b>versterking</b> (die verdedigt mee) en <b>karavanen</b> met grondstoffen via de markt. Overleg in de teamchat!</p>
+    <h3>Veldslagen: zelf besturen of automatisch</h3>
+    <p>Komt je leger aan bij een stad of roverskamp terwijl jij (of de verdediger) online bent, dan kies je: <b>zelf besturen</b> of <b>automatisch</b>.
+    Wie niets kiest of offline is, laat de slag automatisch verlopen. Is de verdediger online, dan krijgt hij een melding en mag hij zijn stad zelf verdedigen.</p>
+    <ul><li>Klik op je troepen of sleep een kader; <b>dubbelklik</b> kiest alle troepen van die soort. Op een gsm tik je, en veeg je om rond te kijken.</li>
+    <li>Klik daarna op de <b>grond</b> om te lopen (ze houden daar hun plek) of op een <b>vijand, toren of muur</b> om die aan te vallen. <b>Stormloop</b> stuurt ze op de dichtstbijzijnde vijand af.</li>
+    <li>Tactieken: stuur speerdragers op ruiters, laat schutters achter je voetvolk, sloop torens met rammen of stenenwerpers, zoek een gat in de muur.
+    Als aanvaller kan je je op elk moment <b>terugtrekken</b>; na 4 minuten trekt je leger zich vanzelf terug.</li>
+    <li><b>Wachttorens</b> (vanaf het Tijdperk van het Brons) schieten op de dichtstbijzijnde vijand. Hogere niveaus doen meer schade en hebben meer levens. Een gesloopte toren verliest een niveau.</li>
+    <li><b>Muren</b> houden aanvallers tegen tot ze een bres slaan; verdedigers kunnen er net overheen vechten. Een open muur heeft een poort in het midden.</li></ul>
     <h3>Gevechten</h3>
     <p>Speerdragers zijn sterk tegen ruiters, boogschutters verdedigen goed tegen voetvolk. Muren, torens en de smidse versterken je verdediging. De sterkste kant wint; de winnaar verliest minder naarmate zijn overmacht groter is.</p>
     <h3>Punten</h3>
