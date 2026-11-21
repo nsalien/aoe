@@ -48,6 +48,7 @@ const P = {
   hourglass: `<path d="M6 2.5h12M6 21.5h12" ${S}/><path d="M7 2.5c0 5.5 4.2 6.5 4.2 9.5S7 16 7 21.5h10c0-5.5-4.2-6.5-4.2-9.5S17 8 17 2.5z" fill="#efe0bb" ${S}/>
     <path d="M9 19.8c.8-2.2 2.2-3 3-3s2.2.8 3 3zM9.6 6.5h4.8c-.6 1.5-1.6 2.4-2.4 3-.8-.6-1.8-1.5-2.4-3z" fill="#d9a43a"/>`,
   chat: `<path d="M3 5.5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-5 4v-4H5a2 2 0 0 1-2-2z" fill="#f3e5c3" ${S}/><path d="M7 8.5h10M7 11.8h7" stroke="#8a6a3a" stroke-width="1.3" stroke-linecap="round"/>`,
+  heart: `<path d="M12 20.5s-8-4.8-8-10.4A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 8 2.5c0 5.6-8 10.4-8 10.4z" fill="#d9483b" ${S}/><path d="M7.6 9.2a2.2 2.2 0 0 1 2.2-1.6" stroke="#ffd6cc" stroke-width="1.3" stroke-linecap="round" fill="none"/>`,
   star: `<path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z" fill="#f2c230" ${S}/>`,
   clock: `<circle cx="12" cy="12" r="9" fill="#fff6e0" ${S}/><path d="M12 6.5V12l3.8 2.2" stroke="${O}" stroke-width="1.6" fill="none" stroke-linecap="round"/>`,
   tent: `<path d="M2 20L12 4l10 16z" fill="#a0402a" ${S}/><path d="M12 4l-3 16h6z" fill="#3b2612"/><path d="M12 4l4 16" stroke="#c2604a" stroke-width="1"/>`,

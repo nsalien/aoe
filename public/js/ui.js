@@ -468,7 +468,7 @@ function trainHtml(app, live, b, units, title = null, cls = '') {
     const t = Math.round((u.time * Math.pow(0.85, Math.max(0, lvl - 1))) / d.world.speed);
     html += `<div class="urow"><img src="${unitThumb(k, d.team.color)}" alt="">
       <div><div class="nm">${u.name}${u.unique ? ` <span class="elite-tag">${icon('star')} elite</span>` : ''}</div>
-      ${u.atk !== undefined && ARMY_UNITS.includes(k) ? `<div class="stats"><span title="Aanval">${icon('swords')} ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">${icon('shield')} ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">${icon('horse')} ${u.speed}</span><span title="Draagvermogen">${icon('cart')} ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">${icon('people')} ${u.pop}</span>` : ''}</div>` : ''}
+      ${u.atk !== undefined && ARMY_UNITS.includes(k) ? `<div class="stats"><span title="Levenspunten">${icon('heart')} ${u.hp}</span><span title="Aanval">${icon('swords')} ${u.atk}</span><span title="Verdediging tegen voetvolk / ruiters / schutters">${icon('shield')} ${u.def.inf}/${u.def.cav}/${u.def.rng}</span><span title="Snelheid (tegels per uur)">${icon('horse')} ${u.speed}</span><span title="Draagvermogen">${icon('cart')} ${u.carry}</span>${u.pop > 1 ? `<span title="Bevolking">${icon('people')} ${u.pop}</span>` : ''}</div>` : ''}
       ${u.desc ? `<div class="small muted">${u.desc}</div>` : ''}
       <div class="row small" style="margin-top:3px">${costHtml(u.cost, live.res)}<span class="muted">${icon('clock')} ${fmtDuration(t * 1000)}</span></div>
       ${locked ? `<p class="req">${err}</p>` : `<div class="trainrow">
@@ -750,6 +750,12 @@ export function helpHtml(w) {
     <p>Elk rijk hoort bij een volk met een eigen bouwstijl. Zodra je stadscentrum een <b>kasteel</b> wordt (${AGES[CASTLE_LEVEL].name}),
     train je daar twee elite-eenheden die enkel jouw volk heeft:</p>
     <ul>${CIV_IDS.map((c) => `<li>${civEmblem(c, 15)} <b>${CIVS[c].name}</b>: ${CIVS[c].units.map((k) => `<b>${UNITS[k].name}</b> (${UNITS[k].desc.charAt(0).toLowerCase()}${UNITS[k].desc.slice(1).replace(/\.$/, '')})`).join(' en ')}.</li>`).join('')}</ul>
+    <h3>Gevechten</h3>
+    <p>Elke eenheid heeft <b>levenspunten</b> (${icon('heart')}): een dorpeling ${UNITS.villager.hp}, een speerdrager ${UNITS.spear.hp},
+    een ridder ${UNITS.knight.hp}, een oorlogsolifant ${UNITS.elephant.hp}. In je eigen gebied zie je elk gevecht gebeuren: de mannetjes
+    slaan om de beurt toe, verliezen bij elke klap levens (de balk boven hun hoofd) en vallen als die leeg is.
+    Barbaren vallen <b>meteen aan</b> wie hun dorp nadert, ook dorpelingen. Geef een vechtende groep een andere opdracht om te vluchten.
+    Gewonde eenheden genezen zodra ze terug thuis zijn.</p>
     <h3>Je eigen gebied verkennen</h3>
     <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Tik op een <b>dorpeling of soldaat</b> en daarna op de grond:
     hij loopt er meteen naartoe en de mist verdwijnt waar hij komt. Een groep die je gekozen hebt, krijgt een gouden ring; tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>

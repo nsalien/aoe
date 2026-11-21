@@ -13,6 +13,7 @@ import { ICON } from './ui.js';
 import * as NAT from './nature.js';
 import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
+import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
@@ -47,6 +48,97 @@ function facing(ctx, x, dir, fn) {
   ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0);
   fn();
   ctx.restore();
+}
+
+// ---------- het barbarendorp (één keer getekend: achterkant en voorkant van de palissade) ----------
+let CAMP_SPR = null;
+function campSprites() {
+  if (CAMP_SPR) return CAMP_SPR;
+  const W = 156; const H = 124; const AY = 84; const K = 2;
+  const make = (fn) => {
+    const cv = document.createElement('canvas');
+    cv.width = W * K; cv.height = H * K;
+    const c = cv.getContext('2d');
+    c.scale(K, K); c.translate(W / 2, AY);
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    fn(c);
+    return cv;
+  };
+  const RX = 60; const RY = 29;
+  const stakes = [];
+  for (let i = 0; i < 34; i++) {
+    const a = (i / 34) * Math.PI * 2;
+    if (Math.abs(a - Math.PI * 0.5) < 0.26) continue; // poort vooraan
+    stakes.push({ x: Math.cos(a) * RX, y: Math.sin(a) * RY, h: 15 + ((i * 7) % 5), lean: Math.cos(a) * 0.8 });
+  }
+  const stake = (c, st) => {
+    const { x, y, h } = st;
+    c.fillStyle = '#5e4027'; c.beginPath(); c.moveTo(x - 1.9, y); c.lineTo(x - 1.7 + st.lean, y - h); c.lineTo(x + st.lean * 1.1, y - h - 4.5); c.lineTo(x + 1.7 + st.lean, y - h); c.lineTo(x + 1.9, y); c.closePath(); c.fill();
+    c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(x + 0.2, y - h, 1.7, h);
+    c.fillStyle = 'rgba(255,220,170,0.18)'; c.fillRect(x - 1.7, y - h, 0.6, h);
+    c.fillStyle = '#b89a6a'; c.fillRect(x - 2, y - h * 0.55, 4, 1);
+  };
+  const hut = (c, x, y, r, roof) => {
+    const wh = r * 0.85;
+    c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); c.ellipse(x + 3, y + 1, r * 1.3, r * 0.5, 0, 0, Math.PI * 2); c.fill();
+    const g = c.createLinearGradient(x - r, 0, x + r, 0);
+    g.addColorStop(0, '#9a7448'); g.addColorStop(0.5, '#7a5a36'); g.addColorStop(1, '#4e3820');
+    c.fillStyle = g; c.beginPath(); c.moveTo(x - r, y - wh); c.lineTo(x - r, y); c.ellipse(x, y, r, r * 0.45, 0, Math.PI, 0, true); c.lineTo(x + r, y - wh); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(40,25,10,0.45)'; c.lineWidth = 0.5;
+    for (let k = -r + 2; k < r; k += 2.2) { c.beginPath(); c.moveTo(x + k, y - wh); c.lineTo(x + k, y + Math.sqrt(Math.max(0, 1 - (k / r) ** 2)) * r * 0.45); c.stroke(); }
+    c.fillStyle = '#2a1a10'; c.beginPath(); c.moveTo(x - r * 0.25, y + r * 0.42); c.lineTo(x - r * 0.25, y - wh * 0.45); c.quadraticCurveTo(x, y - wh * 0.75, x + r * 0.25, y - wh * 0.45); c.lineTo(x + r * 0.25, y + r * 0.42); c.fill();
+    const top = y - wh - r * 1.45;
+    const rg = c.createLinearGradient(x - r, top, x + r, y - wh);
+    rg.addColorStop(0, '#e3c47a'); rg.addColorStop(0.55, roof); rg.addColorStop(1, '#7a5a26');
+    c.fillStyle = rg; c.beginPath(); c.moveTo(x - r * 1.2, y - wh + 1); c.lineTo(x, top); c.lineTo(x + r * 1.2, y - wh + 1); c.ellipse(x, y - wh + 1, r * 1.2, r * 0.5, 0, 0, Math.PI); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(90,60,20,0.5)'; c.lineWidth = 0.5;
+    for (let k = -5; k <= 5; k++) { c.beginPath(); c.moveTo(x, top + 2); c.lineTo(x + (k / 5) * r * 1.2, y - wh + 1 + Math.sqrt(Math.max(0, 1 - (k / 5) ** 2)) * r * 0.5); c.stroke(); }
+    c.fillStyle = '#3a2a18'; c.beginPath(); c.ellipse(x, top + 2.5, 1.6, 0.8, 0, 0, Math.PI * 2); c.fill();
+  };
+  const totem = (c, x, y) => {
+    c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); c.ellipse(x + 2, y + 1, 5, 2, 0, 0, Math.PI * 2); c.fill();
+    const cols = ['#7a4a26', '#a8432f', '#2a2018', '#c49a3a', '#7a4a26'];
+    for (let i = 0; i < 5; i++) {
+      c.fillStyle = cols[i]; c.fillRect(x - 2.6, y - 6 - i * 6, 5.2, 6);
+      c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(x + 0.6, y - 6 - i * 6, 2, 6);
+      c.fillStyle = '#f0e6d0'; c.fillRect(x - 1.6, y - 3.6 - i * 6, 1, 1); c.fillRect(x + 0.6, y - 3.6 - i * 6, 1, 1);
+    }
+    c.fillStyle = '#efe6d2'; c.beginPath(); c.arc(x, y - 33, 2.6, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#2a1a10'; c.fillRect(x - 1.4, y - 33.6, 1, 1); c.fillRect(x + 0.4, y - 33.6, 1, 1);
+    c.strokeStyle = '#efe6d2'; c.lineWidth = 1.1;
+    c.beginPath(); c.moveTo(x - 2.4, y - 34); c.quadraticCurveTo(x - 6, y - 37, x - 5, y - 41); c.moveTo(x + 2.4, y - 34); c.quadraticCurveTo(x + 6, y - 37, x + 5, y - 41); c.stroke();
+  };
+  const rack = (c, x, y) => {
+    c.strokeStyle = '#5e4027'; c.lineWidth = 1.2;
+    c.beginPath(); c.moveTo(x - 7, y); c.lineTo(x - 7, y - 14); c.moveTo(x + 7, y - 2); c.lineTo(x + 7, y - 16); c.moveTo(x - 8, y - 13); c.lineTo(x + 8, y - 15); c.stroke();
+    c.fillStyle = '#c9a77a'; c.beginPath(); c.moveTo(x - 5.5, y - 12.5); c.lineTo(x + 5.5, y - 14); c.quadraticCurveTo(x + 6, y - 7, x + 4.5, y - 4); c.lineTo(x - 4.5, y - 3); c.quadraticCurveTo(x - 6.4, y - 7, x - 5.5, y - 12.5); c.fill();
+    c.strokeStyle = 'rgba(90,60,30,0.6)'; c.lineWidth = 0.4; c.stroke();
+  };
+  const bones = (c, x, y) => { c.strokeStyle = '#efe6d2'; c.lineWidth = 0.9; c.beginPath(); c.moveTo(x - 3, y); c.lineTo(x + 2, y - 1); c.moveTo(x - 1, y + 1.5); c.lineTo(x + 3, y + 2.5); c.stroke(); };
+  const back = make((c) => {
+    c.fillStyle = 'rgba(80,60,35,0.45)'; c.beginPath(); c.ellipse(0, 0, RX - 4, RY - 2, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(60,40,20,0.35)'; c.beginPath(); c.ellipse(-4, 4, 14, 7, 0, 0, Math.PI * 2); c.fill();
+    for (const [x, y] of [[-20, 14], [18, 16], [-36, 2], [40, 6]]) bones(c, x, y);
+    for (const st of stakes) if (st.y < 0) stake(c, st);
+    hut(c, -30, -8, 11, '#c9a24a');
+    hut(c, 26, -12, 13, '#b8913e');
+    hut(c, -4, -18, 9, '#d0ab55');
+    totem(c, 44, -4);
+    rack(c, -46, 6);
+    // houtstapel bij het vuur
+    for (let i = 0; i < 3; i++) { c.fillStyle = '#6b4826'; c.beginPath(); c.ellipse(10 + i * 2, 12 - i * 2.4, 6, 1.6, 0.2, 0, Math.PI * 2); c.fill(); c.fillStyle = '#d6b27a'; c.beginPath(); c.ellipse(16 + i * 2, 13 - i * 2.4, 1, 1.4, 0, 0, Math.PI * 2); c.fill(); }
+  });
+  const front = make((c) => {
+    for (const st of stakes) if (st.y >= 0) stake(c, st);
+    // schedels op palen bij de poort
+    for (const x of [-15, 15]) {
+      c.strokeStyle = '#5e4027'; c.lineWidth = 1.3; c.beginPath(); c.moveTo(x, RY + 1); c.lineTo(x, RY - 22); c.stroke();
+      c.fillStyle = '#efe6d2'; c.beginPath(); c.arc(x, RY - 24, 2.6, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#2a1a10'; c.fillRect(x - 1.5, RY - 24.6, 1, 1); c.fillRect(x + 0.5, RY - 24.6, 1, 1);
+    }
+  });
+  CAMP_SPR = { back, front, w: W, h: H, ay: AY };
+  return CAMP_SPR;
 }
 
 // Teken enkel het zichtbare stuk van een grote, vooraf getekende laag (veel minder pixelwerk per beeld).
@@ -1404,8 +1496,12 @@ export class TownView {
         if (depLeft(s, d) <= 0 || !this.isExplored(d.x, d.y) || !inView(toWorld(d.x, d.y))) continue;
         items.push({ depth: d.x + d.y, kind: 'deposit', d });
       }
+      const scene = this.fightScene(now);
+      this.fighting = scene;
+      for (const sc of scene) for (const u of sc.units) if (!u.gone) items.push({ depth: u.x + u.y, kind: 'fighter', u, sc });
+      const busyBoar = new Set(scene.filter((sc) => sc.f.foe.type === 'boar').map((sc) => sc.f.foe.id));
       for (const b of terr.boars) {
-        if (!boarAlive(s, b.id, now)) continue;
+        if (!boarAlive(s, b.id, now) || busyBoar.has(b.id)) continue;
         const bp = this.boarPos(b);
         if (!this.isVisible(bp.x, bp.y)) continue;
         items.push({ depth: bp.x + bp.y, kind: 'boar', b, bp });
@@ -1414,9 +1510,11 @@ export class TownView {
       const raid = this.raidParty(now);
       if (raid && this.isExplored(raid.x, raid.y)) items.push({ depth: raid.x + raid.y, kind: 'raid', raid });
       for (const g of s.field || []) {
+        if (g.fight && scene.some((sc) => sc.f.id === g.fight)) continue;
         const p = groupPos(g, now);
         items.push({ depth: p.x + p.y, kind: 'group', g, p });
       }
+      this.fightEffects(scene, now);
     }
     items.sort((a, b) => a.depth - b.depth);
 
@@ -1441,6 +1539,7 @@ export class TownView {
         case 'camp': this.drawCamp(ctx, t, now); break;
         case 'raid': this.drawRaid(ctx, it.raid, t); break;
         case 'group': this.drawGroup(ctx, it.g, it.p, t, now, emit); break;
+        case 'fighter': this.drawFighter(ctx, it.u, it.sc, t, now); break;
         default: { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, t); }
       }
     }
@@ -1469,6 +1568,7 @@ export class TownView {
     }
     if (wall && jobs.has(wall.id)) this.drawWallProgress(ctx, jobs.get(wall.id), now);
     this.drawWorkProgress(ctx, now);
+    if (this.fighting && this.fighting.length) this.drawProjectiles(ctx, this.fighting, now);
     this.drawHover(ctx);
   }
 
@@ -1556,34 +1656,150 @@ export class TownView {
 
   drawCampInner(ctx, t, now, s) {
     const p = { x: 0, y: 0 };
+    const busy = (this.fighting || []).some((sc) => sc.f.foe.type === 'camp');
     if (!campAlive(s, now)) {
       ctx.fillStyle = 'rgba(30,25,20,0.55)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 54, 26, 0, 0, Math.PI * 2); ctx.fill();
       for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; ctx.fillStyle = '#2a2018'; ctx.fillRect(p.x + Math.cos(a) * 44 - 1.5, p.y + Math.sin(a) * 20 - 5, 3, 5); }
       A.smoke(ctx, p.x, p.y - 4, t, 7, 0.8);
       return;
     }
-    // palissade, tenten, vuur en barbaren
-    const stakes = [];
-    for (let i = 0; i < 26; i++) {
-      const a = (i / 26) * Math.PI * 2;
-      if (Math.abs(a - Math.PI * 0.5) < 0.28) continue; // poortje vooraan
-      stakes.push({ x: p.x + Math.cos(a) * 54, y: p.y + Math.sin(a) * 26 });
+    // dorp uit vooraf getekende lagen (achterkant en voorkant van de palissade), daartussen vuur en barbaren
+    const spr = campSprites();
+    ctx.drawImage(spr.back, -spr.w / 2, -spr.ay, spr.w, spr.h);
+    A.fire(ctx, p.x - 4, p.y + 4, 1.15, t);
+    A.smoke(ctx, p.x - 26, p.y - 30, t, 3, 0.7);
+    A.smoke(ctx, p.x + 24, p.y - 34, t, 5, 0.7);
+    A.flag(ctx, p.x + 44, p.y - 2, 32, '#1c1c1c', t, 1);
+    ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(p.x + 51, p.y - 30, 2.2, 0, Math.PI * 2); ctx.fill();
+    A.flag(ctx, p.x - 50, p.y - 4, 28, '#5a1a12', t + 700, 0.9);
+    if (!busy) {
+      const n = Math.min(6, Math.max(2, Math.round(campSize(s) / 3)));
+      const spots = [[-30, 8, 0], [26, 8, 2], [8, -14, 4], [-14, 16, 1], [36, -8, 3], [-40, -4, 5]];
+      for (let i = 0; i < n; i++) {
+        const [dx, dy, ph] = spots[i];
+        const dir = dx < 0 ? 1 : -1;
+        facing(ctx, p.x + dx, dir, () => A.person(ctx, p.x + dx, p.y + dy + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: ph % 2 ? '#4f3a2a' : '#5b4636', weapon: ph === 2 || ph === 5 ? 'spear' : 'sword', barb: true, skin: 1 + (ph % 3) }));
+      }
     }
-    const drawStake = (st) => {
-      ctx.fillStyle = '#6b4a2b'; ctx.fillRect(st.x - 1.6, st.y - 13, 3.2, 13);
-      ctx.fillStyle = '#8a6238'; ctx.beginPath(); ctx.moveTo(st.x - 1.6, st.y - 13); ctx.lineTo(st.x, st.y - 17); ctx.lineTo(st.x + 1.6, st.y - 13); ctx.fill();
-    };
-    for (const st of stakes) if (st.y <= p.y) drawStake(st);
-    A.tent(ctx, p.x - 22, p.y - 6, 1.1, '#5b3a2a');
-    A.tent(ctx, p.x + 20, p.y - 9, 1.0, '#6b2f2a');
-    A.tent(ctx, p.x + 2, p.y + 8, 1.15, '#4a4038');
-    A.fire(ctx, p.x - 6, p.y + 2, 1, t);
-    for (const [dx, dy, ph] of [[-30, 6, 0], [28, 6, 2], [10, -16, 4]]) {
-      A.person(ctx, p.x + dx, p.y + dy + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: '#5b4636', weapon: ph === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (ph % 3) });
+    ctx.drawImage(spr.front, -spr.w / 2, -spr.ay, spr.w, spr.h);
+  }
+
+  // ---------- gevechten ----------
+
+  // waar staat elk mannetje in elk gevecht, en hoeveel levens heeft het nog?
+  fightScene(now) {
+    const s = this.state;
+    const out = [];
+    for (const f of (s.terr && s.terr.fights) || []) {
+      const groups = (s.field || []).filter((g) => g.fight === f.id);
+      if (!groups.length) continue;
+      const r = runFight(f, now, true);
+      let ax = 0; let ay = 0;
+      for (const g of groups) { const p = groupPos(g, now); ax += p.x; ay += p.y; }
+      ax /= groups.length; ay /= groups.length;
+      let fx; let fy;
+      if (f.foe.type === 'boar') {
+        const b = this.terr.boars.find((x) => x.id === f.foe.id);
+        fx = b ? b.x : ax + 0.8; fy = b ? b.y : ay;
+      } else {
+        const c = this.terr.camp; const d = Math.hypot(c.x - ax, c.y - ay) || 1;
+        fx = ax + ((c.x - ax) / d) * 1.1; fy = ay + ((c.y - ay) / d) * 1.1;
+      }
+      let ux = fx - ax; let uy = fy - ay; const dl = Math.hypot(ux, uy) || 1; ux /= dl; uy /= dl;
+      if (dl < 0.7) { ax = fx - ux * 0.8; ay = fy - uy * 0.8; }
+      const px = -uy; const py = ux;
+      const units = [];
+      const place = (list, side, cx, cy) => list.forEach((u, i) => {
+        const per = 6;
+        const row = Math.floor(i / per); const col = (i % per) - Math.min(per - 1, list.length - 1 - row * per) / 2 + (row % 2) * 0.25;
+        const back = side ? 1 : -1;
+        const x = cx + ux * back * row * 0.42 + px * col * 0.44 + ((i * 37) % 7 - 3) * 0.02;
+        const y = cy + uy * back * row * 0.42 + py * col * 0.44 + ((i * 53) % 7 - 3) * 0.02;
+        const gone = u.died != null && now - u.died > 4500;
+        units.push({ side, i, k: u.k, hp: u.hp, max: maxHp(u.k), died: u.died, x, y, gone, ux: side ? -ux : ux, uy: side ? -uy : uy });
+      });
+      place(r.a, 0, ax + ux * 0.1, ay + uy * 0.1);
+      place(r.b, 1, fx - ux * 0.1, fy - uy * 0.1);
+      // treffers van de komende 0,4 s: daarvoor vliegen de pijlen al
+      const ranged = [...f.a, ...f.b].some((u) => UNITS[u.k] && UNITS[u.k].ranged);
+      const future = ranged ? runFight(f, now + 400, true).events.filter((e) => e.t > now - 50) : [];
+      out.push({ f, r, units, future });
     }
-    A.flag(ctx, p.x + 40, p.y - 4, 30, '#1c1c1c', t, 1);
-    ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(p.x + 47, p.y - 30, 2.2, 0, Math.PI * 2); ctx.fill();
-    for (const st of stakes) if (st.y > p.y) drawStake(st);
+    return out;
+  }
+
+  // treffers: stofjes en vonken bij wie geraakt wordt
+  fightEffects(scene, now) {
+    const from = this.lastFightNow || now;
+    this.lastFightNow = now;
+    if (now <= from) return;
+    for (const sc of scene) {
+      for (const e of sc.r.events) {
+        if (e.t <= from || e.t > now) continue;
+        const u = sc.units.find((x) => x.side !== e.side && x.i === e.target);
+        if (!u) continue;
+        const p = toWorld(u.x, u.y);
+        if (e.kill) this.particles.dust(p.x, p.y - 4, 4); else this.particles.sparks(p.x, p.y - 10, 2);
+      }
+    }
+  }
+
+  drawFighter(ctx, u, sc, t, now) {
+    const p = toWorld(u.x, u.y);
+    const dir = u.ux - u.uy >= 0 ? 1 : -1;
+    const dead = u.died != null && u.died <= now;
+    if (dead) {
+      // gesneuveld: valt om en vervaagt
+      const age = Math.min(1, (now - u.died) / 4500);
+      ctx.save(); ctx.globalAlpha = 1 - age * 0.85;
+      ctx.translate(p.x, p.y); ctx.rotate(-dir * Math.min(1.45, (now - u.died) / 250));
+      this.drawFightFigure(ctx, u, 0, 0, t, false, dir);
+      ctx.restore();
+      return;
+    }
+    const ls = lastSwing(sc.f, u.side, u.i, u.k, now);
+    const swing = ls != null && now - ls < 340 ? Math.sin(((now - ls) / 340) * Math.PI) : 0;
+    const q = toWorld(u.x + u.ux * swing * 0.16, u.y + u.uy * swing * 0.16);
+    this.drawFightFigure(ctx, u, q.x, q.y, t, swing > 0, dir, ls != null ? (now - ls) / 340 : 0);
+    // levensbalk (pas na de eerste treffer, anders wordt het te druk)
+    if (u.hp >= u.max) return;
+    const tall = u.k === 'elephant' ? 50 : UNITS[u.k] && UNITS[u.k].type === 'cav' ? 38 : u.k === 'boar' ? 22 : 30;
+    const frac = Math.max(0, u.hp / u.max);
+    const w = u.k === 'elephant' ? 20 : 12;
+    ctx.fillStyle = 'rgba(20,12,6,0.7)'; ctx.fillRect(q.x - w / 2 - 1, q.y - tall - 1, w + 2, 4);
+    ctx.fillStyle = frac > 0.6 ? '#62d44c' : frac > 0.3 ? '#f2c230' : '#e2452f';
+    ctx.fillRect(q.x - w / 2, q.y - tall, w * frac, 2);
+    if (u.side) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(q.x - w / 2, q.y - tall, w * frac, 0.7); }
+  }
+
+  // pijlen van schutters vliegen naar hun doelwit
+  drawProjectiles(ctx, scene, now) {
+    for (const sc of scene) {
+      for (const e of sc.future) {
+        const age = now - e.t + 380;
+        if (age < 0 || age > 380) continue;
+        const from = sc.units.find((x) => x.side === e.side && x.i === e.i);
+        const to = sc.units.find((x) => x.side !== e.side && x.i === e.target);
+        if (!from || !to || !(UNITS[from.k] && UNITS[from.k].ranged)) continue;
+        const a = toWorld(from.x, from.y); const b = toWorld(to.x, to.y);
+        const f = age / 380;
+        const x = a.x + (b.x - a.x) * f; const y = a.y - 14 + (b.y - a.y + 6) * f - Math.sin(f * Math.PI) * 18;
+        const ang = Math.atan2((b.y - a.y + 6) - Math.cos(f * Math.PI) * 18 * Math.PI, b.x - a.x);
+        ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+        if (from.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 2.4, 0, Math.PI * 2); ctx.fill(); }
+        else { ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(4, 0); ctx.stroke(); ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(5.5, 0); ctx.lineTo(3.5, -1.2); ctx.lineTo(3.5, 1.2); ctx.fill(); ctx.fillStyle = '#f4efe0'; ctx.fillRect(-5.5, -1, 1.6, 2); }
+        ctx.restore();
+      }
+    }
+  }
+
+  drawFightFigure(ctx, u, x, y, t, swinging, dir, sp = 0) {
+    facing(ctx, x, dir, () => {
+      if (u.k === 'barbarian') A.person(ctx, x, y, { s: 1.05, body: u.i % 2 ? '#4f3a2a' : '#5b4636', weapon: u.i % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.i % 3), walking: swinging, phase: sp * Math.PI });
+      else if (u.k === 'boar') FIG.boar(ctx, x, y, { s: 1.15, walking: swinging, phase: sp * 6 });
+      else if (u.k === 'villager') A.person(ctx, x, y, { s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe', working: swinging, phase: sp * Math.PI * 2 });
+      else this.drawSoldier(ctx, { kind: u.k, gx: u.x, gy: u.y, walking: swinging }, x, y, t);
+    });
   }
 
   // barbaren die op weg zijn naar je stad (de laatste anderhalve minuut voor een overval)
@@ -1642,6 +1858,15 @@ export class TownView {
       facing(ctx, fx, dir, () => this.drawFigure(ctx, k, fx, p.y + q.y, t, moving, working, this.groupTool(g)));
     }
     const total = Object.values(g.units).reduce((a, b) => a + b, 0);
+    if (g.hp) {
+      let hp = 0; let max = 0;
+      for (const k of Object.keys(g.units)) { const n = g.units[k]; const list = g.hp[k] || []; for (let i = 0; i < n; i++) { hp += list[i] != null ? list[i] : maxHp(k); max += maxHp(k); } }
+      if (hp < max) {
+        const frac = hp / max;
+        ctx.fillStyle = 'rgba(20,12,6,0.7)'; ctx.fillRect(p.x - 10, p.y - 47, 20, 4);
+        ctx.fillStyle = frac > 0.6 ? '#62d44c' : frac > 0.3 ? '#f2c230' : '#e2452f'; ctx.fillRect(p.x - 9, p.y - 46, 18 * frac, 2);
+      }
+    }
     if (total > figs.length) {
       ctx.font = '700 10px Inter, sans-serif'; ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(30,20,10,0.8)'; ctx.beginPath(); ctx.roundRect(p.x - 12, p.y - 40, 24, 13, 6); ctx.fill();
