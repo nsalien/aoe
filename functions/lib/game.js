@@ -1,7 +1,7 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
   advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
-  towerDefense, townBaseDef,
+  towerDefense, townBaseDef, effectiveWall,
 } from '../../public/shared/sim.js';
 import {
   resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits,
@@ -229,7 +229,7 @@ async function attackTown(db, world, m, t) {
     const groups = [{ key: 'home', units: { ...s.units } }, ...supRows.map((r) => ({ key: r.id, units: r.unitsObj }))];
     const b = resolveBattle({
       attUnits: m.units, attSmithy: smithy, groups, defSmithy: bLevel(s, 'smithy'),
-      wall: bLevel(s, 'wall'), towerDef: towerDefense(s), baseDef: townBaseDef(s),
+      wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
     });
     s.units = b.groupsLeft[0].units;
     for (const k of Object.keys(s.units)) if (!s.units[k]) delete s.units[k];

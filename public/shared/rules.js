@@ -67,7 +67,7 @@ export const BUILDINGS = {
   },
   wall: {
     name: 'Stadsmuur', size: 0, max: 1, maxLevel: 5, age: 1, cost: { wood: 120, stone: 80 }, time: 1200,
-    placeable: false, desc: '+30 verdediging en +8% verdedigingsbonus per niveau. Rammen beschadigen de muur.',
+    placeable: false, desc: 'Bepaalt hoe sterk je muren zijn. Plaats ze zelf, tegel per tegel. Een volledig gesloten muur verdedigt het best.',
   },
   range: {
     name: 'Schietbaan', size: 1, max: 1, maxLevel: 3, age: 2, cost: { wood: 200, gold: 60 }, time: 1500,
@@ -154,6 +154,19 @@ export const UNITS = {
 // wilde tegenstanders in je eigen gebied (niet trainbaar)
 UNITS.boar = { name: 'Everzwijn', type: 'inf', atk: 22, def: { inf: 10, cav: 8, rng: 8 }, carry: 0, pop: 0, cost: {}, wild: true };
 UNITS.barbarian = { name: 'Barbaar', type: 'inf', atk: 15, def: { inf: 9, cav: 7, rng: 7 }, carry: 25, pop: 0, cost: {}, wild: true };
+
+// ---------- grond bijkopen en muren ----------
+// Grond koop je per lot van 4 x 4 tegels, aansluitend op je bouwgrond. Elk lot wordt duurder.
+export const LAND = { size: 4, max: 12, cost: { wood: 250, food: 200, gold: 40 }, growth: 0.4 };
+export const landCost = (n) => {
+  const o = {};
+  for (const r of Object.keys(LAND.cost)) o[r] = Math.round((LAND.cost[r] * (1 + LAND.growth * n)) / 5) * 5;
+  return o;
+};
+// Muren plaats je tegel per tegel; hun sterkte en uitzicht volgen het niveau van de stadsmuur.
+export const WALL_TILE = { cost: [null, { wood: 6 }, { wood: 8 }, { stone: 6, wood: 2 }, { stone: 8, wood: 2 }, { stone: 10, wood: 2 }], maxPerOrder: 60 };
+// Torens in een veldslag: levenspunten en schade per niveau
+export const TOWER = { hp: [0, 220, 320, 450], dmg: [0, 9, 13, 18], range: 6, rate: 2000 };
 
 // ---------- volkeren ----------
 // Elk volk heeft een eigen bouwstijl en twee eigen eenheden. Die train je in het kasteel: het stadscentrum

@@ -103,7 +103,7 @@ export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, 
   let monumentDamage = 0;
   if (attWins) {
     const pts = Math.floor(wallBreakers(attLeft) / COMBAT.ramsPerWallLevel);
-    wallDamage = Math.min(pts, COMBAT.maxWallDamage, wall);
+    wallDamage = Math.min(pts, COMBAT.maxWallDamage, Math.floor(wall));
     if (pts - wallDamage >= 1 && wall - wallDamage <= 0) monumentDamage = 1;
   }
   return {

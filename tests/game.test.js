@@ -491,3 +491,48 @@ test('een groep kan zich terugtrekken uit een gevecht', () => {
   assert.ok(!g.fight, 'niet opnieuw aangevallen op de terugweg');
   assert.ok(Object.values(g.hp).flat().some((h) => h < U2.spear.hp), 'met schrammen');
 });
+
+// ---------- grond, muren en groepen ----------
+import { checkBuyLot, doBuyLot, isBuildable as canBuild, doPlaceWalls, wallEnclosed, effectiveWall, canPlaceAt as canPut } from '../public/shared/sim.js';
+import { LAND } from '../public/shared/rules.js';
+
+test('grond bijkopen per lot van 4 x 4, aansluitend en elke keer duurder', () => {
+  const s = terrTown();
+  s.res = { food: 3000, wood: 3000, stone: 3000, gold: 3000 };
+  assert.match(checkBuyLot(s, 1, 1), /al bouwen/, 'binnen het vierkant hoef je niets te kopen');
+  assert.match(checkBuyLot(s, 5, 5), /aansluiten/);
+  assert.equal(canBuild(s, 12, 0), false);
+  const wood = s.res.wood;
+  doBuyLot(s, 3, 0); // tegels 12..15 x 0..3
+  assert.ok(canBuild(s, 12, 0) && canBuild(s, 15, 3));
+  assert.ok(wood - s.res.wood >= LAND.cost.wood);
+  const w2 = s.res.wood;
+  doBuyLot(s, 4, 0); // sluit aan op het vorige lot
+  assert.ok(w2 - s.res.wood > wood - w2, 'het tweede lot is duurder');
+  assert.ok(canPut(s, 'house', 13, 1), 'je kan er bouwen');
+});
+
+test('muren tegel per tegel; een gesloten muur verdedigt volledig', () => {
+  const s = terrTown();
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  assert.throws(() => doPlaceWalls(s, [[0, 0]]), /stadsmuur/);
+  s.buildings.find((b) => b.type === 'wall').level = 2;
+  const ring = [];
+  for (let i = 0; i < 12; i++) { ring.push([i, 0], [i, 11]); if (i > 0 && i < 11) ring.push([0, i], [11, i]); }
+  doPlaceWalls(s, ring.slice(0, 40));
+  assert.equal(wallEnclosed(s), false, 'nog een gat');
+  assert.ok(effectiveWall(s) < 2);
+  doPlaceWalls(s, ring.slice(40));
+  assert.equal(wallEnclosed(s), true);
+  assert.equal(effectiveWall(s), 2);
+  assert.equal(canPut(s, 'house', 0, 0), false, 'niet bouwen op een muur');
+  assert.throws(() => doPlaceWalls(s, [[0, 0]]), /al een muur/);
+});
+
+test('meerdere dorpelingen tegelijk op pad sturen', () => {
+  const s = terrTown();
+  const before = s.villagers.food;
+  const g = doFieldSend(s, { villager: 'food', n: 2 }, null, { x: 4, y: 13 }, null, s.t);
+  assert.equal(g.units.villager, 2);
+  assert.equal(s.villagers.food, before - 2);
+});
