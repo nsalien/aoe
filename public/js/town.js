@@ -3,10 +3,10 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, landCost, WALL_TILE } from '../shared/rules.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
-  exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup,
+  exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -257,6 +257,10 @@ export class TownView {
     this.detectUpgrades();
     this.fogAt = 0;
     if (this.sel && this.sel.type === 'group' && !(state.field || []).some((g) => g.id === this.sel.id)) this.setSel(null);
+    if (this.sel && this.sel.type === 'groups') {
+      const ids = this.sel.ids.filter((id) => (state.field || []).some((g) => g.id === id));
+      if (!ids.length) this.setSel(null); else this.sel.ids = ids;
+    }
   }
 
   // ---------- selectie ----------
@@ -279,7 +283,8 @@ export class TownView {
   // kan de selectie bomen kappen of bronnen ontginnen? (enkel dorpelingen)
   selIsVillager() {
     if (!this.sel) return false;
-    if (this.sel.type === 'walker') return true;
+    if (this.sel.type === 'walker' || this.sel.type === 'villagers') return true;
+    if (this.sel.type === 'groups') return this.sel.kind === 'villager';
     const g = this.selGroup();
     return !!(g && isVillagerGroup(g));
   }
@@ -291,7 +296,7 @@ export class TownView {
     if (!s || !this.terr) return;
     const k = buildRing(s);
     const cl = s.terr ? s.terr.cl : [];
-    const key = `${k}|${cl.length}|${s.buildings.length}`;
+    const key = `${k}|${cl.length}|${s.buildings.length}|${(s.terr && s.terr.lots || []).length}`;
     if (key === this.treeKey) return;
     this.treeKey = key;
     const set = clearedSet(s);
@@ -880,7 +885,7 @@ export class TownView {
     const team = this.team;
     const bob = s.walking ? 0 : Math.sin(t * 0.004 + s.gx * 3 + s.gy * 5) * 0.3;
     const o = { s: 1.05, team, phase: t * 0.012, walking: !!s.walking };
-    if (this.sel && this.sel.type === 'soldier' && this.sel.kind === s.kind && Math.abs(this.sel.gx - s.gx) < 0.01 && Math.abs(this.sel.gy - s.gy) < 0.01) {
+    if (this.sel && ((this.sel.type === 'soldier' && this.sel.kind === s.kind && Math.abs(this.sel.gx - s.gx) < 0.01 && Math.abs(this.sel.gy - s.gy) < 0.01) || (this.sel.type === 'soldiers' && this.sel.kind === s.kind && !s.walking))) {
       ctx.strokeStyle = 'rgba(255,225,90,0.85)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.ellipse(x, y, 9, 4.5, 0, 0, Math.PI * 2); ctx.stroke();
     }
@@ -994,29 +999,29 @@ export class TownView {
 
   // ---------- muur ----------
 
+  // muurstukken uit de muurtegels: een paal per tegel en een stuk muur naar elke buur
   wallSegments(level) {
-    if (!level) return [];
-    const k = buildRing(this.state);
-    const lo = -k; const hi = N + k;
+    const s = this.state;
+    const list = s.walls || [];
+    if (!list.length) return [];
+    if (this.wallCache && this.wallCache.key === list.length + ':' + list[0] + ':' + list[list.length - 1]) return this.wallCache.segs;
+    const set = new Set(list);
     const segs = [];
-    const th = 0.16;
-    const gate = (i) => i === N / 2 - 1 || i === N / 2;
-    for (let i = lo; i < hi; i++) {
-      if (!gate(i)) {
-        segs.push({ x0: i, y0: lo - th, x1: i + 1, y1: lo });
-        segs.push({ x0: lo - th, y0: i, x1: lo, y1: i + 1 });
-        segs.push({ x0: hi, y0: i, x1: hi + th, y1: i + 1 });
-        segs.push({ x0: i, y0: hi, x1: i + 1, y1: hi + th });
-      }
+    const th = 0.09; const pw = 0.14;
+    for (const idx of list) {
+      const { i, j } = tileOf(idx);
+      const cx = i + 0.5; const cy = j + 0.5;
+      const e = set.has(tileIndex(i + 1, j)); const so = set.has(tileIndex(i, j + 1));
+      const w = set.has(tileIndex(i - 1, j)); const n = set.has(tileIndex(i, j - 1));
+      if (e) segs.push({ x0: cx, y0: cy - th, x1: cx + 1, y1: cy + th });
+      if (so) segs.push({ x0: cx - th, y0: cy, x1: cx + th, y1: cy + 1 });
+      if (!e && !so && !w && !n) segs.push({ x0: cx - 0.36, y0: cy - th, x1: cx + 0.36, y1: cy + th });
+      const corner = (e || w) && (n || so);
+      const end = (e ? 1 : 0) + (w ? 1 : 0) + (n ? 1 : 0) + (so ? 1 : 0) <= 1;
+      if (corner || end || (i + j) % 4 === 0) segs.push({ x0: cx - pw, y0: cy - pw, x1: cx + pw, y1: cy + pw, tower: true, gate: (corner || end) && (i * 7 + j * 3) % 3 === 0 });
     }
-    const towers = [];
-    const tw = 0.3;
-    for (const [x, y, gateT] of [[lo - tw, lo - tw], [hi, lo - tw], [lo - tw, hi], [hi, hi],
-      [N / 2 - 1 - tw, lo - tw, 1], [N / 2 + 1, lo - tw, 1], [lo - tw, N / 2 - 1 - tw, 1], [lo - tw, N / 2 + 1, 1],
-      [hi, N / 2 - 1 - tw, 1], [hi, N / 2 + 1, 1], [N / 2 - 1 - tw, hi, 1], [N / 2 + 1, hi, 1]]) {
-      towers.push({ x0: x, y0: y, x1: x + tw, y1: y + tw, tower: true, gate: !!gateT });
-    }
-    return [...segs, ...towers];
+    this.wallCache = { key: list.length + ':' + list[0] + ':' + list[list.length - 1], segs };
+    return segs;
   }
 
   wallHeight(seg, level) {
@@ -1082,13 +1087,14 @@ export class TownView {
       const h = b.level > 0 ? (SPRITE_H[b.type] || 55) : 30;
       if (Math.abs(w.x - c.x) < size * 22 && w.y < c.y && w.y > c.y - h) return b;
     }
+    // een muurtegel aanklikken = het muurpaneel
     const wall = s.buildings.find((b) => b.type === 'wall');
-    if (wall && (wall.level > 0 || s.builds.some((j) => j.bid === wall.id))) {
-      const k = buildRing(s);
-      const lo = -k; const hi = N + k;
-      const nearEdge = (v) => (v > lo - 0.45 && v < lo + 0.2) || (v > hi - 0.2 && v < hi + 0.45);
-      const inside = (v) => v > lo - 0.45 && v < hi + 0.45;
-      if ((nearEdge(g.gx) && inside(g.gy)) || (nearEdge(g.gy) && inside(g.gx))) return wall;
+    if (wall && (s.walls || []).length) {
+      const set = wallSet(s);
+      for (const [dx, dy] of [[0, 0], [0, 0.35], [0.35, 0], [0.35, 0.35]]) {
+        const i = Math.floor(g.gx + dx); const j = Math.floor(g.gy + dy);
+        if (i >= T_MIN && j >= T_MIN && i < T_MAX && j < T_MAX && set.has(tileIndex(i, j))) return wall;
+      }
     }
     return null;
   }
@@ -1096,6 +1102,23 @@ export class TownView {
   click(sx, sy, e, order) {
     if (!this.state) return;
     const w = this.cam.screenToWorld(sx, sy);
+    const tnow = performance.now();
+    const dbl = !order && this.lastTap && tnow - this.lastTap.t < 420 && Math.hypot(sx - this.lastTap.x, sy - this.lastTap.y) < 28;
+    this.lastTap = { t: tnow, x: sx, y: sy };
+    if (this.landMode) {
+      const g = toGrid(w.x, w.y);
+      if (this.onBuyLot) this.onBuyLot(Math.floor(g.gx / LAND.size), Math.floor(g.gy / LAND.size));
+      return;
+    }
+    if (this.wallMode) {
+      const g = toGrid(w.x, w.y);
+      const tile = { i: Math.floor(g.gx), j: Math.floor(g.gy) };
+      if (!this.wallStart) { this.wallStart = tile; return; }
+      const tiles = this.wallLine(this.wallStart, tile);
+      this.wallStart = null;
+      if (this.onWalls) this.onWalls(tiles, this.wallMode === 'remove');
+      return;
+    }
     if (this.placing) {
       const g = toGrid(w.x, w.y);
       const size = BUILDINGS[this.placing].size;
@@ -1106,7 +1129,10 @@ export class TownView {
     // een groep in het veld kiezen
     if (!order) {
       const grp = this.pickGroup(w);
-      if (grp) { this.setSel({ type: 'group', id: grp.id }); return; }
+      if (grp) {
+        if (dbl) this.selectAllGroups(grp); else this.setSel({ type: 'group', id: grp.id });
+        return;
+      }
     }
     const sel = this.sel;
     if (sel) {
@@ -1125,9 +1151,9 @@ export class TownView {
       if (target) { this.issue(sel, null, target); return; }
       if (!order) {
         const v = this.pickWalker(w);
-        if (v) { this.setSel({ type: 'walker', w: v }); return; }
+        if (v) { if (dbl) this.selectAllVillagers(v); else this.setSel({ type: 'walker', w: v }); return; }
         const so = this.pickSoldier(w);
-        if (so) { this.setSel({ type: 'soldier', kind: so.kind, gx: so.gx, gy: so.gy }); return; }
+        if (so) { if (dbl) this.selectAllSoldiers(so); else this.setSel({ type: 'soldier', kind: so.kind, gx: so.gx, gy: so.gy }); return; }
         const b = this.pick(sx, sy);
         if (b && b.type === 'tc' && sel.type === 'group') { this.issue(sel, null, { type: 'home' }); return; }
         if (b) { this.setSel(null); this.selected = b.id; if (this.onSelect) this.onSelect(b); return; }
@@ -1151,6 +1177,37 @@ export class TownView {
     if (this.onSelect) this.onSelect(b);
   }
 
+  // dubbelklik: alle mannetjes van dat type
+  selectAllSoldiers(so) {
+    const n = (this.state.units || {})[so.kind] || 0;
+    if (n > 0) this.setSel({ type: 'soldiers', kind: so.kind, n, gx: so.gx, gy: so.gy });
+  }
+
+  selectAllVillagers(v) {
+    const n = Math.min(40, this.state.villagers[v.job] || 0);
+    if (n > 0) this.setSel({ type: 'villagers', job: v.job, n, gx: v.gx, gy: v.gy });
+  }
+
+  selectAllGroups(grp) {
+    const kinds = Object.keys(grp.units);
+    const main = kinds.sort((a, b) => grp.units[b] - grp.units[a])[0];
+    const ids = (this.state.field || []).filter((g) => g.units[main]).map((g) => g.id);
+    this.setSel(ids.length > 1 ? { type: 'groups', ids, kind: main } : { type: 'group', id: grp.id });
+  }
+
+  // rechte muurlijn tussen twee tegels (langs de langste richting)
+  wallLine(a, b) {
+    const out = [];
+    if (Math.abs(b.i - a.i) >= Math.abs(b.j - a.j)) {
+      const d = Math.sign(b.i - a.i) || 1;
+      for (let i = a.i; i !== b.i + d; i += d) out.push([i, a.j]);
+    } else {
+      const d = Math.sign(b.j - a.j) || 1;
+      for (let j = a.j; j !== b.j + d; j += d) out.push([a.i, j]);
+    }
+    return out.slice(0, WALL_TILE.maxPerOrder);
+  }
+
   // een opdracht doorgeven (de server rekent het na en bewaart het)
   issue(sel, to, target) {
     if (!this.onFieldOrder) return;
@@ -1158,6 +1215,17 @@ export class TownView {
     if (sel.type === 'group') this.onFieldOrder({ action: 'order', id: sel.id, to, target });
     else if (sel.type === 'walker') { sel.w.leaving = true; this.onFieldOrder({ action: 'send', spec: { villager: sel.w.job }, from: { x: sel.w.gx, y: sel.w.gy }, to, target }); }
     else if (sel.type === 'soldier') this.onFieldOrder({ action: 'send', spec: { units: { [sel.kind]: 1 } }, from: { x: sel.gx, y: sel.gy }, to, target });
+    else if (sel.type === 'soldiers') this.onFieldOrder({ action: 'send', spec: { units: { [sel.kind]: sel.n } }, from: { x: sel.gx, y: sel.gy }, to, target });
+    else if (sel.type === 'villagers') {
+      let left = sel.n; for (const w of this.walkers) if (left > 0 && w.job === sel.job) { w.leaving = true; left--; }
+      this.onFieldOrder({ action: 'send', spec: { villager: sel.job, n: sel.n }, from: { x: sel.gx, y: sel.gy }, to, target });
+    } else if (sel.type === 'groups') {
+      // elke groep een eigen plekje rond het doel, zodat ze niet op elkaar staan
+      sel.ids.forEach((id, k) => {
+        const off = k === 0 ? [0, 0] : [Math.cos(k * 2.4) * 0.6 * Math.sqrt(k), Math.sin(k * 2.4) * 0.6 * Math.sqrt(k)];
+        this.onFieldOrder({ action: 'order', id, to: to && { x: to.x + off[0], y: to.y + off[1] }, target });
+      });
+    }
     if (mark) this.orderMark = { ...mark, at: performance.now(), attack: !!(target && (target.type === 'boar' || target.type === 'camp')) };
   }
 
@@ -1231,6 +1299,7 @@ export class TownView {
 
   updateCursor() {
     let c = 'grab';
+    if (this.landMode || this.wallMode) { this.canvas.style.cursor = 'crosshair'; return; }
     if (this.hoverW && this.state && !this.placing) {
       if (this.sel) c = this.pickTarget(this.hoverW) ? 'pointer' : 'crosshair';
       else if (this.pickGroup(this.hoverW) || this.pickNode(this.hoverW)) c = 'pointer';
@@ -1453,8 +1522,10 @@ export class TownView {
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
     this.treeMip = cam.zoom * cam.dpr < 0.95;
     if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
+    if (this.landMode) this.drawLandLots(ctx);
+    if (this.wallMode) this.drawWallPreview(ctx);
     const wall = s.buildings.find((b) => b.type === 'wall');
-    const wallLevel = wall ? wall.level : 0;
+    const wallLevel = wall ? Math.max(wall.level, (s.walls || []).length ? 1 : 0) : 0;
     const segs = this.wallSegments(wallLevel);
     this.drawShadows(ctx, segs, wallLevel, light, vis);
 
@@ -1570,6 +1641,7 @@ export class TownView {
     this.drawWorkProgress(ctx, now);
     if (this.fighting && this.fighting.length) this.drawProjectiles(ctx, this.fighting, now);
     this.drawHover(ctx);
+    if (this.landMode) this.drawLandLabel(ctx);
   }
 
   // ---------- wildernis tekenen ----------
@@ -1830,7 +1902,7 @@ export class TownView {
 
   drawGroup(ctx, g, pos, t, now, emit) {
     const p = toWorld(pos.x, pos.y);
-    const sel = this.sel && this.sel.type === 'group' && this.sel.id === g.id;
+    const sel = this.sel && ((this.sel.type === 'group' && this.sel.id === g.id) || (this.sel.type === 'groups' && this.sel.ids.includes(g.id)));
     const moving = g.pending && now < g.t1;
     if (sel) {
       const pulse = 0.6 + Math.sin(t * 0.008) * 0.3;
@@ -1955,6 +2027,82 @@ export class TownView {
     ctx.fillStyle = '#fff3d6'; ctx.fillText(label, at.x, y - 1);
   }
 
+  // ---------- grond kopen en muren plaatsen ----------
+
+  landCandidates() {
+    const s = this.state;
+    const key = `${(s.terr.lots || []).length}|${s.terr.cl.length}|${buildRing(s)}|${Math.floor(Date.now() / 1000)}`;
+    if (this.lotCache && this.lotCache.key === key) return this.lotCache.list;
+    const list = [];
+    for (let lj = Math.floor(T_MIN / LAND.size); lj <= Math.floor((T_MAX - 1) / LAND.size); lj++) {
+      for (let li = Math.floor(T_MIN / LAND.size); li <= Math.floor((T_MAX - 1) / LAND.size); li++) {
+        const err = checkBuyLot(s, li, lj);
+        if (!err || /grondstoffen|maximaal/.test(err)) list.push({ li, lj, ok: !err, err });
+      }
+    }
+    this.lotCache = { key, list };
+    return list;
+  }
+
+  hoverLot() {
+    if (!this.hoverTile) return null;
+    const li = Math.floor(this.hoverTile.gx / LAND.size); const lj = Math.floor(this.hoverTile.gy / LAND.size);
+    return this.landCandidates().find((c) => c.li === li && c.lj === lj) || null;
+  }
+
+  drawLandLots(ctx) {
+    const z = LAND.size;
+    const hov = this.hoverLot();
+    ctx.save();
+    ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    for (const c of this.landCandidates()) {
+      const on = hov && hov.li === c.li && hov.lj === c.lj;
+      ctx.fillStyle = c.ok ? (on ? 'rgba(255,215,90,0.42)' : 'rgba(255,215,90,0.16)') : 'rgba(220,80,60,0.15)';
+      ctx.fillRect(c.li * z + 0.08, c.lj * z + 0.08, z - 0.16, z - 0.16);
+      ctx.strokeStyle = c.ok ? 'rgba(255,230,140,0.95)' : 'rgba(230,110,90,0.8)';
+      ctx.lineWidth = on ? 0.09 : 0.05; ctx.setLineDash(on ? [] : [0.3, 0.2]);
+      ctx.strokeRect(c.li * z + 0.08, c.lj * z + 0.08, z - 0.16, z - 0.16);
+    }
+    ctx.restore();
+  }
+
+  drawLandLabel(ctx) {
+    const c = this.hoverLot();
+    if (!c) return;
+    const p = toWorld(c.li * LAND.size + LAND.size / 2, c.lj * LAND.size + LAND.size / 2);
+    const cost = landCost((this.state.terr.lots || []).length);
+    const txt = c.ok ? `Kopen: ${Object.entries(cost).map(([r, v]) => `${v} ${RES_NAMES[r].toLowerCase()}`).join(', ')}` : c.err;
+    ctx.font = '700 11px Inter, sans-serif'; ctx.textAlign = 'center';
+    const w = ctx.measureText(txt).width + 16;
+    ctx.fillStyle = 'rgba(28,20,12,0.88)'; ctx.beginPath(); ctx.roundRect(p.x - w / 2, p.y - 12, w, 20, 8); ctx.fill();
+    ctx.fillStyle = c.ok ? '#ffe28a' : '#ffb4a4'; ctx.fillText(txt, p.x, p.y + 2);
+  }
+
+  drawWallPreview(ctx) {
+    const s = this.state;
+    const h = this.hoverTile;
+    if (!h) return;
+    const end = { i: Math.floor(h.gx), j: Math.floor(h.gy) };
+    const tiles = this.wallStart ? this.wallLine(this.wallStart, end) : [[end.i, end.j]];
+    const remove = this.wallMode === 'remove';
+    const ok = remove || !checkPlaceWalls(s, tiles);
+    ctx.save();
+    ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    ctx.fillStyle = remove ? 'rgba(230,90,70,0.45)' : ok ? 'rgba(120,230,110,0.45)' : 'rgba(230,90,70,0.45)';
+    for (const [i, j] of tiles) ctx.fillRect(i + 0.08, j + 0.08, 0.84, 0.84);
+    ctx.restore();
+    if (this.wallStart) {
+      const L = Math.max(1, bLevel(s, 'wall'));
+      const cost = WALL_TILE.cost[L] || {};
+      const p = toWorld(end.i + 0.5, end.j + 0.5);
+      const txt = remove ? `${tiles.length} muurstukken afbreken` : `${tiles.length} muurstukken · ${Object.entries(cost).map(([r, v]) => `${v * tiles.length} ${RES_NAMES[r].toLowerCase()}`).join(', ')}`;
+      ctx.font = '700 11px Inter, sans-serif'; ctx.textAlign = 'center';
+      const w = ctx.measureText(txt).width + 16;
+      ctx.fillStyle = 'rgba(28,20,12,0.88)'; ctx.beginPath(); ctx.roundRect(p.x - w / 2, p.y - 40, w, 20, 8); ctx.fill();
+      ctx.fillStyle = ok ? '#ffe28a' : '#ffb4a4'; ctx.fillText(txt, p.x, p.y - 26);
+    }
+  }
+
   // rand van je bouwgrond (en gekapte stukken) zacht aanduiden
   drawBuildArea(ctx) {
     const s = this.state;
@@ -1965,7 +2113,7 @@ export class TownView {
     ctx.strokeRect(-k, -k, N + 2 * k, N + 2 * k);
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(255,240,190,0.08)';
-    for (const idx of s.terr ? s.terr.cl : []) {
+    for (const idx of s.terr ? clearedSet(s) : []) {
       const { i, j } = tileOf(idx);
       if (ringOf(i, j) > k) ctx.fillRect(i, j, 1, 1);
     }
@@ -2148,7 +2296,7 @@ export class TownView {
 
   drawWalker(ctx, w, t) {
     const p = toWorld(w.gx, w.gy);
-    if (this.sel && this.sel.type === 'walker' && this.sel.w === w) {
+    if (this.sel && ((this.sel.type === 'walker' && this.sel.w === w) || (this.sel.type === 'villagers' && this.sel.job === w.job))) {
       const pulse = 0.6 + Math.sin(t * 0.008) * 0.3;
       ctx.strokeStyle = `rgba(255,225,90,${pulse})`; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.ellipse(p.x, p.y, 8, 4, 0, 0, Math.PI * 2); ctx.stroke();
