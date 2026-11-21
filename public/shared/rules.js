@@ -241,6 +241,18 @@ Object.assign(UNITS, {
 });
 UNITS.ram.walls = 1;
 
+// Levenspunten (hp), schade per slag (dmg) en tijd tussen twee slagen (rate, ms) voor gevechten in je eigen gebied.
+// Hoe beter de eenheid, hoe meer levenspunten. ranged = schiet van op afstand.
+const HP = {
+  villager: [25, 3, 1500], spear: [45, 5, 1500], sword: [60, 8, 1500], archer: [35, 6, 1800, true], scout: [45, 2, 1500],
+  rider: [75, 9, 1600], knight: [120, 13, 1600], ram: [150, 2, 2500],
+  chariot: [90, 11, 1600], camel: [80, 8, 1500], hoplite: [80, 7, 1500], peltast: [40, 7, 1700, true],
+  samurai: [75, 11, 1400], yabusame: [70, 8, 1700, true], lionguard: [85, 8, 1500], stonethrower: [100, 14, 3000, true],
+  elephant: [250, 18, 2000], immortal: [70, 8, 1500],
+  boar: [75, 7, 1400], barbarian: [40, 5, 1500],
+};
+for (const [k, [hp, dmg, rate, ranged]] of Object.entries(HP)) Object.assign(UNITS[k], { hp, dmg, rate, ranged: !!ranged });
+
 export const UNIQUE_UNITS = CIV_IDS.flatMap((c) => CIVS[c].units);
 export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram', ...UNIQUE_UNITS];
 
@@ -256,6 +268,9 @@ export const FIELD = {
   chopWood: 25,
   clearReach: 3, // tot zoveel ringen voorbij het bouwvierkant kan je bos kappen
   gatherEff: 0.8, // wilde bronnen: 80% van een gewone werkplek (de weg is langer)
+  aggro: 3.4, // wie zo dicht bij het barbarenkamp komt, wordt meteen aangevallen (tegels)
+  armorK: 40, // schade x armorK / (armorK + verdediging)
+  engageMs: 700, // even op elkaar af stormen voor de eerste slag
 };
 
 // De wildernis: everzwijnen, een barbarenkamp en wilde bronnen.
