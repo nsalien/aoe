@@ -6,7 +6,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -132,7 +132,7 @@ function startGame(data) {
     town.onCancelPlace = cancelPlace;
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
     town.onSelChange = (sel) => {
-      const g = sel && sel.type === 'group' ? sel.id : null;
+      const g = sel && (sel.type === 'group' || sel.type === 'unit') ? sel.id : null;
       const changed = g !== app.selGroup;
       app.selGroup = g;
       renderSelHint();
@@ -464,32 +464,38 @@ function renderSelHint() {
   if (app.placing) return;
   const hint = $('#placeHint');
   const sel = town.sel;
-  const g = sel && sel.type === 'group' ? town.selGroup() : null;
-  if (!sel || (sel.type === 'group' && !g)) { hint.hidden = true; return; }
+  const g = sel && (sel.type === 'group' || sel.type === 'unit') ? town.selGroup() : null;
+  if (!sel || ((sel.type === 'group' || sel.type === 'unit') && !g)) { hint.hidden = true; return; }
   let who; let extra = '';
   if (sel.type === 'walker') who = `Dorpeling${sel.w.job === 'idle' ? '' : ` (${RES_NAMES[sel.w.job].toLowerCase()})`}`;
   else if (sel.type === 'soldier') who = UNITS[sel.kind].name;
   else if (sel.type === 'soldiers') who = `${sel.n} × ${UNITS[sel.kind].name.toLowerCase()}`;
   else if (sel.type === 'villagers') who = `${sel.n} dorpelingen${sel.job === 'idle' ? '' : ` (${RES_NAMES[sel.job].toLowerCase()})`}`;
-  else if (sel.type === 'groups') {
+  else if (sel.type === 'unit') {
+    who = `1 ${UNITS[sel.kind].name.toLowerCase()}`;
+    extra = `<button class="btn small" data-action="fieldHome" data-id="${g.id}">${UI.icon('home')} Groep naar huis</button>`;
+  } else if (sel.type === 'kind') {
+    who = `${sel.n} × ${UNITS[sel.kind].name.toLowerCase()} (alle)`;
+    if (sel.ids.length) extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
+  } else if (sel.type === 'army') {
+    who = `Je hele leger (${sel.n} man)`;
+    if (sel.ids.length) extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
+  } else if (sel.type === 'groups') {
     who = `${sel.ids.length} groepen met ${UNITS[sel.kind].name.toLowerCase()}s`;
     extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
   } else {
     who = UI.unitsText(g.units);
     if (!(g.order && g.order.type === 'home' && g.pending)) extra = `<button class="btn small" data-action="fieldHome" data-id="${g.id}">${UI.icon('home')} Naar huis</button>`;
   }
-  const villager = sel.type === 'walker' || sel.type === 'villagers' || (sel.type === 'groups' && sel.kind === 'villager') || (g && isVillagerGroup(g));
+  const villager = town.selIsVillager();
   const what = villager
     ? `Tik op de grond, een boom aan de rand${sel.type === 'walker' ? ', een vondst' : ''} of een bron.`
     : 'Tik op de grond, een everzwijn of het barbarenkamp.';
   hint.hidden = false;
-  const tip = sel.type === 'soldier' || sel.type === 'walker' || sel.type === 'group' ? ' Dubbelklik om alle van dit type te kiezen.' : '';
-  // kunnen ze het barbarenkamp aan? (ook op een gsm, waar je niet over het kamp kan bewegen)
-  const s = town.state;
-  const camp = !villager && s && s.terr && town.terr && town.terr.camp && campAlive(s, app.now()) && town.isExplored(town.terr.camp.x, town.terr.camp.y)
-    ? town.campForecast() : null;
-  const odds = camp ? ` <b style="color:${camp.win ? '#7fd36a' : '#ff8a70'}">Barbarenkamp: ${UI.esc(camp.text)}.</b>` : '';
-  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}${tip}</span>${odds}</span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const tip = sel.type === 'army' ? '' : villager ? ` ${touch ? 'Dubbel tikken' : 'Dubbelklik'}: alle van deze soort.`
+    : ` ${touch ? 'Dubbel tikken' : 'Dubbelklik'}: alle van deze soort · ingedrukt houden: hele leger.`;
+  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}${tip}</span></span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
 }
 
 // muren plaatsen of grond kopen (aparte modus op de kaart)
@@ -525,6 +531,7 @@ let fieldBusy = false;
 function applyFieldOp(s, op) {
   advance(s, Math.min(op.at, app.data.world.warEnd), app.data.world.speed);
   if (op.action === 'send') return doFieldSend(s, op.spec || {}, op.from, op.to, op.target, op.at);
+  if (op.action === 'split') return doFieldSplit(s, op.id, op.units, op.to, op.target, op.at);
   return doFieldOrder(s, op.id, op.to, op.target, op.at);
 }
 
@@ -539,7 +546,7 @@ function setBaseState(state) {
 
 async function fieldOrder(p) {
   if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return null; }
-  const op = { action: p.action, id: p.id, spec: p.spec, from: p.from, to: p.to, target: p.target, at: Math.round(app.now()) };
+  const op = { action: p.action, id: p.id, spec: p.spec, units: p.units, from: p.from, to: p.to, target: p.target, at: Math.round(app.now()) };
   let g;
   try {
     const s = structuredClone(app.data.town.state);
@@ -552,7 +559,7 @@ async function fieldOrder(p) {
   }
   fieldQueue.push(op);
   computeLive(true);
-  if (p.action === 'send' && g) town.setSel({ type: 'group', id: g.id });
+  if ((p.action === 'send' || p.action === 'split') && g && !p.keepSel) town.setSel({ type: 'group', id: g.id });
   renderSelHint();
   renderPanel();
   pumpField();
@@ -565,7 +572,7 @@ async function pumpField() {
   while (fieldQueue.length) {
     const op = fieldQueue[0];
     try {
-      const r = await post('/field', { action: op.action, id: op.id, spec: op.spec, from: op.from, to: op.to, target: op.target, at: op.at });
+      const r = await post('/field', { action: op.action, id: op.id, spec: op.spec, units: op.units, from: op.from, to: op.to, target: op.target, at: op.at });
       fieldQueue.shift();
       app.serverState = r.state;
       setBaseState(r.state);
@@ -977,7 +984,8 @@ const actions = {
   modeDone() { setMode(null); },
   groupsHome() {
     const sel = town.sel;
-    if (sel && sel.type === 'groups') for (const id of sel.ids) fieldOrder({ action: 'order', id, target: { type: 'home' } });
+    if (sel && (sel.type === 'groups' || sel.type === 'army')) for (const id of sel.ids) fieldOrder({ action: 'order', id, target: { type: 'home' }, keepSel: true });
+    else if (sel && sel.type === 'kind') town.issue(sel, null, { type: 'home' });
     town.clearSel();
   },
   cancelVillager() {

@@ -11,6 +11,7 @@ export class Camera {
     this.onClick = null;
     this.onHover = null;
     this.onRightClick = null;
+    this.onLongPress = null; // ingedrukt houden zonder te slepen
     this.pointers = new Map();
     this.dragging = false;
     this.enabled = true;
@@ -69,6 +70,8 @@ export class Camera {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      // op een gsm opent lang drukken soms een contextmenu: dat is geen rechtsklik
+      if (this.lastType && this.lastType !== 'mouse') return;
       const p = this._pos(e);
       if (this.onRightClick) this.onRightClick(p.x, p.y);
     });
@@ -82,8 +85,22 @@ export class Camera {
       if (!this.enabled) return;
       c.setPointerCapture(e.pointerId);
       const p = this._pos(e);
-      this.pointers.set(e.pointerId, { ...p, sx: p.x, sy: p.y });
-      if (this.pointers.size === 1) { this.dragging = false; this.startCam = { x: this.x, y: this.y }; }
+      this.lastType = e.pointerType;
+      this.pointers.set(e.pointerId, { ...p, sx: p.x, sy: p.y, touch: e.pointerType !== 'mouse' });
+      clearTimeout(this.lpTimer);
+      this.longPressed = false;
+      if (this.pointers.size === 1) {
+        this.dragging = false; this.startCam = { x: this.x, y: this.y };
+        if (this.onLongPress && e.button !== 2) {
+          const id = e.pointerId;
+          this.lpTimer = setTimeout(() => {
+            const pt = this.pointers.get(id);
+            if (!pt || this.dragging || this.pointers.size !== 1) return;
+            this.longPressed = true;
+            this.onLongPress(pt.x, pt.y);
+          }, 550);
+        }
+      }
       if (this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
         this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: this.zoom };
@@ -109,7 +126,7 @@ export class Camera {
         this.clamp();
         return;
       }
-      if (!this.dragging && Math.hypot(p.x - pt.sx, p.y - pt.sy) > 6) this.dragging = true;
+      if (!this.dragging && Math.hypot(p.x - pt.sx, p.y - pt.sy) > (pt.touch ? 10 : 6)) { this.dragging = true; clearTimeout(this.lpTimer); }
       if (this.dragging) {
         this.x -= dx / this.zoom; this.y -= dy / this.zoom;
         this.clamp();
@@ -121,7 +138,9 @@ export class Camera {
       const p = this._pos(e);
       const wasDrag = this.dragging;
       this.pointers.delete(e.pointerId);
+      clearTimeout(this.lpTimer);
       if (this.pointers.size < 2) this.pinch = null;
+      if (this.longPressed) { if (this.pointers.size === 0) { this.longPressed = false; this.dragging = false; } return; }
       if (!wasDrag && this.pointers.size === 0 && e.type === 'pointerup' && this.onClick) {
         if (e.button === 2) return;
         this.onClick(p.x, p.y, e);

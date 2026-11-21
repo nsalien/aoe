@@ -817,11 +817,14 @@ export function helpHtml(w) {
     slaan om de beurt toe, verliezen bij elke klap levens (de balk boven hun hoofd) en vallen als die leeg is.
     Barbaren vallen <b>meteen aan</b> wie hun dorp nadert, ook dorpelingen. Geef een vechtende groep een andere opdracht om te vluchten.
     Gewonde eenheden genezen zodra ze terug thuis zijn.</p>
-    <p>Boven het barbarenkamp staat hoeveel barbaren er wonen: een handvol, iets meer in een later tijdperk. Ongeveer evenveel soldaten volstaan om het te verwoesten. Kies je soldaten en wijs het kamp aan:
-    je ziet meteen of je groep <b>sterk genoeg</b> is (op een gsm staat het bovenaan). Stuur je leger liefst samen: wie alleen aankomt, vecht alleen.</p>
+    <p>Zodra je het barbarenkamp ontdekt hebt, staat erboven hoeveel barbaren er wonen: een handvol, iets meer in een later tijdperk.
+    Ongeveer evenveel soldaten volstaan om het te verwoesten. Stuur je leger liefst samen: wie alleen aankomt, vecht alleen.</p>
     <h3>Je eigen gebied verkennen</h3>
-    <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Tik op een <b>dorpeling of soldaat</b> en daarna op de grond:
-    hij loopt er meteen naartoe en de mist verdwijnt waar hij komt. Een groep die je gekozen hebt, krijgt een gouden ring; tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>
+    <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Kies troepen en tik daarna op de grond:
+    ze lopen er meteen naartoe en de mist verdwijnt waar ze komen. Tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>
+    <ul><li><b>1 klik</b>: één troep (ook één uit een groep in het veld).</li>
+    <li><b>Dubbelklik</b>: alle troepen van die soort, thuis en in het veld.</li>
+    <li><b>Ingedrukt houden</b>: je hele leger, om samen te verplaatsen. Thuis vertrekken ze samen, aan het tempo van de traagste.</li></ul>
     <ul><li><b>Bomen kappen</b>: stuur een dorpeling naar een boom aan de rand van je bouwgrond. Gekapte grond wordt bouwgrond en levert hout op.</li>
     <li><b>Bronnen</b>: in de wildernis liggen goudaders, rotswanden, oude eikenbossen en bessenstruiken. Stuur er een dorpeling heen om ze leeg te halen.</li>
     <li><b>Everzwijnen</b>: stuur een paar soldaten (twee à drie speerdragers volstaan) en tik op het beest voor extra voedsel.</li>

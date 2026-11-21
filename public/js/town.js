@@ -3,7 +3,7 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, COMBAT, landCost, WALL_TILE } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE } from '../shared/rules.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
@@ -13,7 +13,7 @@ import { ICON } from './ui.js';
 import * as NAT from './nature.js';
 import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
-import { runFight, lastSwing, maxHp, combatants } from '../shared/skirmish.js';
+import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
@@ -226,6 +226,7 @@ export class TownView {
       this.hoverW = sx < 0 ? null : this.cam.screenToWorld(sx, sy);
       this.updateCursor();
     };
+    this.cam.onLongPress = (sx, sy) => this.longPress(sx, sy);
     this.cam.onRightClick = (sx, sy) => {
       if (this.placing) { if (this.onCancelPlace) this.onCancelPlace(); return; }
       if (this.sel) this.click(sx, sy, null, true);
@@ -256,7 +257,12 @@ export class TownView {
     this.syncWalkers();
     this.detectUpgrades();
     this.fogAt = 0;
-    if (this.sel && this.sel.type === 'group' && !(state.field || []).some((g) => g.id === this.sel.id)) this.setSel(null);
+    if (this.sel && (this.sel.type === 'group' || this.sel.type === 'unit') && !(state.field || []).some((g) => g.id === this.sel.id)) this.setSel(null);
+    if (this.sel && this.sel.type === 'unit') {
+      const g = state.field.find((x) => x.id === this.sel.id);
+      if (!g.units[this.sel.kind]) this.setSel(null);
+    }
+    if (this.sel && (this.sel.type === 'kind' || this.sel.type === 'army')) this.refreshMultiSel();
     if (this.sel && this.sel.type === 'groups') {
       const ids = this.sel.ids.filter((id) => (state.field || []).some((g) => g.id === id));
       if (!ids.length) this.setSel(null); else this.sel.ids = ids;
@@ -276,7 +282,7 @@ export class TownView {
   }
 
   selGroup() {
-    if (!this.sel || this.sel.type !== 'group' || !this.state) return null;
+    if (!this.sel || (this.sel.type !== 'group' && this.sel.type !== 'unit') || !this.state) return null;
     return (this.state.field || []).find((g) => g.id === this.sel.id) || null;
   }
 
@@ -284,7 +290,8 @@ export class TownView {
   selIsVillager() {
     if (!this.sel) return false;
     if (this.sel.type === 'walker' || this.sel.type === 'villagers') return true;
-    if (this.sel.type === 'groups') return this.sel.kind === 'villager';
+    if (this.sel.type === 'groups' || this.sel.type === 'kind' || this.sel.type === 'unit') return this.sel.kind === 'villager';
+    if (this.sel.type === 'army') return false;
     const g = this.selGroup();
     return !!(g && isVillagerGroup(g));
   }
@@ -885,7 +892,9 @@ export class TownView {
     const team = this.team;
     const bob = s.walking ? 0 : Math.sin(t * 0.004 + s.gx * 3 + s.gy * 5) * 0.3;
     const o = { s: 1.05, team, phase: t * 0.012, walking: !!s.walking };
-    if (this.sel && ((this.sel.type === 'soldier' && this.sel.kind === s.kind && Math.abs(this.sel.gx - s.gx) < 0.01 && Math.abs(this.sel.gy - s.gy) < 0.01) || (this.sel.type === 'soldiers' && this.sel.kind === s.kind && !s.walking))) {
+    const sl = this.sel;
+    if (sl && !s.walking && ((sl.type === 'soldier' && sl.kind === s.kind && Math.abs(sl.gx - s.gx) < 0.01 && Math.abs(sl.gy - s.gy) < 0.01)
+      || ((sl.type === 'soldiers' || sl.type === 'kind') && sl.kind === s.kind) || sl.type === 'army')) {
       ctx.strokeStyle = 'rgba(255,225,90,0.85)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.ellipse(x, y, 9, 4.5, 0, 0, Math.PI * 2); ctx.stroke();
     }
@@ -1130,7 +1139,10 @@ export class TownView {
     if (!order) {
       const grp = this.pickGroup(w);
       if (grp) {
-        if (dbl) this.selectAllGroups(grp); else this.setSel({ type: 'group', id: grp.id });
+        const kind = this.groupFigureAt(grp, w);
+        if (dbl) this.selectKind(kind);
+        else if (Object.values(grp.units).reduce((a, b) => a + b, 0) <= 1) this.setSel({ type: 'group', id: grp.id });
+        else this.setSel({ type: 'unit', id: grp.id, kind });
         return;
       }
     }
@@ -1153,9 +1165,9 @@ export class TownView {
         const v = this.pickWalker(w);
         if (v) { if (dbl) this.selectAllVillagers(v); else this.setSel({ type: 'walker', w: v }); return; }
         const so = this.pickSoldier(w);
-        if (so) { if (dbl) this.selectAllSoldiers(so); else this.setSel({ type: 'soldier', kind: so.kind, gx: so.gx, gy: so.gy }); return; }
+        if (so) { if (dbl) this.selectKind(so.kind, so); else this.setSel({ type: 'soldier', kind: so.kind, gx: so.gx, gy: so.gy }); return; }
         const b = this.pick(sx, sy);
-        if (b && b.type === 'tc' && sel.type === 'group') { this.issue(sel, null, { type: 'home' }); return; }
+        if (b && b.type === 'tc' && ['group', 'unit', 'kind', 'army', 'groups'].includes(sel.type)) { this.issue(sel, null, { type: 'home' }); return; }
         if (b) { this.setSel(null); this.selected = b.id; if (this.onSelect) this.onSelect(b); return; }
       }
       const g = toGrid(w.x, w.y);
@@ -1177,22 +1189,91 @@ export class TownView {
     if (this.onSelect) this.onSelect(b);
   }
 
-  // dubbelklik: alle mannetjes van dat type
-  selectAllSoldiers(so) {
-    const n = (this.state.units || {})[so.kind] || 0;
-    if (n > 0) this.setSel({ type: 'soldiers', kind: so.kind, n, gx: so.gx, gy: so.gy });
+  // dubbelklik: alle troepen van die soort, thuis en in het veld
+  selectKind(kind, at = null) {
+    const s = this.state;
+    const home = kind === 'villager' ? 0 : (s.units || {})[kind] || 0;
+    const ids = (s.field || []).filter((g) => g.units[kind]).map((g) => g.id);
+    const n = home + (s.field || []).reduce((a, g) => a + (g.units[kind] || 0), 0);
+    if (!n) { this.setSel(null); return; }
+    const d = tcDoor();
+    this.setSel({ type: 'kind', kind, home, ids, n, gx: at ? at.gx : d.gx, gy: at ? at.gy : d.gy });
+  }
+
+  // ingedrukt houden: het hele leger (alle soldaten thuis en alle groepen soldaten in het veld)
+  selectArmy() {
+    const sel = this.armySel();
+    this.setSel(sel);
+    return !!sel;
+  }
+
+  armySel() {
+    const s = this.state;
+    const home = {};
+    for (const k of ARMY_UNITS) if ((s.units || {})[k] > 0) home[k] = s.units[k];
+    const ids = (s.field || []).filter((g) => !isVillagerGroup(g)).map((g) => g.id);
+    const n = Object.values(home).reduce((a, b) => a + b, 0)
+      + (s.field || []).filter((g) => ids.includes(g.id)).reduce((a, g) => a + Object.values(g.units).reduce((x, y) => x + y, 0), 0);
+    return n ? { type: 'army', home, ids, n } : null;
+  }
+
+  // na een wijziging (training, sneuvelen, nieuwe groep) de selectie 'alle ...' bijwerken
+  refreshMultiSel() {
+    const sel = this.sel;
+    const key = (x) => JSON.stringify([x.ids, x.n, x.home]);
+    const before = key(sel);
+    if (sel.type === 'kind') {
+      const s = this.state;
+      const home = sel.kind === 'villager' ? 0 : (s.units || {})[sel.kind] || 0;
+      const ids = (s.field || []).filter((g) => g.units[sel.kind]).map((g) => g.id);
+      const n = home + (s.field || []).reduce((a, g) => a + (g.units[sel.kind] || 0), 0);
+      if (!n) { this.setSel(null); return; }
+      Object.assign(sel, { home, ids, n });
+    } else {
+      const a = this.armySel();
+      if (!a) { this.setSel(null); return; }
+      Object.assign(sel, a);
+    }
+    if (key(sel) !== before && this.onSelChange) this.onSelChange(sel);
+  }
+
+  longPress(sx, sy) {
+    if (this.placing || this.landMode || this.wallMode || !this.state) return;
+    if (!this.selectArmy()) return;
+    const w = this.cam.screenToWorld(sx, sy);
+    this.pressMark = { x: w.x, y: w.y, at: performance.now() };
+    if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
+  }
+
+  // waar staat het eerste figuurtje van die soort in een groep?
+  groupFigurePos(g, kind, now) {
+    const kinds = [];
+    for (const k of Object.keys(g.units)) for (let i = 0; i < Math.min(g.units[k], 7); i++) kinds.push(k);
+    const offs = [[0, 0], [0.34, -0.06], [-0.06, 0.34], [0.36, 0.3], [-0.32, 0.04], [0.04, -0.34], [0.38, -0.4]];
+    const i = Math.max(0, Math.min(6, kinds.indexOf(kind)));
+    const pos = groupPos(g, now);
+    return toWorld(pos.x + offs[i][0], pos.y + offs[i][1]);
+  }
+
+  // welke soort staat er op die plek in een groep? (de figuurtjes zoals drawGroup ze tekent)
+  groupFigureAt(g, w) {
+    const kinds = [];
+    for (const k of Object.keys(g.units)) for (let i = 0; i < Math.min(g.units[k], 7); i++) kinds.push(k);
+    const figs = kinds.slice(0, 7);
+    const offs = [[0, 0], [0.34, -0.06], [-0.06, 0.34], [0.36, 0.3], [-0.32, 0.04], [0.04, -0.34], [0.38, -0.4]];
+    const pos = groupPos(g, this.now);
+    let best = figs[0]; let bd = Infinity;
+    figs.forEach((k, i) => {
+      const p = toWorld(pos.x + offs[i][0], pos.y + offs[i][1]);
+      const d = Math.hypot(w.x - p.x, w.y - (p.y - 10));
+      if (d < bd) { bd = d; best = k; }
+    });
+    return best;
   }
 
   selectAllVillagers(v) {
     const n = Math.min(40, this.state.villagers[v.job] || 0);
     if (n > 0) this.setSel({ type: 'villagers', job: v.job, n, gx: v.gx, gy: v.gy });
-  }
-
-  selectAllGroups(grp) {
-    const kinds = Object.keys(grp.units);
-    const main = kinds.sort((a, b) => grp.units[b] - grp.units[a])[0];
-    const ids = (this.state.field || []).filter((g) => g.units[main]).map((g) => g.id);
-    this.setSel(ids.length > 1 ? { type: 'groups', ids, kind: main } : { type: 'group', id: grp.id });
   }
 
   // rechte muurlijn tussen twee tegels (langs de langste richting)
@@ -1213,6 +1294,31 @@ export class TownView {
     if (!this.onFieldOrder) return;
     let mark = to ? { gx: to.x, gy: to.y } : this.targetPos(target);
     if (sel.type === 'group') this.onFieldOrder({ action: 'order', id: sel.id, to, target });
+    else if (sel.type === 'unit') this.onFieldOrder({ action: 'split', id: sel.id, units: { [sel.kind]: 1 }, to, target });
+    else if (sel.type === 'kind' || sel.type === 'army') {
+      // thuis = één nieuwe groep (iedereen samen, aan het tempo van de traagste); in het veld = elke groep (of het deel van die soort)
+      const s = this.state;
+      const ops = [];
+      const goingHome = target && target.type === 'home';
+      if (sel.type === 'kind') {
+        const home = sel.kind === 'villager' ? 0 : (s.units || {})[sel.kind] || 0;
+        if (home && !goingHome) ops.push({ action: 'send', spec: { units: { [sel.kind]: home } }, from: { x: sel.gx, y: sel.gy } });
+        for (const g of s.field || []) {
+          if (!g.units[sel.kind]) continue;
+          ops.push(Object.keys(g.units).length === 1 ? { action: 'order', id: g.id } : { action: 'split', id: g.id, units: { [sel.kind]: g.units[sel.kind] } });
+        }
+      } else {
+        const home = {};
+        for (const k of ARMY_UNITS) if ((s.units || {})[k] > 0) home[k] = s.units[k];
+        if (Object.keys(home).length && !goingHome) ops.push({ action: 'send', spec: { units: home } });
+        for (const g of s.field || []) if (!isVillagerGroup(g)) ops.push({ action: 'order', id: g.id });
+      }
+      ops.forEach((op, k) => {
+        const off = k === 0 ? [0, 0] : [Math.cos(k * 2.4) * 0.6 * Math.sqrt(k), Math.sin(k * 2.4) * 0.6 * Math.sqrt(k)];
+        this.onFieldOrder({ ...op, to: to && { x: to.x + off[0], y: to.y + off[1] }, target, keepSel: true });
+      });
+      if (sel.type === 'kind') this.selectKind(sel.kind); else this.selectArmy();
+    }
     else if (sel.type === 'walker') { sel.w.leaving = true; this.onFieldOrder({ action: 'send', spec: { villager: sel.w.job }, from: { x: sel.w.gx, y: sel.w.gy }, to, target }); }
     else if (sel.type === 'soldier') this.onFieldOrder({ action: 'send', spec: { units: { [sel.kind]: 1 } }, from: { x: sel.gx, y: sel.gy }, to, target });
     else if (sel.type === 'soldiers') this.onFieldOrder({ action: 'send', spec: { units: { [sel.kind]: sel.n } }, from: { x: sel.gx, y: sel.gy }, to, target });
@@ -1594,6 +1700,7 @@ export class TownView {
     const emit = this.emitT > 380;
     if (emit) this.emitT = 0;
     this.drawOrderMark(ctx, t);
+    this.drawPressMark(ctx);
     for (const it of items) {
       switch (it.kind) {
         case 'decor': this.drawDecor(ctx, it.d, t); break;
@@ -1918,13 +2025,23 @@ export class TownView {
 
   drawGroup(ctx, g, pos, t, now, emit) {
     const p = toWorld(pos.x, pos.y);
-    const sel = this.sel && ((this.sel.type === 'group' && this.sel.id === g.id) || (this.sel.type === 'groups' && this.sel.ids.includes(g.id)));
+    const sl = this.sel;
+    const part = sl && sl.type === 'unit' && sl.id === g.id;
+    const sel = sl && (part || (sl.type === 'group' && sl.id === g.id) || ((sl.type === 'groups' || sl.type === 'army') && sl.ids.includes(g.id))
+      || (sl.type === 'kind' && g.units[sl.kind]));
     const moving = g.pending && now < g.t1;
     if (sel) {
       const pulse = 0.6 + Math.sin(t * 0.008) * 0.3;
       ctx.strokeStyle = `rgba(255,225,90,${pulse})`; ctx.lineWidth = 2;
+      if (part) {
+        // één troep uit de groep: kleine ring rond dat figuurtje, de groep zelf gestippeld
+        const q = this.groupFigurePos(g, sl.kind, now);
+        ctx.beginPath(); ctx.ellipse(q.x, q.y + 1, 8, 4, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([3, 4]); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,225,90,0.45)';
+      }
       ctx.beginPath(); ctx.ellipse(p.x + 4, p.y + 3, 18, 9, 0, 0, Math.PI * 2); ctx.stroke();
-      if (moving) {
+      ctx.setLineDash([]);
+      if (moving && !part) {
         const d = toWorld(g.x1, g.y1);
         ctx.setLineDash([5, 5]); ctx.strokeStyle = 'rgba(255,240,180,0.65)'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(d.x, d.y); ctx.stroke(); ctx.setLineDash([]);
@@ -1944,6 +2061,14 @@ export class TownView {
       const q = toWorld(o[0], o[1]);
       const fx = p.x + q.x;
       facing(ctx, fx, dir, () => this.drawFigure(ctx, k, fx, p.y + q.y, t, moving, working, this.groupTool(g)));
+    }
+    if (part) {
+      // gouden pijltje boven de gekozen troep
+      const q = this.groupFigurePos(g, sl.kind, now);
+      const bob = Math.sin(t * 0.008) * 1.5;
+      const top = q.y - (UNITS[sl.kind] && UNITS[sl.kind].type === 'cav' ? 49 : 43) + bob;
+      ctx.fillStyle = '#ffd34d'; ctx.strokeStyle = 'rgba(60,35,5,0.9)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(q.x - 5, top - 7); ctx.lineTo(q.x + 5, top - 7); ctx.lineTo(q.x, top); ctx.closePath(); ctx.fill(); ctx.stroke();
     }
     const total = Object.values(g.units).reduce((a, b) => a + b, 0);
     if (g.hp) {
@@ -1989,6 +2114,17 @@ export class TownView {
     this.drawSoldier(ctx, { kind, gx: x * 0.01, gy: y * 0.01, walking: moving }, x, y, t);
   }
 
+  // gouden ring waar je ingedrukt hield (hele leger gekozen)
+  drawPressMark(ctx) {
+    const m = this.pressMark;
+    if (!m) return;
+    const age = performance.now() - m.at;
+    if (age > 700) { this.pressMark = null; return; }
+    const f = age / 700;
+    ctx.strokeStyle = `rgba(255,220,100,${1 - f})`; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.ellipse(m.x, m.y, 10 + f * 46, 5 + f * 23, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+
   // doel-markering na een opdracht
   drawOrderMark(ctx, t) {
     const m = this.orderMark;
@@ -2011,44 +2147,12 @@ export class TownView {
     }
   }
 
-  // Wat gebeurt er als de gekozen soldaten het barbarenkamp aanvallen? (dezelfde berekening als het echte gevecht)
-  campForecast() {
-    const s = this.state; const sel = this.sel;
-    if (!sel || this.selIsVillager()) return null;
-    const units = {}; const hp = {};
-    const add = (u, h) => {
-      for (const k of Object.keys(u || {})) {
-        if (k === 'villager') continue;
-        const list = (h && h[k]) || [];
-        for (let i = 0; i < u[k]; i++) { units[k] = (units[k] || 0) + 1; (hp[k] || (hp[k] = [])).push(list[i] != null ? list[i] : maxHp(k)); }
-      }
-    };
-    if (sel.type === 'soldier') add({ [sel.kind]: 1 });
-    else if (sel.type === 'soldiers') add({ [sel.kind]: sel.n });
-    else if (sel.type === 'group' || sel.type === 'groups') {
-      const ids = sel.type === 'group' ? [sel.id] : sel.ids;
-      for (const g of s.field || []) if (ids.includes(g.id)) add(g.units, g.hp);
-    }
-    const n = Object.values(units).reduce((a, b) => a + b, 0);
-    if (!n) return null;
-    const foes = Math.max(1, campSize(s));
-    const key = `${JSON.stringify(hp)}|${foes}|${bLevel(s, 'smithy')}`;
-    if (this.forecast && this.forecast.key === key) return this.forecast.v;
-    const r = runFight({ t0: 0, a: combatants(units, hp), b: combatants({ barbarian: foes }), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') });
-    const left = r.a.filter((u) => u.hp > 0).length;
-    const killed = r.b.filter((u) => u.hp <= 0).length;
-    const v = left ? { win: true, text: `kansrijk, ±${left} van je ${n} man overleven` }
-      : { win: false, text: `te sterk voor je ${n} man (±${killed} barbaren neer)` };
-    this.forecast = { key, v };
-    return v;
-  }
-
   // naam en voorraad tonen als je over iets in de wildernis beweegt
   drawHover(ctx) {
     const w = this.hoverW;
     const s = this.state;
     if (!w || !s.terr || this.placing) return;
-    let label = null; let at = null; let tone = null;
+    let label = null; let at = null;
     for (const d of this.terr.deposits) {
       if (depLeft(s, d) <= 0 || !this.isExplored(d.x, d.y)) continue;
       const p = toWorld(d.x, d.y);
@@ -2065,16 +2169,13 @@ export class TownView {
       if (Math.abs(w.x - p.x) < 68 && w.y < p.y + 30 && w.y > p.y - 52) {
         label = campAlive(s, this.now) ? `${WILD.camp.name} · ${Math.max(1, campSize(s))} barbaren` : `${WILD.camp.name} (verwoest)`;
         at = p;
-        const guess = campAlive(s, this.now) ? this.campForecast() : null;
-        if (guess) { label += ` · ${guess.text}`; tone = guess.win ? 'win' : 'lose'; }
       }
     }
     if (!label) return;
     ctx.font = '700 11px Inter, sans-serif'; ctx.textAlign = 'center';
     const tw = ctx.measureText(label).width + 14;
     const y = at.y - 52;
-    ctx.fillStyle = tone === 'win' ? 'rgba(24,70,22,0.9)' : tone === 'lose' ? 'rgba(110,22,14,0.92)' : 'rgba(28,20,12,0.85)';
-    ctx.beginPath(); ctx.roundRect(at.x - tw / 2, y - 14, tw, 18, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(28,20,12,0.85)'; ctx.beginPath(); ctx.roundRect(at.x - tw / 2, y - 14, tw, 18, 7); ctx.fill();
     ctx.fillStyle = '#fff3d6'; ctx.fillText(label, at.x, y - 1);
   }
 

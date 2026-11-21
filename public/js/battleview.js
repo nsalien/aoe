@@ -238,13 +238,26 @@ export class BattleView {
       cv.setPointerCapture(e.pointerId);
       const p = this.pt(e);
       down = { x: p.x, y: p.y, sx: p.x, sy: p.y, btn: e.button, touch: e.pointerType !== 'mouse', moved: false, camX: this.cam.x, camY: this.cam.y };
+      // ingedrukt houden = je hele leger kiezen
+      clearTimeout(this.lpTimer);
+      if (e.button !== 2) {
+        const d0 = down;
+        this.lpTimer = setTimeout(() => {
+          if (down !== d0 || d0.moved || !this.manual) return;
+          d0.long = true;
+          this.selectAll();
+          this.flashHint(`Je hele leger is gekozen (${this.sel.size}). Klik op de grond of op een vijand.`);
+          this.renderBars(true);
+          if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
+        }, 550);
+      }
     });
     cv.addEventListener('pointermove', (e) => {
       const p = this.pt(e);
       this.hover = p;
       if (!down) return;
       down.x = p.x; down.y = p.y;
-      if (Math.hypot(p.x - down.sx, p.y - down.sy) > (down.touch ? 10 : 6)) down.moved = true;
+      if (Math.hypot(p.x - down.sx, p.y - down.sy) > (down.touch ? 10 : 6)) { down.moved = true; clearTimeout(this.lpTimer); }
       if (down.moved && down.touch) {
         // vegen = het slagveld verschuiven (op een gsm past het niet helemaal op het scherm)
         this.cam.x = down.camX - (p.x - down.sx) / this.S;
@@ -255,7 +268,9 @@ export class BattleView {
     const end = (e) => {
       if (!down) return;
       const d = down; down = null;
+      clearTimeout(this.lpTimer);
       this.box = null;
+      if (d.long) return;
       if (d.touch && d.moved) return;
       if (!d.touch && d.moved && d.btn === 0) { this.boxSelect(d.sx, d.sy, d.x, d.y, e.shiftKey); return; }
       if (d.btn === 2) { this.command(d.sx, d.sy); return; }
@@ -400,8 +415,8 @@ export class BattleView {
     let hint = '';
     if (this.hintMsg && this.hintMsg.until > now) hint = this.hintMsg.t;
     else if (b.status === 'live' && this.manual && !this.sel.size) hint = matchMedia('(pointer: coarse)').matches
-      ? 'Tik op je troepen om ze te kiezen (twee keer tikken = alle van die soort). Tik daarna op de grond of op een vijand. Veeg om rond te kijken.'
-      : 'Klik op je troepen of sleep een kader (dubbelklik = alle van die soort). Klik of rechtsklik daarna op de grond om te lopen, of op een vijand om aan te vallen.';
+      ? 'Tik op een troep om hem te kiezen, twee keer tikken = alle van die soort, ingedrukt houden = je hele leger. Tik daarna op de grond of op een vijand. Veeg om rond te kijken.'
+      : 'Klik op een troep (dubbelklik = alle van die soort, ingedrukt houden = je hele leger, of sleep een kader). Klik daarna op de grond om te lopen, of op een vijand om aan te vallen.';
     else if (b.status === 'live' && this.manual) hint = `${this.sel.size} geselecteerd: klik op een vijand, toren of muur om aan te vallen, of op de grond om te verplaatsen.`;
     this.hint.textContent = hint;
     this.hint.hidden = !hint;
