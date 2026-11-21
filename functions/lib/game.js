@@ -1,11 +1,12 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
   advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
-  towerDefense, townBaseDef, effectiveWall,
+  towerDefense, townBaseDef, effectiveWall, wallEnclosed,
 } from '../../public/shared/sim.js';
 import {
-  resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits,
+  resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits, subtractUnits,
 } from '../../public/shared/battle.js';
+import { createBattle, stepTo, giveOrder, battleOutcome, FB } from '../../public/shared/fieldbattle.js';
 import {
   RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue,
 } from '../../public/shared/rules.js';
@@ -106,10 +107,11 @@ function damageBuilding(s, type, levels) {
 
 export async function processDue(db, world, now, budget = 30) {
   let processed = 0;
+  await processBattles(db, world, now);
   for (let loop = 0; loop < 10; loop++) {
     if (db.ctx.count > budget) break;
     const due = await db.prepare(
-      `SELECT * FROM marches WHERE status IN ('out','back') AND arrive_at <= ? AND lock_until < ?
+      `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
        ORDER BY arrive_at LIMIT 4`,
     ).bind(now, now).all();
     if (!due.results.length) break;
@@ -121,7 +123,7 @@ export async function processDue(db, world, now, budget = 30) {
       m.units = JSON.parse(m.units);
       m.res = JSON.parse(m.res);
       try {
-        await resolveMarch(db, world, m);
+        await resolveMarch(db, world, m, now);
         processed++;
       } catch (e) {
         console.error('march', m.id, e && e.stack);
@@ -146,8 +148,15 @@ async function sendBack(db, m, units, res, t) {
   ).bind(JSON.stringify(units), JSON.stringify(res), t, t + dur, m.id).run();
 }
 
-async function resolveMarch(db, world, m) {
+async function resolveMarch(db, world, m, now = m.arrive_at) {
   const t = m.arrive_at;
+  // aanval en iemand is online: eerst kiezen tussen zelf besturen of automatisch
+  if (m.status === 'out' && m.kind === 'attack' && await maybeOfferBattle(db, m, now)) return;
+  // vangnet: een slag die nooit afgerond werd, wordt alsnog automatisch uitgerekend
+  if (m.status === 'battle') {
+    await db.prepare("UPDATE battles SET status = 'done', version = version + 1, updated_at = ? WHERE march_id = ? AND status != 'done'").bind(now, m.id).run();
+    m.status = 'out';
+  }
   if (m.status === 'back') {
     const home = await db.prepare('SELECT id FROM towns WHERE id = ?').bind(m.from_town).first();
     if (home) {
@@ -214,7 +223,7 @@ async function participants(db, m) {
   return { attacker, smithy };
 }
 
-async function attackTown(db, world, m, t) {
+async function attackTown(db, world, m, t, override = null) {
   const { attacker, smithy } = await participants(db, m);
   const def = await db.prepare(
     'SELECT t.id, t.name, t.player_id, p.name AS pname FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?',
@@ -227,10 +236,17 @@ async function attackTown(db, world, m, t) {
 
   const { result: out } = await mutateTown(db, world, m.target_id, t, (s) => {
     const groups = [{ key: 'home', units: { ...s.units } }, ...supRows.map((r) => ({ key: r.id, units: r.unitsObj }))];
-    const b = resolveBattle({
+    const b = override ? override.build(groups, s, smithy) : resolveBattle({
       attUnits: m.units, attSmithy: smithy, groups, defSmithy: bLevel(s, 'smithy'),
       wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
     });
+    // torens die in de veldslag sneuvelden, verliezen een niveau (of vallen helemaal om)
+    for (const id of (override && override.towersLost) || []) {
+      const tw = s.buildings.find((x) => x.id === id);
+      if (!tw) continue;
+      tw.level -= 1;
+      if (tw.level <= 0) { s.buildings = s.buildings.filter((x) => x !== tw); s.builds = s.builds.filter((j) => j.bid !== id); }
+    }
     s.units = b.groupsLeft[0].units;
     for (const k of Object.keys(s.units)) if (!s.units[k]) delete s.units[k];
     let loot = { food: 0, wood: 0, stone: 0, gold: 0 };
@@ -283,6 +299,7 @@ async function attackTown(db, world, m, t) {
     attUnits: m.units, attLost: b.attLost, defUnits, defLost, loot, wallDamage, monumentDamage,
     supporters: supRows.map((r) => r.pname),
   };
+  data.live = !!(override && override.live);
   await addReport(db, m.player_id, t, 'attack',
     b.attWins ? `Overwinning bij ${def.name}` : `Nederlaag bij ${def.name}`, data);
   await addReport(db, def.player_id, t, 'defense',
@@ -293,6 +310,7 @@ async function attackTown(db, world, m, t) {
     notified.add(r.player_id);
     await addReport(db, r.player_id, t, 'defense', `Je troepen vochten mee in ${def.name}`, data);
   }
+  return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost, loot };
 }
 
 function freshCamp(level) {
@@ -307,13 +325,13 @@ async function loadCamp(db, id, t) {
   return c;
 }
 
-async function attackCamp(db, world, m, t) {
+async function attackCamp(db, world, m, t, override = null) {
   const { attacker, smithy } = await participants(db, m);
   for (let i = 0; i < 4; i++) {
     const c = await loadCamp(db, m.target_id, t);
     if (!c) { await sendBack(db, m, m.units, {}, t); return; }
     const groups = [{ key: 'camp', units: { ...c.state.units } }];
-    const b = resolveBattle({ attUnits: m.units, attSmithy: smithy, groups, baseDef: campBaseDef(c.level) });
+    const b = override ? override.build(groups, null, smithy, campBaseDef(c.level)) : resolveBattle({ attUnits: m.units, attSmithy: smithy, groups, baseDef: campBaseDef(c.level) });
     let loot = { food: 0, wood: 0, stone: 0, gold: 0 };
     c.state.units = b.groupsLeft[0].units;
     if (b.attWins) {
@@ -332,10 +350,11 @@ async function attackCamp(db, world, m, t) {
       attacker: { name: attacker ? attacker.name : '?', town: attacker ? attacker.town : '?' },
       defender: { name: 'Rovers', town: name },
       attUnits: m.units, attLost: b.attLost, defUnits: groups[0].units, defLost: b.groupsLost[0].units, loot,
-      wallDamage: 0, monumentDamage: 0, supporters: [],
+      wallDamage: 0, monumentDamage: 0, supporters: [], live: !!(override && override.live),
     });
-    return;
+    return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost: b.groupsLost[0].units, loot };
   }
+  return null;
 }
 
 async function scoutCamp(db, world, m, t) {
@@ -397,4 +416,259 @@ export async function awayPop(db, playerId) {
 
 export function freshCampState(level) {
   return freshCamp(level);
+}
+
+
+// ---------- veldslagen die je zelf kan besturen ----------
+
+const ONLINE_MS = 90000;
+const isOnline = (row, now) => !!row && row.last_seen > now - ONLINE_MS;
+
+// Aanval komt aan: als de aanvaller of verdediger online is, krijgen ze even de keuze.
+async function maybeOfferBattle(db, m, now) {
+  const att = await db.prepare('SELECT last_seen FROM players WHERE id = ?').bind(m.player_id).first();
+  let defPlayer = null; let defOn = false; let title = 'Roverskamp';
+  if (m.target_kind === 'town') {
+    const d = await db.prepare('SELECT t.name, p.id, p.last_seen FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?').bind(m.target_id).first();
+    if (!d) return false;
+    defPlayer = d.id; defOn = isOnline(d, now); title = d.name;
+  } else {
+    const c = await db.prepare('SELECT level FROM camps WHERE id = ?').bind(m.target_id).first();
+    title = `Roverskamp (niveau ${c ? c.level : '?'})`;
+  }
+  if (!isOnline(att, now) && !defOn) return false;
+  if (now - m.arrive_at > ONLINE_MS) return false; // al lang aangekomen: gewoon automatisch
+  await db.prepare(
+    `INSERT INTO battles (march_id, att_player, def_player, target_kind, target_id, title, status, choose_until, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'choose', ?, ?, ?)`,
+  ).bind(m.id, m.player_id, defPlayer, m.target_kind, m.target_id, title, now + FB.chooseMs, now, now).run();
+  // het leger wacht op het slagveld; lukt het afronden nooit, dan neemt processDue het later over
+  await db.prepare("UPDATE marches SET status = 'battle', lock_until = ? WHERE id = ?")
+    .bind(now + FB.chooseMs + FB.maxMs + 600000, m.id).run();
+  return true;
+}
+
+// het leger dat op dit slagveld vecht (enkel zolang het daar nog staat)
+async function loadMarch(db, id) {
+  const m = await db.prepare("SELECT * FROM marches WHERE id = ? AND status = 'battle'").bind(id).first();
+  if (!m) return null;
+  m.units = JSON.parse(m.units); m.res = JSON.parse(m.res);
+  return m;
+}
+
+export async function loadBattle(db, id) {
+  const b = await db.prepare('SELECT * FROM battles WHERE id = ?').bind(id).first();
+  if (!b) return null;
+  b.state = b.state ? JSON.parse(b.state) : null;
+  b.result = b.result ? JSON.parse(b.result) : null;
+  return b;
+}
+
+async function saveBattle(db, b, now) {
+  const r = await db.prepare(
+    'UPDATE battles SET status = ?, att_mode = ?, def_mode = ?, state = ?, result = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?',
+  ).bind(b.status, b.att_mode, b.def_mode, b.state ? JSON.stringify(b.state) : null, b.result ? JSON.stringify(b.result) : null, now, b.id, b.version).run();
+  if (!r.meta.changes) throw new GameError('Het slagveld veranderde net, probeer opnieuw.', 409);
+  b.version++;
+}
+
+// keuzes, verlopen keuzetijd, verlaten slagvelden en opruimen
+async function processBattles(db, world, now) {
+  const due = (await db.prepare(
+    `SELECT id FROM battles WHERE (status = 'choose' AND choose_until <= ?) OR (status = 'live' AND updated_at < ?) OR (status = 'done' AND updated_at < ?) LIMIT 3`,
+  ).bind(now, now - FB.staleMs, now - 15 * 60000).all()).results;
+  for (const { id } of due) {
+    if (db.ctx.count > 20) break;
+    const b = await loadBattle(db, id);
+    if (!b) continue;
+    try {
+      if (b.status === 'done') await db.prepare('DELETE FROM battles WHERE id = ?').bind(id).run();
+      else if (b.status === 'choose') await startBattle(db, world, b, now);
+      else await finishBattle(db, world, b, now, true);
+    } catch (e) { console.error('battle', id, e && e.stack); }
+  }
+}
+
+// keuzetijd voorbij of iedereen koos: live slagveld of meteen automatisch
+async function startBattle(db, world, b, now) {
+  if (b.att_mode !== 'manual' && b.def_mode !== 'manual') return autoBattle(db, world, b, now);
+  const m = await loadMarch(db, b.march_id);
+  if (!m) { await db.prepare('DELETE FROM battles WHERE id = ?').bind(b.id).run(); return; }
+  const att = await db.prepare('SELECT t.state FROM towns t WHERE t.id = ?').bind(m.from_town).first();
+  const smithyA = att ? bLevel(JSON.parse(att.state), 'smithy') : 0;
+  let setup;
+  if (b.target_kind === 'town') {
+    const town = await loadTown(db, b.target_id);
+    if (!town) return autoBattle(db, world, b, now);
+    ensureTerritory(town.state, town.id);
+    advance(town.state, gameTime(world, now), world.speed);
+    const s = town.state;
+    const sup = (await db.prepare('SELECT id, units FROM support WHERE host_town = ?').bind(b.target_id).all()).results;
+    const defGroups = [{ key: 'home', units: { ...s.units } }, ...sup.map((r) => ({ key: r.id, units: JSON.parse(r.units) }))];
+    setup = {
+      kind: 'town', att: m.units, defGroups, smithyA, smithyD: bLevel(s, 'smithy'),
+      towers: s.buildings.filter((x) => x.type === 'tower' && x.level > 0).slice(0, 6).map((x) => ({ id: x.id, level: x.level })),
+      wall: (s.walls || []).length ? bLevel(s, 'wall') : 0, enclosed: wallEnclosed(s),
+      style: { civ: s.civ, age: bLevel(s, 'tc') },
+    };
+  } else {
+    const c = await loadCamp(db, b.target_id, now);
+    if (!c) return autoBattle(db, world, b, now);
+    setup = { kind: 'camp', att: m.units, defGroups: [{ key: 'camp', units: { ...c.state.units } }], smithyA, level: c.level };
+  }
+  const state = createBattle({ ...setup, now });
+  // namen en kleuren voor het slagveld in de browser
+  const side = (pid) => (pid ? db.prepare('SELECT p.name, tm.color FROM players p LEFT JOIN teams tm ON tm.id = p.team_id WHERE p.id = ?').bind(pid).first() : null);
+  const pa = await side(b.att_player); const pd = await side(b.def_player);
+  state.meta = {
+    attInit: m.units, defInit: Object.fromEntries(setup.defGroups.map((g) => [g.key, g.units])), style: setup.style || null, level: setup.level || 0,
+    att: { name: pa ? pa.name : '?', color: (pa && pa.color) || '#2e6fb5' },
+    def: { name: pd ? pd.name : 'Rovers', color: pd ? pd.color || '#c0392b' : '#7a1b12' },
+  };
+  b.status = 'live';
+  b.state = state;
+  await saveBattle(db, b, now);
+}
+
+// eerst de slag 'claimen' (met versiecontrole), zodat ze nooit twee keer uitgerekend wordt
+async function claimBattle(db, b, now) {
+  b.status = 'done';
+  b.result = { pending: true };
+  await saveBattle(db, b, now);
+}
+
+async function autoBattle(db, world, b, now) {
+  await claimBattle(db, b, now);
+  const m = await loadMarch(db, b.march_id);
+  let r = null;
+  if (m) r = b.target_kind === 'town' ? await attackTown(db, world, m, now) : await attackCamp(db, world, m, now);
+  b.status = 'done';
+  b.result = { auto: true, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {} };
+  b.state = null;
+  await saveBattle(db, b, now);
+}
+
+// uitslag van het slagveld omzetten naar de vorm van resolveBattle (voor de bestaande verwerking)
+function fieldResult(o, meta, groups, finish) {
+  const attLeft = o.attLeft;
+  const groupsLeft = groups.map((g) => {
+    const init = meta.defInit[g.key];
+    if (!init) return { key: g.key, units: { ...g.units } }; // kwam pas na de slag aan
+    const left = {};
+    const survived = o.defLeft[g.key] || {};
+    for (const k of Object.keys(g.units)) {
+      // overlevenden van de slag + wat er intussen bij kwam
+      left[k] = Math.max(0, Math.min(g.units[k], (survived[k] || 0) + Math.max(0, g.units[k] - (init[k] || 0))));
+    }
+    return { key: g.key, units: left };
+  });
+  let r = { attWins: o.attWins, attLeft, groupsLeft };
+  if (finish) r = finish(r);
+  return {
+    attWins: r.attWins, A: 0, D: 0, attLeft: r.attLeft, attLost: subtractUnits(meta.attInit, r.attLeft),
+    groupsLeft: r.groupsLeft, groupsLost: groups.map((g, i) => ({ key: g.key, units: subtractUnits(g.units, r.groupsLeft[i].units) })),
+    wallDamage: o.attWins && o.wallsBroken >= 3 ? 1 : 0, monumentDamage: 0,
+  };
+}
+
+async function finishBattle(db, world, b, now, abandoned = false) {
+  const state = b.state;
+  await claimBattle(db, b, now);
+  const m = await loadMarch(db, b.march_id);
+  const o = battleOutcome(state);
+  let r = null;
+  if (m) {
+    m.units = state.meta.attInit;
+    // verlaten slagveld: de rest van de slag wordt automatisch uitgerekend
+    const finish = abandoned && state.over == null ? (part) => {
+      const rr = resolveBattle({ attUnits: part.attLeft, groups: part.groupsLeft.map((g) => ({ key: g.key, units: g.units })) });
+      return { attWins: rr.attWins, attLeft: rr.attLeft, groupsLeft: rr.groupsLeft };
+    } : null;
+    const override = { live: true, towersLost: o.towersLost, build: (groups) => fieldResult(o, state.meta, groups, finish) };
+    r = b.target_kind === 'town' ? await attackTown(db, world, m, now, override) : await attackCamp(db, world, m, now, override);
+  }
+  b.status = 'done';
+  b.result = { auto: abandoned, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, retreat: o.retreat };
+  await saveBattle(db, b, now);
+}
+
+// slag bijwerken tot nu (in stukjes om de server niet te overbelasten)
+async function tickBattle(db, world, b, now) {
+  if (b.status === 'choose' && now >= b.choose_until) { await startBattle(db, world, b, now); return; }
+  if (b.status !== 'live') return;
+  stepTo(b.state, now, FB.maxTicksPerCall);
+  if (b.state.over != null) await finishBattle(db, world, b, now);
+  else await saveBattle(db, b, now);
+}
+
+function battleRole(b, playerId) {
+  if (b.att_player === playerId) return 'att';
+  if (b.def_player === playerId) return 'def';
+  return null;
+}
+
+export async function battleView(db, world, id, playerId, now) {
+  const b = await loadBattle(db, id);
+  if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
+  const role = battleRole(b, playerId);
+  if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
+  await tickBattle(db, world, b, now);
+  return publicBattle(b, role);
+}
+
+export function publicBattle(b, role) {
+  return {
+    id: b.id, title: b.title, status: b.status, role, kind: b.target_kind, chooseUntil: b.choose_until,
+    attMode: b.att_mode, defMode: b.def_mode, state: b.state, result: b.result,
+  };
+}
+
+export async function setBattleMode(db, world, id, playerId, mode, now) {
+  const b = await loadBattle(db, id);
+  if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
+  const role = battleRole(b, playerId);
+  if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
+  if (mode !== 'manual' && mode !== 'auto') throw new GameError('Kies zelf of automatisch.');
+  if (b.status === 'done') return publicBattle(b, role);
+  if (role === 'att') b.att_mode = mode; else b.def_mode = mode;
+  if (b.status === 'choose') {
+    // wie niet (meer) online is, laat de slag automatisch verlopen
+    const decided = async (pid, mode) => {
+      if (!pid || mode) return true;
+      return !isOnline(await db.prepare('SELECT last_seen FROM players WHERE id = ?').bind(pid).first(), now);
+    };
+    if (await decided(b.att_player, b.att_mode) && await decided(b.def_player, b.def_mode)) { await startBattle(db, world, b, now); return publicBattle(b, role); }
+  }
+  await saveBattle(db, b, now);
+  return publicBattle(b, role);
+}
+
+export async function battleOrder(db, world, id, playerId, body, now) {
+  const b = await loadBattle(db, id);
+  if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
+  const role = battleRole(b, playerId);
+  if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
+  if (b.status !== 'live') return publicBattle(b, role);
+  if ((role === 'att' ? b.att_mode : b.def_mode) !== 'manual') throw new GameError('Je laat deze slag automatisch verlopen.');
+  stepTo(b.state, now, FB.maxTicksPerCall);
+  const ids = Array.isArray(body.ids) ? body.ids.slice(0, 300).map(Number).filter(Number.isFinite) : null;
+  const o = { x: Number(body.x), y: Number(body.y), target: body.target != null ? Number(body.target) : null, charge: !!body.charge, retreat: !!body.retreat };
+  if (!o.charge && !o.retreat && o.target == null && !(Number.isFinite(o.x) && Number.isFinite(o.y))) throw new GameError('Ongeldig bevel.');
+  giveOrder(b.state, role === 'att' ? 0 : 1, ids, o);
+  if (b.state.over != null) await finishBattle(db, world, b, now);
+  else await saveBattle(db, b, now);
+  return publicBattle(b, role);
+}
+
+export async function myBattles(db, playerId, now) {
+  const rows = (await db.prepare(
+    `SELECT b.id, b.title, b.status, b.choose_until, b.att_player, b.def_player, b.att_mode, b.def_mode, b.result, b.target_kind, p.name AS att_name
+     FROM battles b LEFT JOIN players p ON p.id = b.att_player
+     WHERE (b.att_player = ? OR b.def_player = ?) AND (b.status != 'done' OR b.updated_at > ?)`,
+  ).bind(playerId, playerId, now - 120000).all()).results;
+  return rows.map((b) => ({
+    id: b.id, title: b.title, status: b.status, chooseUntil: b.choose_until, kind: b.target_kind,
+    role: b.att_player === playerId ? 'att' : 'def', attMode: b.att_mode, defMode: b.def_mode, attName: b.att_name,
+    result: b.status === 'done' && b.result ? JSON.parse(b.result) : null,
+  }));
 }

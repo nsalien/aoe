@@ -5,6 +5,7 @@ import {
 } from './auth.js';
 import {
   getWorld, phaseOf, worldTimes, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop,
+  battleView, setBattleMode, battleOrder, myBattles,
   freshCampState,
 } from './game.js';
 import {
@@ -193,6 +194,7 @@ route('GET', '/state', { auth: true }, async (ctx) => {
   // twee aparte MAX-query's: SQLite leest dan via de index maar één rij per kanaal
   const lastWorld = await db.prepare('SELECT MAX(id) AS last FROM messages WHERE channel = ?').bind('world').first();
   const lastTeam = await db.prepare('SELECT MAX(id) AS last FROM messages WHERE channel = ?').bind(`team:${player.team_id}`).first();
+  const battles = await myBattles(db, player.id, now);
   let away = 0;
   for (const m of marches) if (m.own && m.units) away += unitsPop(m.units);
   for (const s of mySupport) away += unitsPop(s.units);
@@ -201,7 +203,7 @@ route('GET', '/state', { auth: true }, async (ctx) => {
     me: { id: player.id, name: player.name, teamId: player.team_id, killPts: player.kill_pts },
     team: team && { id: team.id, name: team.name, color: team.color },
     town: { id: townRow.id, name: townRow.name, x: townRow.x, y: townRow.y, state },
-    awayPop: away, marches, supportHere, mySupport, unseenReports: unseen.c,
+    awayPop: away, marches, supportHere, mySupport, unseenReports: unseen.c, battles,
     chat: { world: lastWorld.last || 0, team: lastTeam.last || 0 },
   });
 });
@@ -436,6 +438,24 @@ route('POST', '/recall', { auth: true, active: true }, async (ctx) => {
   return json({ ok: true });
 });
 
+// ---------- veldslagen (zelf besturen of automatisch) ----------
+
+route('GET', '/battle', { auth: true, process: false }, async ({ db, world, player, now, url }) => {
+  return json({ now, battle: await battleView(db, world, int(url.searchParams.get('id')), player.id, now) });
+});
+
+route('POST', '/battle/mode', { auth: true, process: false }, async (ctx) => {
+  const { db, world, player, now } = ctx;
+  const body = await readJson(ctx.request);
+  return json({ now, battle: await setBattleMode(db, world, int(body.id), player.id, String(body.mode || ''), now) });
+});
+
+route('POST', '/battle/order', { auth: true, process: false }, async (ctx) => {
+  const { db, world, player, now } = ctx;
+  const body = await readJson(ctx.request);
+  return json({ now, battle: await battleOrder(db, world, int(body.id), player.id, body, now) });
+});
+
 // ---------- rapporten en chat ----------
 
 route('GET', '/reports', { auth: true, process: false }, async ({ db, player }) => {
@@ -511,7 +531,7 @@ route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const size = WORLD_SIZE;
   const terrain = generateTerrain(seed, size);
   const camps = generateCamps(seed, size, terrain, CAMP_EXTRA);
-  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages']
+  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles']
     .map((tb) => db.prepare(`DELETE FROM ${tb}`));
   stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(seed, size, w.start_at, w.prep_ms, w.war_ms, w.speed, w.team_size, w.join_code, now));
