@@ -626,3 +626,44 @@ test('veldslag: grote legers worden samengevoegd tot hooguit maxPerSide figuren'
   assert.equal(o.attLeft.spear, 500);
   assert.equal(o.defLeft.camp.barbarian, 120);
 });
+
+// ---------- één troep uit een groep sturen ----------
+import { doFieldSplit } from '../public/shared/sim.js';
+
+test('één soldaat uit een groep apart wegsturen; de rest loopt gewoon verder', () => {
+  const s = terrTown();
+  s.units = { spear: 5, archer: 2 };
+  const g = doFieldSend(s, { units: { spear: 5, archer: 2 } }, null, { x: 6, y: 14 }, null, s.t);
+  advance(s, s.t + 1500, 1);
+  const before = groupPos(g, s.t);
+  const ng = doFieldSplit(s, g.id, { spear: 1 }, { x: 10, y: 6 }, null, s.t);
+  assert.notEqual(ng.id, g.id);
+  assert.deepEqual(ng.units, { spear: 1 });
+  assert.deepEqual(g.units, { spear: 4, archer: 2 });
+  assert.equal(g.x1, 6); assert.equal(g.y1, 14);
+  assert.ok(Math.hypot(ng.x0 - before.x, ng.y0 - before.y) < 1e-9, 'vertrekt waar de groep nu is');
+  // alles van een soort uit een gemengde groep, en een hele groep = gewone opdracht
+  const ar = doFieldSplit(s, g.id, { archer: 2 }, { x: 8, y: 8 }, null, s.t);
+  assert.deepEqual(ar.units, { archer: 2 });
+  assert.deepEqual(g.units, { spear: 4 });
+  const same = doFieldSplit(s, g.id, { spear: 4 }, { x: 9, y: 9 }, null, s.t);
+  assert.equal(same, g);
+  assert.equal(s.field.length, 3);
+});
+
+test('één soldaat uit een gevecht halen: de rest vecht verder', () => {
+  const s = terrTown();
+  s.units = { spear: 6 };
+  const camp = territory(s.terr.seed).camp;
+  const g = doFieldSend(s, { units: { spear: 6 } }, null, { x: camp.x, y: camp.y }, null, s.t);
+  advance(s, g.t1, 1);
+  assert.ok(g.fight, 'in gevecht');
+  advance(s, s.t + 3000, 1);
+  const ng = doFieldSplit(s, g.id, { spear: 1 }, { x: 6, y: 10 }, null, s.t);
+  assert.equal(Object.values(ng.units).reduce((a, b) => a + b, 0), 1);
+  assert.ok(!ng.fight && ng.pending, 'hij loopt weg');
+  assert.ok(g.fight, 'de rest vecht verder');
+  const f = s.terr.fights.find((x) => x.id === g.fight);
+  assert.ok(f.a.every((u) => u.g === g.id), 'enkel de achterblijvers staan nog in het gevecht');
+  assert.equal(f.a.length, 5);
+});

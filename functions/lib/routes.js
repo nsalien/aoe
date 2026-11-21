@@ -10,7 +10,7 @@ import {
 } from './game.js';
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary,
-  townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder,
+  townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder, doFieldSplit,
   doBuyLot, doPlaceWalls, doRemoveWalls,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
@@ -340,6 +340,7 @@ route('POST', '/field', { auth: true, active: true }, async (ctx) => {
       const from = body.from && { x: Number(body.from.x), y: Number(body.from.y) };
       return doFieldSend(s, body.spec || {}, from, to, target, at);
     }
+    if (body.action === 'split') return doFieldSplit(s, int(body.id), body.units && typeof body.units === 'object' ? body.units : {}, to, target, at);
     return doFieldOrder(s, int(body.id), to, target, at);
   });
 });
