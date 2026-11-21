@@ -87,7 +87,7 @@ export const BUILDINGS = {
   },
   tower: {
     name: 'Wachttoren', size: 1, max: 4, maxLevel: 3, age: 2, cost: { stone: 250, wood: 80 }, time: 2400,
-    defense: 80, desc: '+80 verdediging per niveau.',
+    defense: 80, desc: 'Schiet tijdens een veldslag op de dichtstbijzijnde vijand. Elk niveau geeft meer schade en levens. Aanvallers kunnen hem slopen.',
   },
   workshop: {
     name: 'Belegwerkplaats', size: 1, max: 1, maxLevel: 2, age: 3, cost: { wood: 350, gold: 200, stone: 100 }, time: 3600,
