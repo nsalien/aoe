@@ -3,12 +3,13 @@ import * as A from './art.js';
 import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
+  LAND, landCost, WALL_TILE,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
-  depositById, depLeft, campAlive, campSize, exploredNow,
+  depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
 } from '../shared/sim.js';
 import { territory, exHas } from '../shared/territory.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
@@ -50,6 +51,7 @@ export function civEmblem(civ, size = 18) {
   const e = EMBLEM[civ];
   return e ? `<svg class="civ-emblem" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true">${e}</svg>` : '';
 }
+export const isEnclosed = (live) => wallEnclosed(live);
 export const civName = (civ) => (CIVS[civ] ? CIVS[civ].name : '');
 
 // keuze van een volk bij het stichten van een rijk
@@ -152,8 +154,50 @@ export function phaseHtml(w, now) {
 }
 
 // ---------- bouwbalk ----------
+// kleine tekeningen voor de muur- en grondkaart in de bouwbalk
+function specialThumb(kind, level = 1) {
+  const key = `sp:${kind}:${level}`;
+  if (thumbs.has(key)) return thumbs.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = 160; cv.height = 140;
+  const ctx = cv.getContext('2d');
+  ctx.translate(80, 92); ctx.scale(1.7, 1.7);
+  if (kind === 'wall') {
+    const stone = level >= 3;
+    const col = stone ? '#b9b1a1' : '#9a6a38';
+    A.box(ctx, -0.6, -0.08, 0.6, 0.08, 0, stone ? 20 : 16, col);
+    A.box(ctx, -0.16, -0.16, 0.16, 0.16, 0, stone ? 28 : 22, stone ? '#a39a89' : '#7a5129');
+    if (stone) for (const x of [-0.55, -0.35, 0.25, 0.45]) A.box(ctx, x, -0.08, x + 0.1, 0.08, 20, 24, '#a39a89');
+  } else {
+    A.diamond(ctx, 0, 0, 64 * 1.1, 32 * 1.1, '#8cc45a', 'rgba(60,90,30,0.6)');
+    ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 1.6;
+    for (const [x, y] of [[-34, 0], [0, -17], [34, 0], [0, 17]]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 9); ctx.stroke(); }
+    ctx.fillStyle = '#f2c230'; ctx.beginPath(); ctx.moveTo(4, -26); ctx.lineTo(16, -22); ctx.lineTo(4, -18); ctx.fill();
+    ctx.strokeStyle = '#5a3a1e'; ctx.beginPath(); ctx.moveTo(4, -10); ctx.lineTo(4, -27); ctx.stroke();
+  }
+  const url = cv.toDataURL();
+  thumbs.set(key, url);
+  return url;
+}
+
 export function buildBarHtml(live, placing, team) {
-  return BUILD_ORDER.map((type) => {
+  const wallL = bLevel(live, 'wall');
+  const wallCost = WALL_TILE.cost[Math.max(1, wallL)];
+  const lots = ((live.terr && live.terr.lots) || []).length;
+  const lc = landCost(lots);
+  const special = `<button class="bcard special ${placing === 'wall' ? 'active' : ''} ${wallL ? '' : 'locked'}" data-action="wallMode" title="${esc(wallL ? 'Muren plaatsen: klik een begin- en een eindtegel' : 'Bouw eerst de stadsmuur (niveau 1) via het muurpaneel')}">
+      <span class="cnt">${(live.walls || []).length}</span>
+      <img src="${specialThumb('wall', wallL)}" alt="">
+      <span class="bn">Muur</span>
+      <span class="bc">${RES.filter((r) => wallCost[r]).map((r) => `<span>${resImg(r, '')}${wallCost[r]}</span>`).join('')}<span class="muted">/tegel</span></span>
+    </button>
+    <button class="bcard special ${placing === 'land' ? 'active' : ''} ${lots >= LAND.max ? 'locked' : ''}" data-action="landMode" title="Grond bijkopen: een lot van ${LAND.size} x ${LAND.size} tegels">
+      <span class="cnt">${lots}/${LAND.max}</span>
+      <img src="${specialThumb('land')}" alt="">
+      <span class="bn">Grond kopen</span>
+      <span class="bc">${RES.filter((r) => lc[r]).map((r) => `<span>${resImg(r, '')}${fmt(lc[r])}</span>`).join('')}</span>
+    </button>`;
+  return special + BUILD_ORDER.map((type) => {
     const def = BUILDINGS[type];
     const have = findType(live, type).length;
     const err = checkBuild(live, type);
@@ -231,7 +275,7 @@ export function townOverviewHtml(app, live) {
   }
 
   html += `<div class="card"><h3>${icon('castle')} Verdediging</h3>
-    <dl class="kv"><dt>Stadsmuur</dt><dd>${wall.level ? `niveau ${wall.level}` : 'geen'}</dd>
+    <dl class="kv"><dt>Stadsmuur</dt><dd>${wall.level ? `niveau ${wall.level} · ${(live.walls || []).length ? (wallEnclosed(live) ? 'gesloten' : 'nog open') : 'nog geen muren'}` : 'geen'}</dd>
     <dt>Wachttorens</dt><dd>${findType(live, 'tower').filter((b) => b.level).length}</dd>
     <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd>
     ${live.terr ? `<dt>Barbarenkamp</dt><dd>${campText(live, app.now())}</dd>` : ''}</dl>
@@ -438,8 +482,16 @@ function buildingInfo(app, live, b) {
     case 'storage': return `<div class="card"><dl class="kv"><dt>Opslag per grondstof</dt><dd>${fmt(capacity(live))}</dd><dt>Verborgen voor plunderaars</dt><dd>${fmt(protectAmount(live))}</dd></dl></div>`;
     case 'smithy': return `<div class="card"><dl class="kv"><dt>Bonus aanval en verdediging</dt><dd>+${5 * L}%</dd></dl></div>`;
     case 'tower': return `<div class="card"><dl class="kv"><dt>Verdediging</dt><dd>+${80 * L}</dd></dl></div>`;
-    case 'wall': return `<div class="card"><dl class="kv"><dt>Verdedigingsbonus</dt><dd>+${8 * L}% en +${30 * L}</dd></dl>
-      <p class="small muted" style="margin:6px 0 0">Vanaf niveau 3 wordt de palissade een stenen muur.</p></div>`;
+    case 'wall': {
+      const n = (live.walls || []).length;
+      const closed = n && wallEnclosed(live);
+      return `<div class="card"><dl class="kv"><dt>Muurstukken</dt><dd>${n}</dd>
+        <dt>Je stad is</dt><dd>${!n ? 'niet ommuurd' : closed ? '<b style="color:#3f8f3c">volledig ommuurd</b>' : '<b style="color:#b2372a">nog open</b>'}</dd>
+        <dt>Verdedigingsbonus</dt><dd>${L ? `+${8 * L}% en +${30 * L}${closed ? '' : ' (30% zolang er een gat is)'}` : '—'}</dd></dl>
+      <p class="small muted" style="margin:6px 0 0">Plaats muren zelf, tegel per tegel. Een gesloten ring rond je stadscentrum verdedigt volledig.
+      Vanaf niveau 3 worden houten palissades stenen muren; een hoger tijdperk laat sterkere muren toe.</p>
+      <div class="actions"><button class="btn primary" data-action="wallMode" ${L && app.canAct ? '' : 'disabled'}>${icon('hammer')} Muren plaatsen</button></div></div>`;
+    }
     case 'monument': return `<div class="card"><dl class="kv"><dt>Punten van dit monument</dt><dd>${fmt(1500 * L)}+</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Bescherm het goed: vijandelijke rammen kunnen het afbreken.</p></div>`;
     case 'market': return marketHtml(app, live);

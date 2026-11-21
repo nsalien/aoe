@@ -137,6 +137,11 @@ function startGame(data) {
       if (changed && app.view === 'town') renderPanel();
     };
     town.onFieldOrder = fieldOrder;
+    town.onBuyLot = async (li, lj) => { await act('/land', { li, lj }, 'Grond gekocht! Je kan er nu bouwen.'); };
+    town.onWalls = async (tiles, remove) => {
+      const r = await act('/walls', { tiles, remove }, remove ? 'Muur afgebroken' : `${tiles.length} muurstukken geplaatst`);
+      if (r && !remove && UI.isEnclosed(app.live)) toast('Je stad is volledig ommuurd!', 'ok', 'castle');
+    };
     town.onHarvested = (node) => toast(`Je dorpeling bracht ${node.amount} ${RES_NAMES[node.res].toLowerCase()} mee!`, 'ok', 'star');
     town.onCelebrate = (b) => {
       celebrateQueue.push(b);
@@ -367,16 +372,44 @@ function renderSelHint() {
   let who; let extra = '';
   if (sel.type === 'walker') who = `Dorpeling${sel.w.job === 'idle' ? '' : ` (${RES_NAMES[sel.w.job].toLowerCase()})`}`;
   else if (sel.type === 'soldier') who = UNITS[sel.kind].name;
-  else {
+  else if (sel.type === 'soldiers') who = `${sel.n} × ${UNITS[sel.kind].name.toLowerCase()}`;
+  else if (sel.type === 'villagers') who = `${sel.n} dorpelingen${sel.job === 'idle' ? '' : ` (${RES_NAMES[sel.job].toLowerCase()})`}`;
+  else if (sel.type === 'groups') {
+    who = `${sel.ids.length} groepen met ${UNITS[sel.kind].name.toLowerCase()}s`;
+    extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
+  } else {
     who = UI.unitsText(g.units);
     if (!(g.order && g.order.type === 'home' && g.pending)) extra = `<button class="btn small" data-action="fieldHome" data-id="${g.id}">${UI.icon('home')} Naar huis</button>`;
   }
-  const villager = sel.type === 'walker' || (g && isVillagerGroup(g));
+  const villager = sel.type === 'walker' || sel.type === 'villagers' || (sel.type === 'groups' && sel.kind === 'villager') || (g && isVillagerGroup(g));
   const what = villager
     ? `Tik op de grond, een boom aan de rand${sel.type === 'walker' ? ', een vondst' : ''} of een bron.`
     : 'Tik op de grond, een everzwijn of het barbarenkamp.';
   hint.hidden = false;
-  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}</span></span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
+  const tip = sel.type === 'soldier' || sel.type === 'walker' || sel.type === 'group' ? ' Dubbelklik om alle van dit type te kiezen.' : '';
+  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}${tip}</span></span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
+}
+
+// muren plaatsen of grond kopen (aparte modus op de kaart)
+function setMode(mode) {
+  cancelPlace();
+  town.clearSel();
+  app.mode = mode;
+  town.landMode = mode === 'land';
+  town.wallMode = mode === 'wall' ? 'build' : mode === 'wallremove' ? 'remove' : null;
+  town.wallStart = null;
+  const hint = $('#placeHint');
+  if (!mode) { hint.hidden = true; renderBuildBar(); return; }
+  hint.hidden = false;
+  if (mode === 'land') {
+    setHTML(hint, `<span><b>Grond kopen</b> <span class="muted">Tik op een gouden lot naast je bouwgrond.</span></span><button class="btn small" data-action="modeDone">Klaar</button>`);
+  } else {
+    const rm = mode === 'wallremove';
+    setHTML(hint, `<span><b>${rm ? 'Muur afbreken' : 'Muur bouwen'}</b> <span class="muted">Tik op een begintegel en daarna op een eindtegel.</span></span>
+      <button class="btn small" data-action="${rm ? 'wallMode' : 'wallRemove'}">${rm ? 'Bouwen' : 'Afbreken'}</button><button class="btn small" data-action="modeDone">Klaar</button>`);
+  }
+  openPanelMobile(false);
+  renderBuildBar();
 }
 
 // opdracht voor een groep in het veld (de server controleert alles opnieuw)
@@ -489,7 +522,7 @@ function renderBuildBar(force = false) {
   if (bb.hidden) return;
   if (!force && isBusy('buildbar')) { pending.buildbar = true; return; }
   pending.buildbar = false;
-  setHTML(bb, UI.buildBarHtml(app.live, app.placing, app.data.team.color));
+  setHTML(bb, UI.buildBarHtml(app.live, app.placing || (app.mode === 'wallremove' ? 'wall' : app.mode), app.data.team.color));
 }
 
 function renderPanel(force = false) {
@@ -821,6 +854,7 @@ const actions = {
     const err = el.classList.contains('locked') || el.classList.contains('poor') ? el.title.split(': ').slice(1).join(': ') : null;
     if (err) { toast(err, 'err'); return; }
     app.placing = type;
+    if (app.mode) setMode(null);
     town.clearSel();
     town.placing = type;
     town.selected = null;
@@ -833,6 +867,15 @@ const actions = {
     renderPanel();
   },
   cancelPlace,
+  wallMode(el) { if (el && el.classList.contains('locked')) { toast(el.title, 'err'); return; } setMode(app.mode === 'wall' ? null : 'wall'); },
+  wallRemove() { setMode('wallremove'); },
+  landMode() { setMode(app.mode === 'land' ? null : 'land'); },
+  modeDone() { setMode(null); },
+  groupsHome() {
+    const sel = town.sel;
+    if (sel && sel.type === 'groups') for (const id of sel.ids) fieldOrder({ action: 'order', id, target: { type: 'home' } });
+    town.clearSel();
+  },
   cancelVillager() {
     town.clearSel();
     $('#placeHint').hidden = true;
@@ -981,6 +1024,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
     else if (app.placing) cancelPlace();
+    else if (app.mode) setMode(null);
     else if (town && town.sel) actions.cancelVillager();
     else if (app.selBuilding) actions.deselect();
   }
