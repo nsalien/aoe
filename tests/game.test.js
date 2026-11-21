@@ -458,6 +458,15 @@ test('elke eenheid heeft levenspunten; betere eenheden hebben er meer', () => {
   assert.deepEqual(runFight(f, end / 2), half, 'zelfde verloop in browser en server');
 });
 
+test('gevechten in je gebied: wie in de minderheid is, haalt toch vijanden neer en het duurt even', () => {
+  const r = runFight({ t0: 0, a: combatants({ spear: 5 }), b: combatants({ barbarian: 8 }) });
+  assert.ok(r.a.every((u) => u.hp <= 0), 'de kleine groep verliest');
+  assert.ok(r.b.filter((u) => u.hp <= 0).length >= 2, 'maar neemt barbaren mee');
+  assert.ok(r.end > 12000, `geen flits van een paar seconden (${r.end} ms)`);
+  const big = runFight({ t0: 0, a: combatants({ spear: 20, archer: 10 }), b: combatants({ barbarian: 14 }) });
+  assert.ok(big.b.every((u) => u.hp <= 0) && big.a.some((u) => u.hp > 0), 'een groot leger wint');
+});
+
 test('barbaren vallen meteen aan wie hun kamp nadert, ook een dorpeling', () => {
   const s = terrTown();
   const camp = territory(s.terr.seed).camp;

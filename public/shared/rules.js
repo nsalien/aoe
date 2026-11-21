@@ -283,7 +283,8 @@ export const FIELD = {
   gatherEff: 0.8, // wilde bronnen: 80% van een gewone werkplek (de weg is langer)
   aggro: 3.4, // wie zo dicht bij het barbarenkamp komt, wordt meteen aangevallen (tegels)
   armorK: 40, // schade x armorK / (armorK + verdediging)
-  engageMs: 700, // even op elkaar af stormen voor de eerste slag
+  engageMs: 1500, // eerst op elkaar af stormen, dan pas de eerste slag
+  fightPace: 1.5, // gevechten in je gebied iets trager dan de ruwe aanvalssnelheid: beter te volgen
 };
 
 // De wildernis: everzwijnen, een barbarenkamp en wilde bronnen.
