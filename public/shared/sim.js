@@ -757,6 +757,30 @@ function leaveFight(s, g, t) {
   return true;
 }
 
+// enkele soldaten uit een lopend gevecht halen (de rest van de groep vecht verder)
+function splitFromFight(s, g, take, t) {
+  const f = (s.terr.fights || []).find((x) => x.id === g.fight);
+  if (!f) { g.fight = null; return null; }
+  const r = runFight(f, t);
+  const need = { ...take };
+  const leaving = [];
+  for (const u of r.a) if (u.g === g.id && u.hp > 0 && (need[u.k] || 0) > 0) { leaving.push(u); need[u.k]--; }
+  if (!leaving.length) throw new GameError('Die soldaten zijn al gesneuveld.');
+  const strip = ({ died, ...u }) => u;
+  f.killed = (f.killed || 0) + r.b.filter((u) => u.hp <= 0).length;
+  f.t0 = t;
+  f.a = r.a.filter((u) => u.hp > 0 && !leaving.includes(u)).map(strip);
+  f.b = r.b.filter((u) => u.hp > 0).map(strip);
+  f.end = fightEnd(f);
+  const stay = survivorsByGroup(f.a.filter((u) => u.g === g.id))[g.id];
+  if (stay) { g.units = stay.units; g.hp = stay.hp; } else s.field = s.field.filter((x) => x !== g);
+  if (!f.a.length) {
+    s.terr.fights = s.terr.fights.filter((x) => x !== f);
+    if (f.foe.type === 'camp') s.terr.camp.loss = (s.terr.camp.loss || 0) + f.killed;
+  }
+  return survivorsByGroup(leaving.map((u) => ({ ...u, g: 0 })))[0];
+}
+
 function finishFight(s, f, t, speed) {
   const r = runFight(f, t);
   s.terr.fights = s.terr.fights.filter((x) => x !== f);
@@ -872,6 +896,42 @@ export function doFieldSend(s, spec, from, to, target, now) {
   s.field.push(g);
   doFieldOrder(s, g.id, to, target, now);
   return g;
+}
+
+// Een deel van een groep apart een opdracht geven (bv. 1 soldaat aanklikken in een groep van 8).
+// units = { soort: aantal } die meegaan; is dat de hele groep, dan krijgt gewoon de hele groep de opdracht.
+export function doFieldSplit(s, id, units, to, target, now) {
+  const g = (s.field || []).find((x) => x.id === id);
+  if (!g) throw new GameError('Die groep bestaat niet meer.');
+  const take = {};
+  let all = true;
+  for (const k of Object.keys(g.units)) {
+    const n = Math.min(g.units[k], Math.max(0, Math.floor(Number(units && units[k]) || 0)));
+    if (n > 0) take[k] = n;
+    if (n < g.units[k]) all = false;
+  }
+  if (!Object.keys(take).length) throw new GameError('Kies wie er op pad gaat.');
+  if (all) return doFieldOrder(s, id, to, target, now);
+  if (s.field.length >= FIELD.maxGroups) throw new GameError(`Je hebt al ${FIELD.maxGroups} groepen op pad.`);
+  let part;
+  if (g.fight) {
+    part = splitFromFight(s, g, take, now);
+    if (!part) return doFieldSplit(s, id, units, to, target, now);
+  } else {
+    part = { units: take, hp: {} };
+    for (const k of Object.keys(take)) {
+      const list = (g.hp && g.hp[k]) || [];
+      if (list.length) { part.hp[k] = list.slice(0, take[k]); g.hp[k] = list.slice(take[k]); }
+      g.units[k] -= take[k];
+      if (!g.units[k]) { delete g.units[k]; if (g.hp) delete g.hp[k]; }
+    }
+  }
+  const pos = groupPos(g, now);
+  const ng = { id: s.nextId++, units: part.units, job: g.job, x0: pos.x, y0: pos.y, x1: pos.x, y1: pos.y, t0: now, t1: now, pending: false, order: null, work: null };
+  if (Object.keys(part.hp || {}).length) ng.hp = part.hp;
+  s.field.push(ng);
+  doFieldOrder(s, ng.id, to, target, now);
+  return ng;
 }
 
 // Geef een groep in het veld een nieuwe opdracht: lopen, aanvallen, verzamelen, kappen of naar huis.
