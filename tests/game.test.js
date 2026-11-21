@@ -374,7 +374,7 @@ test('barbaren overvallen een onverdedigde stad', () => {
   const log = s.terr.log.find((l) => l.kind === 'raid-lost' || l.kind === 'raid-won');
   assert.ok(log, 'er was een overval');
   assert.equal(s.terr.camp.raids, 1);
-  assert.ok(raidSize(s) >= 3 && campSize(s) >= 5);
+  assert.ok(raidSize(s) >= 3 && campSize(s) >= 4);
 });
 
 test('wilde dieren en barbaren kan je niet trainen', () => {
@@ -465,6 +465,18 @@ test('gevechten in je gebied: wie in de minderheid is, haalt toch vijanden neer 
   assert.ok(r.end > 12000, `geen flits van een paar seconden (${r.end} ms)`);
   const big = runFight({ t0: 0, a: combatants({ spear: 20, archer: 10 }), b: combatants({ barbarian: 14 }) });
   assert.ok(big.b.every((u) => u.hp <= 0) && big.a.some((u) => u.hp > 0), 'een groot leger wint');
+});
+
+test('het barbarenkamp rond je stad is vrij makkelijk te verslaan', () => {
+  const s = terrTown();
+  const n = campSize(s);
+  assert.ok(n <= 5, `klein kamp in het eerste tijdperk (${n})`);
+  // ongeveer evenveel speerdragers als barbaren winnen, met hooguit een paar verliezen
+  const r = runFight({ t0: 0, a: combatants({ spear: n }), b: combatants({ barbarian: n }) });
+  assert.ok(r.b.every((u) => u.hp <= 0), 'de barbaren zijn verslagen');
+  assert.ok(r.a.filter((u) => u.hp > 0).length >= n - 2, 'en je verliest bijna niemand');
+  s.terr.camp.raids = 30;
+  assert.ok(campSize(s) <= n + 3, 'overvallen maken het kamp maar een beetje sterker');
 });
 
 test('barbaren vallen meteen aan wie hun kamp nadert, ook een dorpeling', () => {
