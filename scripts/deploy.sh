@@ -9,6 +9,7 @@
 #   3. maakt het Pages-project aan als het nog niet bestaat
 #   4. zet de beheerderssleutel (ADMIN_KEY) als die is meegegeven
 #   5. publiceert de map public/ + functions/ als productieversie
+#   6. zet de meldingen-worker (cron/, elke minuut) online; lukt dat niet, dan gaat de rest gewoon door
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -59,3 +60,11 @@ echo "▶ Publiceren…"
   ${COMMIT_MSG:+--commit-message "$COMMIT_MSG"}
 
 echo "✔ Online: https://$PROJECT.pages.dev"
+
+echo "▶ Meldingen-worker (elke minuut) online zetten…"
+sed -i.bak -E "s/^database_id = \".*\"/database_id = \"$DB_ID\"/" cron/wrangler.toml && rm -f cron/wrangler.toml.bak
+if "${W[@]}" deploy --config cron/wrangler.toml; then
+  echo "  ✔ meldingen worden elke minuut verstuurd"
+else
+  echo "::warning::De meldingen-worker kon niet online. Geef het Cloudflare-token ook het recht 'Account · Workers Scripts · Edit'. Tot dan gaan meldingen enkel uit als iemand het spel open heeft."
+fi

@@ -43,6 +43,8 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
 - **14 gebouwen** met elk meerdere niveaus, **7 soorten troepen** (speerdrager, zwaardvechter, boogschutter,
   verkenner, ruiter, ridder, stormram) met sterktes en zwaktes.
 - **Gevechten** met muren, torens, smidse-bonussen, plunderen, verkennen, rammen die muren en monumenten slopen.
+- **Meldingen op je gsm**: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt) een melding, met in het spel
+  een aftelling waarbij je al kan kiezen: zelf besturen of automatisch.
 - **Android-app**: `public/rijken-van-de-vallei.apk` (te downloaden via de site) opent het spel volledig scherm.
   Opnieuw bouwen met `android/build-apk.sh`.
 - **Troepen kiezen** zoals in Age of Empires: 1 klik = 1 troep, dubbelklik = alle troepen van die soort, ingedrukt
@@ -69,7 +71,9 @@ Dat regelt de GitHub-actie [`.github/workflows/deploy.yml`](.github/workflows/de
 
 **1. Cloudflare-token maken** — op [dash.cloudflare.com](https://dash.cloudflare.com) (gratis account):
 - *My Profile → API Tokens → Create Token → Create Custom Token*
-- Rechten: **Account · Cloudflare Pages · Edit** en **Account · D1 · Edit** → *Continue → Create Token* → kopieer het token.
+- Rechten: **Account · Cloudflare Pages · Edit**, **Account · D1 · Edit** en **Account · Workers Scripts · Edit** → *Continue → Create Token* → kopieer het token.
+  (Het laatste recht is voor de kleine worker die elke minuut de meldingen op je gsm verstuurt. Zonder dat recht werkt
+  het spel gewoon, maar gaan meldingen enkel uit als iemand het spel open heeft.)
 - Je **Account ID** vind je op de startpagina van het dashboard (rechts, of in de adresbalk na `dash.cloudflare.com/`).
 
 **2. Geheimen in GitHub zetten** — in de repository: *Settings → Secrets and variables → Actions → New repository secret*:
