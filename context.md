@@ -170,6 +170,9 @@ registratie; oude spelers kregen een vast willekeurig volk.
     wisselen van doelwit en minder duwen; verdedigers blijven binnen tot er een bres is; geen ×n-labels meer.
     Peilen 0,6 s, bevelen 0,2 s vertraagd, correcties glijden bij. Getest met echte tikken (Playwright, aanraakscherm)
     en twee spelers met 600–900 ms vertraging: beide zien exact hetzelfde, geen sprongen (scripts: taps/duo in scratchpad).
+20. **Oefenslag** op de wereldkaart (kaartje 'Oefenslag'): 30 tegen 30 tegen de computer, als aanvaller (oefendorp) of
+    als verdediger (eigen stad), zonder gevolgen. Gevraagd door de gebruiker om te testen zonder te marcheren.
+    Fout opgelost: puin van een muur op een tegel met negatieve coördinaten brak het tekenen van de rest van het beeld.
 
 ## 8. Bekende beperkingen en ideeën
 
