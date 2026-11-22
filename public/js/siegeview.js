@@ -262,7 +262,7 @@ export class SiegeView extends TownView {
 
   drawRubble(ctx, x, y, seed, s, age, tower = false) {
     const c = toWorld(x, y);
-    let r = (seed * 9301 + 49297) % 233280;
+    let r = (((Math.floor(seed) * 9301 + 49297) % 233280) + 233280) % 233280; // ook voor negatieve tegels positief
     const R = () => { r = (r * 9301 + 49297) % 233280; return r / 233280; };
     const stone = (this.bv.state.wallL || 1) >= 3 || tower;
     for (let i = 0; i < 9; i++) {
