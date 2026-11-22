@@ -743,3 +743,39 @@ test('een oude, volledig ommuurde stad zonder poort krijgt er automatisch een', 
   assert.equal((s.gates || []).length, 1, 'een poort');
   assert.equal(wallEnclosed(s), true, 'en nog steeds dicht');
 });
+
+// ---------- meldingen op je gsm (web push) ----------
+import { encryptPayload, vapidHeader, validPushEndpoint, b64u, unb64u } from '../functions/lib/push.js';
+
+test('meldingen: enkel echte meldingsdiensten, geldige VAPID-handtekening, versleutelde inhoud', async () => {
+  assert.ok(validPushEndpoint('https://fcm.googleapis.com/fcm/send/abc'));
+  assert.ok(validPushEndpoint('https://web.push.apple.com/QGs'));
+  assert.ok(!validPushEndpoint('https://evil.example.com/fcm.googleapis.com'));
+  assert.ok(!validPushEndpoint('http://fcm.googleapis.com/x'));
+  const subtle = crypto.subtle;
+  // VAPID: handtekening klopt met de publieke sleutel
+  const kp = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const keys = { pub: b64u(await subtle.exportKey('raw', kp.publicKey)), priv: await subtle.exportKey('jwk', kp.privateKey) };
+  const h = await vapidHeader(keys, 'https://fcm.googleapis.com/fcm/send/abc', 1000);
+  const [, jwt, k] = h.match(/^vapid t=([^,]+), k=(.+)$/);
+  const [a, b, sig] = jwt.split('.');
+  assert.equal(JSON.parse(new TextDecoder().decode(unb64u(b))).aud, 'https://fcm.googleapis.com');
+  const pk = await subtle.importKey('raw', unb64u(k), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+  assert.ok(await subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pk, unb64u(sig), new TextEncoder().encode(`${a}.${b}`)));
+  // versleuteling (RFC 8291): het 'toestel' kan het terug ontsleutelen
+  const ua = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const uaPub = new Uint8Array(await subtle.exportKey('raw', ua.publicKey));
+  const auth = crypto.getRandomValues(new Uint8Array(16));
+  const body = await encryptPayload({ p256dh: b64u(uaPub), auth: b64u(auth) }, { title: 'Je leger komt over 2:00 aan' });
+  const salt = body.slice(0, 16); const idlen = body[20]; const asPub = body.slice(21, 21 + idlen); const ct = body.slice(21 + idlen);
+  const asKey = await subtle.importKey('raw', asPub, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const shared = new Uint8Array(await subtle.deriveBits({ name: 'ECDH', public: asKey }, ua.privateKey, 256));
+  const hk = async (s, ikm, info, n) => new Uint8Array(await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: s, info }, await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']), n * 8));
+  const te = new TextEncoder();
+  const ikm = await hk(auth, shared, new Uint8Array([...te.encode('WebPush: info\0'), ...uaPub, ...asPub]), 32);
+  const cek = await hk(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hk(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
+  const plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce }, await subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']), ct));
+  assert.equal(plain[plain.length - 1], 2, 'laatste blok');
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(plain.slice(0, -1))), { title: 'Je leger komt over 2:00 aan' });
+});

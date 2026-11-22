@@ -151,7 +151,7 @@ async function sendBack(db, m, units, res, t) {
 async function resolveMarch(db, world, m, now = m.arrive_at) {
   const t = m.arrive_at;
   // aanval en iemand is online: eerst kiezen tussen zelf besturen of automatisch
-  if (m.status === 'out' && m.kind === 'attack' && await maybeOfferBattle(db, m, now)) return;
+  if (m.status === 'out' && m.kind === 'attack' && await maybeOfferBattle(db, world, m, now)) return;
   // vangnet: een slag die nooit afgerond werd, wordt alsnog automatisch uitgerekend
   if (m.status === 'battle') {
     await db.prepare("UPDATE battles SET status = 'done', version = version + 1, updated_at = ? WHERE march_id = ? AND status != 'done'").bind(now, m.id).run();
@@ -425,7 +425,7 @@ const ONLINE_MS = 90000;
 const isOnline = (row, now) => !!row && row.last_seen > now - ONLINE_MS;
 
 // Aanval komt aan: als de aanvaller of verdediger online is, krijgen ze even de keuze.
-async function maybeOfferBattle(db, m, now) {
+async function maybeOfferBattle(db, world, m, now) {
   const att = await db.prepare('SELECT last_seen FROM players WHERE id = ?').bind(m.player_id).first();
   let defPlayer = null; let defOn = false; let title = 'Roverskamp';
   if (m.target_kind === 'town') {
@@ -436,15 +436,24 @@ async function maybeOfferBattle(db, m, now) {
     const c = await db.prepare('SELECT level FROM camps WHERE id = ?').bind(m.target_id).first();
     title = `Roverskamp (niveau ${c ? c.level : '?'})`;
   }
-  if (!isOnline(att, now) && !defOn) return false;
+  const attOn = isOnline(att, now);
+  if (!attOn && !defOn) return false;
   if (now - m.arrive_at > ONLINE_MS) return false; // al lang aangekomen: gewoon automatisch
-  await db.prepare(
-    `INSERT INTO battles (march_id, att_player, def_player, target_kind, target_id, title, status, choose_until, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'choose', ?, ?, ?)`,
-  ).bind(m.id, m.player_id, defPlayer, m.target_kind, m.target_id, title, now + FB.chooseMs, now, now).run();
+  // vooraf gekozen (tijdens de aftelling): automatisch en de verdediger is er niet → meteen uitrekenen
+  const pref = attOn && (m.pref_mode === 'manual' || m.pref_mode === 'auto') ? m.pref_mode : null;
+  if (pref === 'auto' && !defOn) return false;
+  const ins = await db.prepare(
+    `INSERT INTO battles (march_id, att_player, def_player, target_kind, target_id, title, status, choose_until, att_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'choose', ?, ?, ?, ?)`,
+  ).bind(m.id, m.player_id, defPlayer, m.target_kind, m.target_id, title, now + FB.chooseMs, pref, now, now).run();
   // het leger wacht op het slagveld; lukt het afronden nooit, dan neemt processDue het later over
   await db.prepare("UPDATE marches SET status = 'battle', lock_until = ? WHERE id = ?")
     .bind(now + FB.chooseMs + FB.maxMs + 600000, m.id).run();
+  // al gekozen voor zelf besturen en niemand anders hoeft te kiezen: de slag begint meteen
+  if (pref === 'manual' && !defOn) {
+    const b = await loadBattle(db, ins.meta.last_row_id);
+    if (b) await startBattle(db, world, b, now);
+  }
   return true;
 }
 

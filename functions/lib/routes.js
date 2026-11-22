@@ -1,4 +1,5 @@
 import { json, readJson, int, wrapDb, GameError } from './http.js';
+import { vapidKeys, validPushEndpoint, notifyDue, notifyPlayer } from './push.js';
 import {
   hashPassword, newSalt, safeEqual, createSession, sessionCookie, clearCookie, getSessionPlayer,
   destroySession, validateName, validatePassword,
@@ -48,7 +49,11 @@ export async function handle(context) {
         await db.prepare('UPDATE players SET last_seen = ? WHERE id = ?').bind(now, ctx.player.id).run();
       }
     }
-    if (ctx.world && r.process !== false) await processDue(db, ctx.world, now);
+    if (ctx.world && r.process !== false) {
+      await processDue(db, ctx.world, now);
+      // meldingen 'leger komt bijna aan' (de cron-worker doet dit elke minuut; dit is een vangnet)
+      if (context.waitUntil) context.waitUntil(notifyDue(wrapDb(env.DB), now, 2).catch((e) => console.error('notify', e && e.message)));
+    }
     if (r.active) {
       const phase = phaseOf(ctx.world, now);
       if (phase === 'lobby') throw new GameError('Het spel is nog niet begonnen.');
@@ -181,7 +186,7 @@ route('GET', '/state', { auth: true }, async (ctx) => {
       to: { kind: m.target_kind, id: m.target_id, name: m.to_name, x: m.to_x, y: m.to_y },
       targetTeam: m.target_team, teamId: m.team_id,
       units: own ? JSON.parse(m.units) : null, res: own ? JSON.parse(m.res) : null,
-      departAt: m.depart_at, arriveAt: m.arrive_at,
+      departAt: m.depart_at, arriveAt: m.arrive_at, pref: m.player_id === player.id ? m.pref_mode || null : null,
     };
   });
   const supportHere = (await db.prepare(
@@ -472,6 +477,51 @@ route('POST', '/recall', { auth: true, active: true }, async (ctx) => {
   return json({ ok: true });
 });
 
+// ---------- meldingen op je gsm ----------
+
+route('GET', '/push/key', { auth: true, process: false }, async ({ db }) => json({ key: (await vapidKeys(db)).pub }));
+
+route('POST', '/push/subscribe', { auth: true, process: false }, async (ctx) => {
+  const { db, player, now } = ctx;
+  const body = await readJson(ctx.request);
+  const ep = String(body.endpoint || '');
+  const keys = body.keys || {};
+  const ok = (v, a, b) => typeof v === 'string' && /^[A-Za-z0-9_-]+$/.test(v) && v.length >= a && v.length <= b;
+  if (!validPushEndpoint(ep) || ep.length > 900 || !ok(keys.p256dh, 80, 100) || !ok(keys.auth, 16, 30)) throw new GameError('Ongeldige inschrijving voor meldingen.');
+  await db.prepare(
+    `INSERT INTO push_subs (player_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET player_id = excluded.player_id, p256dh = excluded.p256dh, auth = excluded.auth`,
+  ).bind(player.id, ep, keys.p256dh, keys.auth, now).run();
+  // hooguit 4 toestellen per speler
+  await db.prepare('DELETE FROM push_subs WHERE player_id = ? AND id NOT IN (SELECT id FROM push_subs WHERE player_id = ? ORDER BY id DESC LIMIT 4)')
+    .bind(player.id, player.id).run();
+  return json({ ok: true });
+});
+
+route('POST', '/push/unsubscribe', { auth: true, process: false }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  await ctx.db.prepare('DELETE FROM push_subs WHERE endpoint = ? AND player_id = ?').bind(String(body.endpoint || ''), ctx.player.id).run();
+  return json({ ok: true });
+});
+
+// proefmelding naar je eigen toestellen
+route('POST', '/push/test', { auth: true, process: false }, async ({ db, player }) => {
+  const sent = await notifyPlayer(db, await vapidKeys(db), player.id, {
+    title: 'Meldingen staan aan', body: 'Je krijgt een melding ±2 minuten voor je leger aankomt.', tag: 'test', url: '/',
+  }, 300);
+  return json({ ok: true, sent });
+});
+
+// vooraf kiezen voor een aanval die nog onderweg is: zelf besturen of automatisch
+route('POST', '/march/mode', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  const mode = body.mode === 'manual' || body.mode === 'auto' ? body.mode : null;
+  const r = await ctx.db.prepare("UPDATE marches SET pref_mode = ? WHERE id = ? AND player_id = ? AND status = 'out' AND kind = 'attack'")
+    .bind(mode, int(body.id), ctx.player.id).run();
+  if (!r.meta.changes) throw new GameError('Dit leger is al aangekomen.');
+  return json({ ok: true, mode });
+});
+
 // ---------- veldslagen (zelf besturen of automatisch) ----------
 
 route('GET', '/battle', { auth: true, process: false }, async ({ db, world, player, now, url }) => {
@@ -565,7 +615,7 @@ route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const size = WORLD_SIZE;
   const terrain = generateTerrain(seed, size);
   const camps = generateCamps(seed, size, terrain, CAMP_EXTRA);
-  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles']
+  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs']
     .map((tb) => db.prepare(`DELETE FROM ${tb}`));
   stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(seed, size, w.start_at, w.prep_ms, w.war_ms, w.speed, w.team_size, w.join_code, now));
