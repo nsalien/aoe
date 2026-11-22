@@ -67,7 +67,7 @@ registratie; oude spelers kregen een vast willekeurig volk.
 **Muren en poorten**
 - Stadsmuur-gebouw (niveau 1–5) bepaalt de sterkte; muren plaats je zelf tegel per tegel (`s.walls`).
   Niveau 1–2 houten palissade, vanaf 3 steen.
-- **Poorten** (`s.gates`, max. 4, 80 hout + 40 steen) in een recht stuk muur. Een stad helemaal dichtmaken zonder poort
+- **Poorten** (`s.gates`, max. 4, 80 hout + 40 steen), **2 tegels breed**, in een recht stuk muur. Een stad helemaal dichtmaken zonder poort
   mag niet. In een volledig ommuurde stad gaan troepen en dorpelingen **enkel via een poort** naar binnen/buiten;
   de deuren gaan open als er iemand door wil. Een gesloten ring verdedigt volledig, een open muur maar 30%.
 - **Wachttorens** (tijdperk 2, max. 4, niveau 1–3): schieten in een veldslag op de dichtstbijzijnde vijand;
@@ -173,6 +173,8 @@ registratie; oude spelers kregen een vast willekeurig volk.
 20. **Oefenslag** op de wereldkaart (kaartje 'Oefenslag'): 30 tegen 30 tegen de computer, als aanvaller (oefendorp) of
     als verdediger (eigen stad), zonder gevolgen. Gevraagd door de gebruiker om te testen zonder te marcheren.
     Fout opgelost: puin van een muur op een tegel met negatieve coördinaten brak het tekenen van de rest van het beeld.
+21. Poorten 2 tegels breed (gevraagd door de gebruiker); oude poorten automatisch verbreed. In een belegering valt een
+    poort in zijn geheel. Oefenslag: de computer krijgt een kleur die duidelijk verschilt van de speler.
 
 ## 8. Bekende beperkingen en ideeën
 

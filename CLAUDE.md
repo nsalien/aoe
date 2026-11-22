@@ -53,7 +53,9 @@ Daarom:
   Selecteren in de stad (`town.js`): 1 klik = 1 troep (`unit`), dubbelklik = alle van die soort (`kind`), ingedrukt houden
   = het hele leger (`army`, via `Camera.onLongPress` in `iso.js`).
 - Muren en poorten: `s.walls` en `s.gates` (tegelnummers). `wallSet()` = muren + poorten (een dichte poort sluit de stad).
-  `insideSet()` = de binnenkant van een volledig ommuurde stad. Een poort staat in een recht stuk muur (`gateAxis`).
+  `insideSet()` = de binnenkant van een volledig ommuurde stad. Een poort is **2 tegels breed** (twee aangrenzende tegels in
+  `s.gates`; `gateList()` groepeert ze, `gateSpan()` kiest bij een tik de 2 tegels) en staat in een recht stuk muur.
+  Oude poorten van 1 tegel worden in `ensureTerritory()` gratis verbreed; afbreken gaat altijd per hele poort.
   Een stad helemaal dichtmaken zonder poort mag niet; oude dichte steden krijgen in `ensureTerritory()` een poort.
   Groepen en dorpelingen lopen via `gateRoute()` door de poort (tussenstops in `g.via`, `fieldArrive` loopt verder).
   Gebouwen afbreken: `doDemolish` (deel van de kosten terug, zie `DEMOLISH` in `rules.js`).
