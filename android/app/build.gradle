@@ -1,0 +1,39 @@
+// De app is een 'Trusted Web Activity': ze opent https://rijken-van-de-vallei.pages.dev volledig scherm in Chrome.
+// Updates van het spel komen dus vanzelf mee; de app zelf moet je enkel opnieuw bouwen als je icoon/naam verandert.
+plugins { id 'com.android.application' }
+
+def ks = System.getenv('RVDV_KEYSTORE') ?: "${rootDir}/keystore/rijken.jks"
+
+android {
+    namespace 'dev.pages.rijkenvandevallei'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'dev.pages.rijkenvandevallei'
+        minSdk 21
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+    signingConfigs {
+        release {
+            storeFile file(ks)
+            storePassword System.getenv('RVDV_KEYSTORE_PASS') ?: 'rijken-van-de-vallei'
+            keyAlias 'rijken'
+            keyPassword System.getenv('RVDV_KEYSTORE_PASS') ?: 'rijken-van-de-vallei'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}
