@@ -115,7 +115,7 @@ export class SiegeView extends TownView {
       for (const u of st.units) {
         if (u.s !== 1 || u.hp <= 0 || !mobile(u)) continue;
         const p = this.bv.pos(u);
-        if (Math.abs(p.x - seg.i - 0.5) < 1.3 && Math.abs(p.y - seg.j - 0.5) < 1.3) { near = true; break; }
+        if (Math.abs(p.x - seg.cx) < 1.3 + (seg.w - 1) * 0.5 && Math.abs(p.y - seg.cy) < 1.3 + (seg.w - 1) * 0.5) { near = true; break; }
       }
     }
     const tnow = performance.now();

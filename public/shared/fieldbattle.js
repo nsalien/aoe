@@ -509,7 +509,11 @@ function deployDefense(st, nv) {
     const gates = alive.filter(({ w }) => w.g).sort((a, b) => proj(st, b.w.i + 0.5, b.w.j + 0.5) - proj(st, a.w.i + 0.5, a.w.j + 0.5) || a.k - b.k);
     const spots = [];
     const top = proj(st, wallCells[0].w.i + 0.5, wallCells[0].w.j + 0.5);
-    for (const { w } of gates) if (proj(st, w.i + 0.5, w.j + 0.5) >= top - 4 && spots.length < 2) spots.push(behind(st, nv, w));
+    for (const { w } of gates) {
+      if (proj(st, w.i + 0.5, w.j + 0.5) < top - 4 || spots.length >= 2) continue;
+      const b = behind(st, nv, w);
+      if (!spots.some((p) => SQ(p.x - b.x) + SQ(p.y - b.y) < 9)) spots.push(b);
+    }
     if (!spots.length) spots.push(behind(st, nv, wallCells[0].w));
     const per = Math.ceil(inf.length / spots.length);
     spots.forEach((sp, n) => {
@@ -831,6 +835,8 @@ function hit(st, nv, u, e, bt) {
 
 function breakWall(st, w, bt) {
   w.hp = 0; w.died = bt;
+  // een poort valt in zijn geheel (2 tegels breed)
+  if (w.g) for (const o of st.walls) if (o.g && o.hp > 0 && Math.abs(o.i - w.i) + Math.abs(o.j - w.j) === 1) { o.hp = 0; o.died = bt; }
   st.nv++;
   const nv = nav(st);
   void nv;

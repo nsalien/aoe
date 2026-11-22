@@ -7,7 +7,7 @@ import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, 
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, gateRoute,
+  gateAxis, checkPlaceGate, gateRoute, gateList, gateSpan,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -1039,9 +1039,10 @@ export class TownView {
       const end = (e ? 1 : 0) + (w ? 1 : 0) + (n ? 1 : 0) + (so ? 1 : 0) <= 1;
       if (corner || end || (i + j) % 4 === 0) segs.push({ x0: cx - pw, y0: cy - pw, x1: cx + pw, y1: cy + pw, tower: true, gate: (corner || end) && (i * 7 + j * 3) % 3 === 0 });
     }
-    for (const idx of gl) {
-      const { i, j } = tileOf(idx);
-      segs.push({ gateTile: true, idx, i, j, ax: gateAxis(set, i, j) || 'x', x0: i + 0.1, y0: j + 0.1, x1: i + 0.9, y1: j + 0.9 });
+    // poorten (2 tegels breed; oude poorten 1 tegel): één stuk met een toren aan elke kant
+    for (const g of gateList(s)) {
+      const [a, b] = [g.tiles[0], g.tiles[g.tiles.length - 1]];
+      segs.push({ gateTile: true, idx: g.idx, i: a[0], j: a[1], ax: g.ax, cx: g.cx, cy: g.cy, w: g.w, x0: a[0] + 0.1, y0: a[1] + 0.1, x1: b[0] + 0.9, y1: b[1] + 0.9 });
     }
     this.wallCache = { key, segs };
     return segs;
@@ -1050,7 +1051,7 @@ export class TownView {
   // poort: open zolang er troepen vlakbij zijn (zacht open en dicht)
   gateOpenness(seg, now) {
     if (!this.gateOpen) this.gateOpen = new Map();
-    const cx = seg.i + 0.5; const cy = seg.j + 0.5;
+    const cx = seg.cx; const cy = seg.cy;
     let near = false;
     for (const g of this.state.field || []) {
       const p = groupPos(g, now);
@@ -1068,8 +1069,9 @@ export class TownView {
 
   drawGate(ctx, seg, level) {
     const stone = level >= 3;
-    const cx = seg.i + 0.5; const cy = seg.j + 0.5;
-    const gt = 0.34; const tw = 0.15;
+    const cx = seg.cx; const cy = seg.cy;
+    const wide = (seg.w || 1) >= 2;
+    const gt = wide ? 0.84 : 0.34; const tw = wide ? 0.17 : 0.15; // afstand van het midden tot een poorttoren
     const along = seg.ax === 'x'; // muur loopt langs x: torens links en rechts, doorgang langs y
     const th = stone ? 36 + level * 3 : 30;
     const hDoor = stone ? 20 : 18;
@@ -1909,8 +1911,12 @@ export class TownView {
     const pulse = 0.55 + Math.sin(t * 0.006) * 0.25;
     ctx.save();
     ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-    ctx.fillStyle = `rgba(255,215,90,${pulse * 0.45})`; ctx.fillRect(w.i - 0.08, w.j - 0.08, 1.16, 1.16);
-    ctx.strokeStyle = `rgba(255,232,140,${pulse + 0.25})`; ctx.lineWidth = 0.07; ctx.strokeRect(w.i - 0.08, w.j - 0.08, 1.16, 1.16);
+    // een poort: beide tegels
+    const g = w.gate ? gateList(this.state).find((x) => x.tiles.some(([a, b]) => a === w.i && b === w.j)) : null;
+    const t0 = g ? g.tiles[0] : [w.i, w.j]; const t1 = g ? g.tiles[g.tiles.length - 1] : [w.i, w.j];
+    const bw = t1[0] - t0[0] + 1.16; const bh = t1[1] - t0[1] + 1.16;
+    ctx.fillStyle = `rgba(255,215,90,${pulse * 0.45})`; ctx.fillRect(t0[0] - 0.08, t0[1] - 0.08, bw, bh);
+    ctx.strokeStyle = `rgba(255,232,140,${pulse + 0.25})`; ctx.lineWidth = 0.07; ctx.strokeRect(t0[0] - 0.08, t0[1] - 0.08, bw, bh);
     ctx.restore();
   }
 
@@ -1949,10 +1955,11 @@ export class TownView {
     if (!h) return;
     const i = Math.floor(h.gx); const j = Math.floor(h.gy);
     const err = checkPlaceGate(this.state, i, j);
+    const span = !err ? gateSpan(this.state, i, j) : null;
     ctx.save();
     ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
     ctx.fillStyle = err ? 'rgba(230,90,70,0.45)' : 'rgba(120,230,110,0.5)';
-    ctx.fillRect(i + 0.06, j + 0.06, 0.88, 0.88);
+    for (const [a, b] of span ? span.tiles : [[i, j]]) ctx.fillRect(a + 0.06, b + 0.06, 0.88, 0.88);
     ctx.restore();
     const p = toWorld(i + 0.5, j + 0.5);
     const txt = err && !/grondstoffen/.test(err) ? 'Hier kan geen poort' : err ? 'Niet genoeg grondstoffen' : 'Poort hier maken';
