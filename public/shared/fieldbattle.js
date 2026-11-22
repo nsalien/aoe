@@ -22,10 +22,12 @@ export const FB = {
   staleMs: 30000, // niemand kijkt nog mee: de server rekent de rest automatisch uit
   maxTicksPerCall: 40, // hooguit 4 s slag per verzoek (CPU-limiet van de server)
   delay: 700, // de server rekent zo ver achter op de klok: bevelen komen zo op tijd aan
+  lead: 2, // een bevel gaat zoveel tikken na de tik in (de tegenstander hoort het zo meestal vóór het gebeurt)
+  pollMs: 600, // zo vaak vraagt de browser tijdens een slag de stand op
   maxPerSide: 64, // grote legers: één figuur staat dan voor meerdere soldaten
   squad: 8, // figuren per eenheid (kaartje onderaan)
-  margin: 8, // zoveel tegels rond de stad horen bij het slagveld
-  zone: 5, // diepte van de opstelplaats van de aanvaller
+  margin: 11, // zoveel tegels rond de stad horen bij het slagveld
+  zone: 9, // hooguit zo diep is de opstelplaats van de aanvaller (en minstens 4 tegels van de stad)
   melee: 0.85, ranged: 4.4, siegeRange: 5.6, wallRange: 1.6,
   aggro: 4, leash: 6.5, // wie op zijn plek staat, valt vijanden in de buurt aan en loopt niet te ver weg
   pace: 0.35, // gevechten trager dan de ruwe schade: een slag duurt minuten, geen seconden
@@ -290,13 +292,30 @@ export function createBattle(o) {
   st.dir = { x: R3(dx), y: R3(dy) };
   const nv = nav(st);
   // opstelplaats van de aanvaller: de strook aan de kant waar hij vandaan komt
-  let pmax = -Infinity;
+  let pmax = -Infinity; let edge = -Infinity;
   for (let c = 0; c < nv.N; c++) {
-    if (!nv.p0[c] || inside(nv, c)) continue;
     const { i, j } = cellXY(st, c);
-    pmax = Math.max(pmax, proj(st, i + 0.5, j + 0.5));
+    const pr = proj(st, i + 0.5, j + 0.5);
+    const ch = st.grid[c];
+    if (ch === 'w' || ch === 'g' || ch === 'b' || ch === 'x' || inside(nv, c)) edge = Math.max(edge, pr);
+    if (nv.p0[c] && !inside(nv, c)) pmax = Math.max(pmax, pr);
   }
-  st.zmin = R3(pmax - FB.zone);
+  // een brede strook aan de kant van de aanvaller, niet tegen de muur aan
+  st.zmin = R3(Math.min(pmax - 3, Math.max(pmax - FB.zone, edge + 4)));
+  // het leger kapte het bos tussen zijn kamp en de stad: een open veld voor de muur aan die kant
+  let cut = '';
+  for (let c = 0; c < nv.N; c++) {
+    const ch = st.grid[c];
+    if (ch === 'f') {
+      const { i, j } = cellXY(st, c);
+      const x = i + 0.5 - st.plaza.x; const y = j + 0.5 - st.plaza.y;
+      const along = x * st.dir.x + y * st.dir.y; const lat = Math.abs(-x * st.dir.y + y * st.dir.x);
+      if (along > edge - 1 && lat <= 9 + Math.max(0, along - edge) * 0.4) { cut += '.'; continue; }
+    }
+    cut += ch;
+  }
+  st.grid = cut;
+  NAV.delete(st);
   // troepen: grote legers krijgen figuren die voor meerdere soldaten staan
   const total = (u) => Object.values(u || {}).reduce((a, b) => a + (b || 0), 0);
   const sA = Math.max(1, Math.ceil(total(o.att) / FB.maxPerSide));
@@ -324,8 +343,8 @@ export function createBattle(o) {
     st.units.push({ id: st.uid++, s: 1, k: 'tower', b: tw.id, L, x: tw.x, y: tw.y, hp: TOWER.hp[L], hp0: TOWER.hp[L], n: 1, cd: 600, st: 'hold', tg: null, tw: -1, at: -1 });
   }
   delete st.towerDefs;
-  deployAttack(st, nv);
-  deployDefense(st, nv);
+  deployAttack(st, nav(st));
+  deployDefense(st, nav(st));
   return st;
 }
 
@@ -567,7 +586,7 @@ export function giveOrder(st, side, ids, o) {
   moveGroup(st, nv, mine, Math.min(st.box.x0 + st.box.w - 0.2, Math.max(st.box.x0 + 0.2, o.x)), Math.min(st.box.y0 + st.box.h - 0.2, Math.max(st.box.y0 + 0.2, o.y)));
 }
 
-function toHold(u) { u.st = 'hold'; u.hx = u.x; u.hy = u.y; u.tg = null; u.tw = -1; u.path = null; u.np = 0; u.gx = null; u.gy = null; }
+function toHold(u) { u.st = 'hold'; u.hx = u.x; u.hy = u.y; u.tg = null; u.tw = -1; u.path = null; u.np = 0; u.gx = null; u.gy = null; u.pace = null; }
 
 // plekken in formatie rond (x, y), naar richting d; op een muurstuk: langs de muur
 function formation(st, nv, list, c0, x, y, d0) {
@@ -616,11 +635,14 @@ function moveGroup(st, nv, list, x, y) {
   const slots = formation(st, nv, list, c0, x, y, side ? st.dir : { x: -st.dir.x, y: -st.dir.y });
   const lead = [...list].sort((a, b) => (SQ(a.x - c0.x) + SQ(a.y - c0.y)) - (SQ(b.x - c0.x) + SQ(b.y - c0.y)) || a.id - b.id)[0];
   const lp = findPath(st, nv, side, lead.k, lead.x, lead.y, x, y);
+  // samen op pad: iedereen in het tempo van de traagste, zodat de formatie bij elkaar blijft
+  const kinds = new Set(list.map((u) => u.k));
+  const pace = kinds.size > 1 ? Math.min(...list.map((u) => speedOf(u.k))) : null;
   for (const { u, x: sx0, y: sy0 } of slots) {
     let sx = sx0; let sy = sy0;
     const sc = cellOf(st, sx, sy);
     if (!standable(nv, side, u.k, sc)) { const c = nearestStand(st, nv, side, u.k, sx, sy, null, 4); const q = cellXY(st, c); sx = q.i + 0.5; sy = q.j + 0.5; }
-    u.st = 'move'; u.tg = null; u.tw = -1; u.gx = R3(sx); u.gy = R3(sy); u.stk = 0; u.blk = false;
+    u.st = 'move'; u.tg = null; u.tw = -1; u.gx = R3(sx); u.gy = R3(sy); u.stk = 0; u.blk = false; u.pace = pace;
     if (lp && lp.blk) {
       // het doel is niet bereikbaar (achter de muur): zo dicht mogelijk, daarna een bres slaan
       u.path = joinPath(st, nv, u, lp.pts); u.blk = true; u.np = u.path ? 0 : 1;
@@ -705,9 +727,12 @@ function canHit(st, nv, u, e, uc) {
 
 function pickEnemy(st, nv, u, alive, maxD, from = u) {
   const uc = cellOf(st, u.x, u.y);
+  // voetvolk van de verdediger dat binnen de muren op zijn plek staat, gaat niet naar buiten (enkel op bevel of bij een bres)
+  const stayIn = u.s === 1 && u.st === 'hold' && st.enc && meleeK(u.k) && uc >= 0 && (inside(nv, uc) || nv.p1[uc] === 4);
   let best = null; let bd = Infinity;
   for (const e of alive) {
     if (e.s === u.s || e.hp <= 0) continue;
+    if (stayIn) { const ec = cellOf(st, e.x, e.y); if (ec < 0 || !inside(nv, ec)) continue; }
     const d = Math.sqrt(SQ(e.x - from.x) + SQ(e.y - from.y));
     if (d > maxD) continue;
     const score = d + (e.k === 'tower' ? 2.5 : 0);
@@ -742,7 +767,7 @@ function walk(st, nv, u, tx, ty, stop) {
   if (d <= stop) return true;
   const c = cellOf(st, u.x, u.y);
   const p = u.s ? nv.p1 : nv.p0;
-  const sp = speedOf(u.k) * (FB.tick / 1000) * (c >= 0 && p[c] === 2 ? FB.forestSlow : 1);
+  const sp = (u.pace && u.st === 'move' ? Math.min(u.pace, speedOf(u.k)) : speedOf(u.k)) * (FB.tick / 1000) * (c >= 0 && p[c] === 2 ? FB.forestSlow : 1);
   const s = Math.min(d, sp);
   const nx = u.x + (dx / d) * s; const ny = u.y + (dy / d) * s;
   if (tryMove(st, nv, u, nx, ny) || tryMove(st, nv, u, nx, u.y) || tryMove(st, nv, u, u.x, ny)) return d - s <= stop;
@@ -863,10 +888,12 @@ function actUnit(st, nv, u, alive, byId, bt) {
   }
   if (u.st === 'charge') {
     let e = u.tg != null ? byId.get(u.tg) : null;
-    if (!e || e.hp <= 0 || (st.n + u.id) % 5 === 0) {
+    if (!e || e.hp <= 0 || (st.n + u.id) % 8 === 0) {
+      // niet voortdurend van doelwit wisselen: enkel als er een duidelijk dichtere vijand is
       const ne = pickEnemy(st, nv, u, alive, Infinity);
-      if (ne) e = ne;
-      else if (e && e.hp > 0 && !canHit(st, nv, u, e, uc)) e = null;
+      if (!e || e.hp <= 0) e = ne;
+      else if (ne && ne !== e && dist(u, ne) < dist(u, e) - 1.5) e = ne;
+      else if (!canHit(st, nv, u, e, uc)) e = ne;
     }
     if (e && e.hp > 0) {
       u.tg = e.id;
@@ -896,7 +923,7 @@ function actUnit(st, nv, u, alive, byId, bt) {
     if (r === 'blocked') u.tg = null;
     return;
   }
-  if (SQ(u.x - home.x) + SQ(u.y - home.y) > 0.09) approach(st, nv, u, home.x, home.y, 0.08);
+  if (u.back || SQ(u.x - home.x) + SQ(u.y - home.y) > 0.36) { u.back = approach(st, nv, u, home.x, home.y, 0.12) !== 'there'; }
 }
 
 function fightUnit(st, nv, u, e, leash, bt) {
@@ -1066,9 +1093,11 @@ function separate(st, nv, alive) {
       if (dx > 0.42) break;
       const dy = b.y - a.y; const d2 = dx * dx + dy * dy;
       if (d2 > 0.1764 || d2 === 0) continue;
-      const d = Math.sqrt(d2); const push = (0.42 - d) * 0.22;
+      const d = Math.sqrt(d2); const push = (0.42 - d) * 0.16;
       const ox = (dx / d) * push; const oy = (dy / d) * push;
-      shove(st, nv, a, -ox, -oy); shove(st, nv, b, ox, oy);
+      // wie aan het vechten is, laat zich nauwelijks wegduwen (rustiger linies)
+      const fa = a.at >= 0 && st.n * FB.tick - a.at < 1600 ? 0.3 : 1; const fb = b.at >= 0 && st.n * FB.tick - b.at < 1600 ? 0.3 : 1;
+      shove(st, nv, a, -ox * fa, -oy * fa); shove(st, nv, b, ox * fb, oy * fb);
     }
   }
 }
