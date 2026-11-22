@@ -611,6 +611,7 @@ export function worldPanelHtml(app, sel) {
     const loot = campLoot(c.level);
     return `<div class="ph"><div><h2>Roverskamp</h2><div class="lvl">Niveau ${c.level} · positie (${c.x}, ${c.y}) · ${dist.toFixed(1)} tegels</div></div></div>
       <p class="desc">Rovers plunderen de vallei. Versla ze voor buit en punten — ook tijdens de vredestijd! Na een aanval herstelt het kamp zich na een tijdje.</p>
+      ${targetMarchesHtml(app, 'camp', c.id)}
       ${c.plundered ? `<div class="card"><b>Verlaten.</b> De rovers keren terug over ${timer(c.refreshAt)}.</div>` : ''}
       <div class="card"><h3>Geschatte bezetting (vol kamp)</h3><div class="unitgrid">${Object.keys(u).map((k) => `<div class="ucell"><img src="${unitThumb(k, '#333333')}" alt=""><b>${u[k]}</b>${UNITS[k].name}</div>`).join('')}</div>
       <p class="small muted" style="margin:8px 0 2px">Buit (vol kamp):</p>${costHtml(loot)}</div>
@@ -629,7 +630,8 @@ export function worldPanelHtml(app, sel) {
     <div class="card"><dl class="kv"><dt>Tijdperk</dt><dd>${AGES[t.age].short}</dd><dt>Punten</dt><dd>${fmt(t.score)}</dd>
     <dt>Gebouwen</dt><dd>${t.buildings}</dd><dt>Muur</dt><dd>${t.wall ? `niveau ${t.wall}` : 'geen'}</dd>
     ${t.monument ? `<dt>Monument</dt><dd>niveau ${t.monument}</dd>` : ''}
-    <dt>Positie</dt><dd>(${t.x}, ${t.y})</dd>${mine ? '' : `<dt>Afstand</dt><dd>${dist.toFixed(1)} tegels</dd>`}</dl></div>`;
+    <dt>Positie</dt><dd>(${t.x}, ${t.y})</dd>${mine ? '' : `<dt>Afstand</dt><dd>${dist.toFixed(1)} tegels</dd>`}</dl></div>
+    ${targetMarchesHtml(app, 'town', t.id)}`;
   if (mine) {
     html += `<div class="actions"><button class="btn primary" data-action="view" data-view="town">${icon('castle')} Naar mijn stad</button></div>`;
   } else if (ally) {
@@ -651,17 +653,35 @@ export function marchesHtml(app) {
   const d = app.data;
   const ms = [...d.marches].sort((a, b) => a.arriveAt - b.arriveAt);
   if (!ms.length) return '<p class="empty">Er zijn geen legers onderweg.</p>';
-  return ms.map((m) => {
-    const [ic, nm] = KIND[m.kind] || ['•', m.kind];
-    const hostile = !m.ally;
-    const back = m.status === 'back';
-    const label = hostile ? `<b style="color:var(--red)">${nm} van ${esc(m.player)}</b> op ${esc(m.to.name)}`
-      : back ? `${m.own ? '' : `${esc(m.player)}: `}Terug van ${esc(m.to.name)}` : `${m.own ? '' : `${esc(m.player)}: `}${nm} → ${esc(m.to.name)}`;
-    const fight = m.status === 'battle' ? ` <b style="color:var(--red)">· veldslag bezig</b>` : '';
-    return `<div class="qitem"><span class="qicon">${icon(back ? 'home' : ic)}</span>
-      <div><div class="nm">${label}${fight}</div><div class="small muted">${marchCargo(m)}</div>
-      ${bar(m.departAt, m.arriveAt)}</div>${timer(m.arriveAt)}</div>`;
-  }).join('');
+  return ms.map(marchItem).join('');
+}
+
+function marchItem(m) {
+  const [ic, nm] = KIND[m.kind] || ['•', m.kind];
+  const hostile = !m.ally;
+  const back = m.status === 'back';
+  const label = hostile ? `<b style="color:var(--red)">${nm} van ${esc(m.player)}</b> op ${esc(m.to.name)}`
+    : back ? `${m.own ? '' : `${esc(m.player)}: `}Terug van ${esc(m.to.name)}` : `${m.own ? '' : `${esc(m.player)}: `}${nm} → ${esc(m.to.name)}`;
+  const fight = m.status === 'battle' ? ` <b style="color:var(--red)">· veldslag bezig</b>` : '';
+  return `<div class="qitem"><span class="qicon">${icon(back ? 'home' : ic)}</span>
+    <div><div class="nm">${label}${fight}</div><div class="small muted">${marchCargo(m)}</div>
+    ${bar(m.departAt, m.arriveAt)}</div>${m.status === 'battle' ? '' : timer(m.arriveAt)}</div>`;
+}
+
+// klokuur (en dag als het niet vandaag is), bv. 'om 14:05' of 'ma om 09:30'
+function clockTime(t) {
+  const d = new Date(t);
+  const hm = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+  return new Date().toDateString() === d.toDateString() ? `om ${hm}` : `${d.toLocaleDateString('nl-BE', { weekday: 'short' })} om ${hm}`;
+}
+
+// legers die op weg zijn naar deze stad of dit kamp (je eigen aanvallen, die van bondgenoten en vijandelijke)
+function targetMarchesHtml(app, kind, id) {
+  const ms = app.data.marches.filter((m) => m.to.kind === kind && m.to.id === id && m.status !== 'back').sort((a, b) => a.arriveAt - b.arriveAt);
+  if (!ms.length) return '';
+  const first = ms[0];
+  const head = first.status === 'battle' ? 'Veldslag bezig' : `Aankomst ${clockTime(first.arriveAt - (app.offset || 0))} · over ${timer(first.arriveAt)}`;
+  return `<div class="card march-target"><h3>${icon('flag')} Onderweg hierheen <span class="right">${head}</span></h3>${ms.map(marchItem).join('')}</div>`;
 }
 
 function marchCargo(m) {
