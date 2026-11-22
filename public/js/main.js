@@ -292,6 +292,7 @@ function battleView() {
       openReports: () => openModal('reports'),
       onClose: () => { renderAlert(); setTimeout(refresh, 400); },
     });
+    window.__battle = battle; // handig bij het debuggen in de console
   }
   return battle;
 }

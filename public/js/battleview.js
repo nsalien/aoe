@@ -1,43 +1,26 @@
-// Veldslag die je zelf bestuurt (of bekijkt). De server is de baas over het verloop; de browser rekent tussen
-// twee peilingen exact hetzelfde verder (fieldbattle.js is deterministisch) zodat alles vloeiend beweegt.
-import * as A from './art.js';
-import * as FIG from './figures.js';
-import * as N from './nature.js';
-import { Particles } from './fx.js';
-import { UNITS, TOWER } from '../shared/rules.js';
-import { stepTo, giveOrder, FB } from '../shared/fieldbattle.js';
+// Belegering die je zelf bestuurt (of bekijkt). De server is de baas over het verloop; de browser rekent
+// tussen twee peilingen exact hetzelfde verder (fieldbattle.js is deterministisch) zodat alles vloeiend beweegt.
+// Je eigen bevelen gaan meteen in, met het tijdstip (tik) waarop je tikte; de server voert ze op dezelfde tik uit.
+import { UNITS } from '../shared/rules.js';
+import { stepTo, queueOrder, FB, mobile, aliveN, battleTime, deployLeft, nav, cellOf } from '../shared/fieldbattle.js';
+import { SiegeView, toWorld } from './siegeview.js';
 import { icon } from './icons.js';
 import { setHTML } from './dom.js';
 
-const TAU = Math.PI * 2;
-const TOP = 1.7; // ruimte boven het slagveld voor de stad (in tegels)
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const mmss = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const isCav = (k) => UNITS[k] && UNITS[k].type === 'cav';
-const isRanged = (k) => k === 'tower' || !!(UNITS[k] && UNITS[k].ranged);
-const mobile = (u) => u.k !== 'tower' && u.k !== 'wall';
-const aliveN = (u) => Math.max(0, Math.min(u.n || 1, Math.ceil(u.hp / u.hp0 - 1e-6)));
-
-function facing(ctx, x, dir, fn) {
-  if (dir >= 0) { fn(); return; }
-  ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0);
-  fn();
-  ctx.restore();
-}
-
-function rnd(seed) {
-  let s = seed >>> 0;
-  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-}
+const coarse = () => matchMedia('(pointer: coarse)').matches;
 
 // ---------- keuzevenster: zelf besturen of automatisch ----------
-export function askHtml(b, now, unitThumb) {
+export function askHtml(b, now) {
   const att = b.role === 'att';
+  const camp = b.kind === 'camp';
   const left = Math.max(0, b.chooseUntil - now);
-  const head = att ? `Je leger is aangekomen bij ${esc(b.title)}!` : `${esc(b.title)} wordt aangevallen${b.attName ? ` door ${esc(b.attName)}` : ''}!`;
+  const head = att ? `Je leger staat bij ${esc(b.title)}!` : `${esc(b.title)} wordt aangevallen${b.attName ? ` door ${esc(b.attName)}` : ''}!`;
   const text = att
-    ? 'Bestuur de aanval zelf: kies wie welke vijand aanvalt, spaar je schutters en sloop eerst de torens. Of laat het gevecht automatisch uitrekenen.'
-    : 'Verdedig je stad zelf: stuur je troepen naar de bres, laat je schutters achter de muur en val de rammen aan. Of laat de verdediging haar gang gaan.';
+    ? (camp ? 'Stel je troepen op en val het kamp zelf aan, of laat het gevecht automatisch uitrekenen.'
+      : 'Bestuur de belegering zelf: stel je leger op, ram de poort of sla een bres in de muur en verover het plein. Of laat het gevecht automatisch uitrekenen.')
+    : 'Verdedig je stad zelf: zet je schutters op de muur aan de kant van de aanval en je soldaten achter de poort. Of laat de verdediging haar gang gaan.';
   return `<div class="bt-ask-card" role="dialog" aria-modal="true">
     <div class="bt-ask-crest">${icon('swords')}</div>
     <h2>${head}</h2>
@@ -61,34 +44,32 @@ export class BattleView {
       <div class="bt-bottom"></div><div class="bt-result" hidden></div>`;
     document.body.appendChild(this.root);
     this.cv = this.root.querySelector('canvas');
-    this.ctx = this.cv.getContext('2d');
     this.top = this.root.querySelector('.bt-top');
     this.bottom = this.root.querySelector('.bt-bottom');
     this.hint = this.root.querySelector('.bt-hint');
     this.resultEl = this.root.querySelector('.bt-result');
     this.sel = new Set();
-    this.prev = new Map(); // positie vóór de laatste tik (voor vloeiende beweging)
-    this.disp = new Map();
-    this.dirs = new Map();
-    this.lastHp = new Map();
-    this.particles = new Particles(300);
-    this.cam = { x: FB.W / 2, y: FB.H / 2 };
-    this.bindInput();
-    window.addEventListener('resize', () => { if (!this.root.hidden) this.layout(); });
+    this.targets = new Set();
+    this.prev = new Map(); // positie één tik eerder (voor vloeiende beweging)
+    this.offs = new Map(); // verschil met wat er op het scherm stond toen de server iets anders zei (vervaagt)
+    this.pending = []; // eigen bevelen die de server nog niet bevestigde
+    this.alpha = 0;
+    this.view = new SiegeView(this.cv, this);
+    window.addEventListener('keydown', (e) => this.onKey(e));
     this.root.addEventListener('click', (e) => this.onButton(e));
   }
 
   get open() { return !this.root.hidden; }
+  get side() { return this.b && this.b.role === 'def' ? 1 : 0; }
+  get manual() { return !!this.b && (this.b.role === 'att' ? this.b.attMode : this.b.defMode) === 'manual'; }
 
   show(id, battle = null) {
     if (this.id !== id) {
-      this.id = id; this.b = null; this.state = null; this.sel.clear(); this.prev.clear(); this.disp.clear();
-      this.lastHp.clear(); this.resultShown = false; this.ground = null; this.camSet = false;
-      this.resultEl.hidden = true;
+      this.id = id; this.b = null; this.state = null; this.srv = null; this.sel.clear(); this.prev.clear(); this.offs.clear(); this.pending = [];
+      this.resultShown = false; this.resultEl.hidden = true; this.view.key = null;
     }
     this.root.hidden = false;
     document.body.classList.add('in-battle');
-    this.layout();
     if (battle) this.apply(battle);
     this.poll();
     clearInterval(this.pollTimer);
@@ -116,38 +97,73 @@ export class BattleView {
     } finally { this.polling = false; }
   }
 
-  get side() { return this.b && this.b.role === 'def' ? 1 : 0; }
-  get manual() { return !!this.b && (this.b.role === 'att' ? this.b.attMode : this.b.defMode) === 'manual'; }
-
-  // nieuwe toestand van de server
+  // nieuwe toestand van de server: verder rekenen tot nu, en het verschil met het scherm zacht wegwerken
   apply(b) {
     if (!b || b.id !== this.id) return;
     this.b = b;
-    if (b.state) {
-      // wat nu op het scherm staat, wordt het vertrekpunt van de volgende tik (geen sprongen)
-      for (const u of b.state.units) {
-        const d = this.disp.get(u.id);
-        this.prev.set(u.id, d ? { x: d.x, y: d.y } : { x: u.x, y: u.y });
+    const ns = b.state;
+    // een antwoord dat na een nieuwer antwoord binnenkomt, slaan we over
+    const stale = ns && this.srv && this.srv.t0 === ns.t0 && ns.n < this.srv.n;
+    if (ns && ns.v === 2 && !stale) {
+      this.srv = { t0: ns.t0, n: ns.n };
+      const tnow = performance.now();
+      this.pending = this.pending.filter((p) => !(ns.ack || []).includes(p.cid) && tnow - p.sent < 10000);
+      for (const p of this.pending) queueOrder(ns, this.side, p.ids, p.o, p.at, p.cid);
+      const before = new Map();
+      if (this.state && this.state.t0 === ns.t0) for (const u of this.state.units) before.set(u.id, this.pos(u));
+      const now = this.o.now();
+      const prev = new Map();
+      let k = 0;
+      while (ns.over == null && ns.t + FB.tick <= now && k < 120) {
+        if (ns.t + 2 * FB.tick > now) for (const u of ns.units) prev.set(u.id, { x: u.x, y: u.y });
+        stepTo(ns, ns.t + FB.tick, 1); k++;
       }
-      const ground = !this.state || this.state.kind !== b.state.kind;
-      this.state = b.state;
+      this.state = ns;
+      this.prev = prev;
+      this.alpha = Math.max(0, Math.min(1, (now - ns.t) / FB.tick));
+      this.offs.clear();
+      for (const u of ns.units) {
+        const old = before.get(u.id);
+        if (!old || u.hp <= 0) continue;
+        const p = this.pos(u);
+        const dx = old.x - p.x; const dy = old.y - p.y;
+        if (dx * dx + dy * dy > 0.0004 && dx * dx + dy * dy < 9) this.offs.set(u.id, { x: dx, y: dy });
+      }
       for (const id of [...this.sel]) { const u = this.unit(id); if (!u || u.hp <= 0) this.sel.delete(id); }
-      if (ground) this.ground = null;
-      if (!this.camSet) this.centerCam();
+      this.view.setBattle(ns);
     }
     if (b.status === 'done') { clearInterval(this.pollTimer); this.pollTimer = null; this.showResult(); }
     this.renderBars(true);
   }
 
-  unit(id) { return this.state && this.state.units.find((u) => u.id === id); }
+  unit(id) {
+    if (!this.state) return null;
+    if (this.byIdN !== this.state.n || this.byIdS !== this.state) { this.byId = new Map(this.state.units.map((u) => [u.id, u])); this.byIdN = this.state.n; this.byIdS = this.state; }
+    return this.byId.get(id) || null;
+  }
 
-  // ---------- opdrachten ----------
-  order(o) {
-    if (!this.manual || !this.state || this.state.over != null) return;
-    const ids = [...this.sel];
-    if (!ids.length && !o.charge && !o.retreat) return;
-    giveOrder(this.state, this.side, ids.length ? ids : null, o); // meteen tonen, de server bevestigt
-    this.o.post('/battle/order', { id: this.id, ids: ids.length ? ids : null, ...o })
+  // waar staat u nu op het scherm (tussen twee tikken in, plus de zacht vervagende correctie)
+  pos(u) {
+    const p = this.prev.get(u.id);
+    let x = u.x; let y = u.y;
+    if (p && this.state && this.state.over == null) { x = p.x + (u.x - p.x) * this.alpha; y = p.y + (u.y - p.y) * this.alpha; }
+    const o = this.offs.get(u.id);
+    if (o) { x += o.x; y += o.y; }
+    return { x, y };
+  }
+
+  // ---------- bevelen ----------
+  order(o, ids = [...this.sel]) {
+    const st = this.state;
+    if (!this.manual || !st || st.over != null || this.b.status !== 'live') return;
+    const needIds = !(o.ready || o.retreat || o.ai != null);
+    if (needIds && !ids.length) return;
+    const cid = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const at = st.n + 1;
+    const list = needIds ? ids : null;
+    queueOrder(st, this.side, list, o, at, cid); // meteen tonen; de server voert het op dezelfde tik uit
+    this.pending.push({ cid, at, ids: list, o, sent: performance.now() });
+    this.o.post('/battle/order', { id: this.id, ids: list, at, cid, ...o })
       .then((r) => this.apply(r.battle))
       .catch((e) => this.o.toast(e.message, 'err'));
   }
@@ -166,195 +182,131 @@ export class BattleView {
     if (a === 'close') this.close();
     else if (a === 'all') this.selectAll();
     else if (a === 'none') this.sel.clear();
-    else if (a === 'kind') this.selectKind(el.dataset.k);
+    else if (a === 'sq') this.cardClick(Number(el.dataset.sq), e);
+    else if (a === 'ready') this.order({ ready: true });
     else if (a === 'charge') this.order({ charge: true });
+    else if (a === 'stop') this.order({ stop: true });
     else if (a === 'retreat') {
       if (confirm('Wil je je troepen terugtrekken? De overlevenden keren naar huis terug.')) this.order({ retreat: true });
     } else if (a === 'manual') this.setMode('manual');
     else if (a === 'auto') this.setMode('auto');
+    else if (a === 'focus') { if (this.state) this.view.focus(this.state); }
     else if (a === 'reports') { this.close(); this.o.openReports(); }
     this.renderBars(true);
+  }
+
+  onKey(e) {
+    if (!this.open || e.target.closest('input, textarea')) return;
+    if (e.key === 'Escape') { if (this.sel.size) this.sel.clear(); else this.close(); }
+    else if (e.key === 'a' || e.key === 'A') this.selectAll();
+    else if (e.key === 's' || e.key === 'S') this.order({ stop: true });
+    else return;
+    this.renderBars(true);
+    e.preventDefault();
   }
 
   mine() { return this.state ? this.state.units.filter((u) => u.s === this.side && u.hp > 0 && mobile(u)) : []; }
   selectAll() { this.sel = new Set(this.mine().map((u) => u.id)); }
   selectKind(k) { this.sel = new Set(this.mine().filter((u) => u.k === k).map((u) => u.id)); }
 
-  // ---------- schermindeling ----------
-  layout() {
-    const r = this.cv.getBoundingClientRect();
-    const w = Math.max(200, r.width); const h = Math.max(200, r.height);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.cv.width = Math.round(w * dpr); this.cv.height = Math.round(h * dpr);
-    this.w = w; this.h = h; this.dpr = dpr;
-    this.K = h > w ? 0.8 : 0.6;
-    const narrow = w < 700;
-    let S = Math.min(w / FB.W, h / (FB.H * this.K + TOP + 0.4));
-    if (narrow) S = Math.max(S, 27);
-    this.S = S;
-    this.fs = Math.max(0.6, Math.min(1.5, S / 44));
-    this.ground = null;
-    this.clampCam();
+  // kaartje onderaan: één klik = die eenheid, twee keer = alle van die soort, met Shift/Ctrl erbij
+  cardClick(sq, e) {
+    const list = this.mine().filter((u) => u.sq === sq);
+    if (!list.length) return;
+    const now = performance.now();
+    const dbl = this.lastCard && this.lastCard.sq === sq && now - this.lastCard.t < 380;
+    this.lastCard = { sq, t: now };
+    if (dbl) { this.selectKind(list[0].k); return; }
+    if (e.shiftKey || e.ctrlKey || e.metaKey) { const on = list.every((u) => this.sel.has(u.id)); for (const u of list) if (on) this.sel.delete(u.id); else this.sel.add(u.id); return; }
+    this.sel = new Set(list.map((u) => u.id));
+    // camera naar die eenheid als ze buiten beeld is
+    const c = list.reduce((a, u) => ({ x: a.x + u.x / list.length, y: a.y + u.y / list.length }), { x: 0, y: 0 });
+    const w = toWorld(c.x, c.y); const s = this.view.cam.worldToScreen(w.x, w.y);
+    if (s.x < 30 || s.y < 30 || s.x > this.view.cam.w - 30 || s.y > this.view.cam.h - 30) { this.view.cam.x = w.x; this.view.cam.y = w.y; this.view.cam.clamp(); }
   }
 
-  worldW() { return FB.W * this.S; }
-  worldH() { return (FB.H * this.K + TOP + 0.4) * this.S; }
-  W(x, y) { return [x * this.S, (TOP + y * this.K) * this.S]; } // veld → wereldpixels
-
-  centerCam() {
-    const mine = this.mine();
-    if (mine.length) {
-      this.cam.x = mine.reduce((a, u) => a + u.x, 0) / mine.length;
-      this.cam.y = this.side ? FB.wallY : FB.H * 0.62;
-    }
-    this.camSet = true;
-    this.clampCam();
-  }
-
-  clampCam() {
-    if (!this.S) return;
-    const ww = this.worldW(); const wh = this.worldH();
-    const halfX = this.w / 2 / this.S; const halfY = this.h / 2 / this.S;
-    if (ww <= this.w) this.ox = (this.w - ww) / 2;
-    else { this.cam.x = Math.max(halfX, Math.min(FB.W - halfX, this.cam.x)); this.ox = this.w / 2 - this.cam.x * this.S; }
-    if (wh <= this.h) this.oy = (this.h - wh) / 2;
-    else {
-      const cy = TOP + this.cam.y * this.K;
-      const maxY = wh / this.S - halfY;
-      const c = Math.max(halfY, Math.min(maxY, cy));
-      this.cam.y = (c - TOP) / this.K;
-      this.oy = this.h / 2 - c * this.S;
-    }
-  }
-
-  toField(sx, sy) { return { x: (sx - this.ox) / this.S, y: ((sy - this.oy) / this.S - TOP) / this.K }; }
-
-  // ---------- invoer ----------
-  bindInput() {
-    const cv = this.cv;
-    let down = null;
-    cv.addEventListener('contextmenu', (e) => e.preventDefault());
-    cv.addEventListener('pointerdown', (e) => {
-      cv.setPointerCapture(e.pointerId);
-      const p = this.pt(e);
-      down = { x: p.x, y: p.y, sx: p.x, sy: p.y, btn: e.button, touch: e.pointerType !== 'mouse', moved: false, camX: this.cam.x, camY: this.cam.y };
-      // ingedrukt houden = je hele leger kiezen
-      clearTimeout(this.lpTimer);
-      if (e.button !== 2) {
-        const d0 = down;
-        this.lpTimer = setTimeout(() => {
-          if (down !== d0 || d0.moved || !this.manual) return;
-          d0.long = true;
-          this.selectAll();
-          this.flashHint(`Je hele leger is gekozen (${this.sel.size}). Klik op de grond of op een vijand.`);
-          this.renderBars(true);
-          if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
-        }, 550);
-      }
-    });
-    cv.addEventListener('pointermove', (e) => {
-      const p = this.pt(e);
-      this.hover = p;
-      if (!down) return;
-      down.x = p.x; down.y = p.y;
-      if (Math.hypot(p.x - down.sx, p.y - down.sy) > (down.touch ? 10 : 6)) { down.moved = true; clearTimeout(this.lpTimer); }
-      if (down.moved && down.touch) {
-        // vegen = het slagveld verschuiven (op een gsm past het niet helemaal op het scherm)
-        this.cam.x = down.camX - (p.x - down.sx) / this.S;
-        this.cam.y = down.camY - (p.y - down.sy) / (this.S * this.K);
-        this.clampCam();
-      }
-    });
-    const end = (e) => {
-      if (!down) return;
-      const d = down; down = null;
-      clearTimeout(this.lpTimer);
-      this.box = null;
-      if (d.long) return;
-      if (d.touch && d.moved) return;
-      if (!d.touch && d.moved && d.btn === 0) { this.boxSelect(d.sx, d.sy, d.x, d.y, e.shiftKey); return; }
-      if (d.btn === 2) { this.command(d.sx, d.sy); return; }
-      this.click(d.sx, d.sy, e.shiftKey || e.ctrlKey || e.metaKey);
-    };
-    cv.addEventListener('pointerup', end);
-    cv.addEventListener('pointercancel', () => { down = null; this.box = null; });
-    cv.addEventListener('pointerleave', () => { this.hover = null; });
-    this.boxFn = () => (down && !down.touch && down.moved && down.btn === 0 ? down : null);
-    window.addEventListener('keydown', (e) => {
-      if (!this.open || e.target.closest('input, textarea')) return;
-      if (e.key === 'Escape') { if (this.sel.size) this.sel.clear(); else this.close(); }
-      else if (e.key === 'a' || e.key === 'A') this.selectAll();
-      else return;
-      this.renderBars(true);
-      e.preventDefault();
-    });
-  }
-
-  pt(e) { const r = this.cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-
-  // eenheid onder de cursor (eerst levende figuren, dan torens en muren)
-  pick(sx, sy, touch = false) {
-    if (!this.state) return null;
-    const rad = (touch ? 24 : 15) * this.fs;
+  // ---------- klikken op het slagveld ----------
+  pick(sx, sy) {
+    const st = this.state;
+    if (!st) return null;
+    const cam = this.view.cam;
+    const w = cam.screenToWorld(sx, sy);
+    const rad = (coarse() ? 24 : 15) / cam.zoom;
     let best = null; let bd = Infinity;
-    for (const u of this.state.units) {
+    for (const u of st.units) {
       if (u.hp <= 0) continue;
-      const d0 = this.disp.get(u.id) || u;
-      const [wx, wy] = this.W(d0.x, d0.y);
-      const x = wx + this.ox; const y = wy + this.oy;
-      let d;
-      if (u.k === 'wall') { if (Math.abs(sx - x) > this.S / 2 || sy > y + 6 || sy < y - this.S) continue; d = rad * 0.9; }
-      else if (u.k === 'tower') { if (Math.abs(sx - x) > this.S * 0.7 || sy > y + 8 || sy < y - this.S * 2.4) continue; d = rad * 0.8; }
-      else d = Math.hypot(sx - x, sy - (y - (isCav(u.k) ? 16 : 12) * this.fs));
+      if (u.k === 'tower') {
+        const c = toWorld(u.x, u.y);
+        if (Math.abs(w.x - c.x) < 26 && w.y < c.y + 10 && w.y > c.y - 90) { const d = rad * 0.8; if (d < bd) { bd = d; best = u; } }
+        continue;
+      }
+      const p = this.pos(u); const c = toWorld(p.x, p.y);
+      const z = this.view.zOf(u, p);
+      const d = Math.hypot(w.x - c.x, w.y - (c.y - z - (UNITS[u.k] && UNITS[u.k].type === 'cav' ? 15 : 11)));
       if (d < rad && d < bd) { bd = d; best = u; }
     }
     return best;
   }
 
-  click(sx, sy, add) {
+  // muurstuk of poort onder de vinger (ook de voorkant van de muur telt)
+  pickWall(sx, sy) {
+    const st = this.state;
+    const t = this.view.screenTile(sx, sy);
+    for (const g of [{ gx: t.gx, gy: t.gy }, t.low]) {
+      const i = Math.floor(g.gx); const j = Math.floor(g.gy);
+      const k = st.walls.findIndex((w) => w.hp > 0 && w.i === i && w.j === j);
+      if (k >= 0) return k;
+    }
+    return -1;
+  }
+
+  click(sx, sy, e) {
     if (!this.state) return;
-    const u = this.pick(sx, sy, matchMedia('(pointer: coarse)').matches);
+    const u = this.pick(sx, sy);
     const now = performance.now();
     if (u && u.s === this.side && mobile(u)) {
-      if (!this.manual) { this.flashHint('Je laat deze slag automatisch verlopen. Kies "Zelf besturen" om je troepen te leiden.'); return; }
+      if (!this.manual) { this.flashHint('De computer leidt je troepen. Kies "Zelf besturen" om ze zelf te leiden.'); return; }
       const dbl = this.lastClick && now - this.lastClick.t < 380 && this.lastClick.k === u.k;
       this.lastClick = { t: now, k: u.k };
       if (dbl) this.selectKind(u.k);
-      else if (add) { if (this.sel.has(u.id)) this.sel.delete(u.id); else this.sel.add(u.id); }
+      else if (e && (e.shiftKey || e.ctrlKey || e.metaKey)) { if (this.sel.has(u.id)) this.sel.delete(u.id); else this.sel.add(u.id); }
       else this.sel = new Set([u.id]);
       this.renderBars(true);
       return;
     }
     this.lastClick = null;
-    if (this.sel.size) this.command(sx, sy);
+    if (this.sel.size) this.command(sx, sy, u);
   }
 
-  command(sx, sy) {
-    if (!this.manual || !this.sel.size) return;
-    const u = this.pick(sx, sy, matchMedia('(pointer: coarse)').matches);
-    if (u && u.s !== this.side) {
+  command(sx, sy, u = this.pick(sx, sy)) {
+    const st = this.state;
+    if (!this.manual || !this.sel.size || !st) return;
+    const battle = st.phase === 'battle';
+    if (battle && u && u.s !== this.side) {
       this.order({ target: u.id });
       this.mark = { x: u.x, y: u.y, at: performance.now(), attack: true };
       return;
     }
-    const f = this.toField(sx, sy);
-    if (f.x < 0 || f.x > FB.W || f.y < 0 || f.y > FB.H) return;
-    this.order({ x: Math.round(f.x * 100) / 100, y: Math.round(f.y * 100) / 100 });
-    this.mark = { x: f.x, y: f.y, at: performance.now(), attack: false };
+    const wk = this.pickWall(sx, sy);
+    if (battle && wk >= 0 && this.side === 0) {
+      this.order({ wall: wk });
+      const w = st.walls[wk];
+      this.mark = { x: w.i + 0.5, y: w.j + 0.5, at: performance.now(), attack: true };
+      return;
+    }
+    let { gx, gy } = this.view.screenTile(sx, sy);
+    if (wk >= 0 && this.side === 1) { gx = st.walls[wk].i + 0.5; gy = st.walls[wk].j + 0.5; }
+    if (cellOf(st, gx, gy) < 0) return;
+    this.order({ x: Math.round(gx * 100) / 100, y: Math.round(gy * 100) / 100 });
+    this.mark = { x: gx, y: gy, at: performance.now(), attack: false };
   }
 
-  boxSelect(x0, y0, x1, y1, add) {
-    if (!this.manual) return;
-    const a = Math.min(x0, x1); const b = Math.max(x0, x1); const c = Math.min(y0, y1); const d = Math.max(y0, y1);
-    const ids = this.mine().filter((u) => {
-      const p = this.disp.get(u.id) || u;
-      const [wx, wy] = this.W(p.x, p.y);
-      const x = wx + this.ox; const y = wy + this.oy - 10 * this.fs;
-      return x >= a && x <= b && y >= c && y <= d;
-    }).map((u) => u.id);
-    if (!add) this.sel.clear();
-    for (const id of ids) this.sel.add(id);
+  longPress() {
+    if (!this.manual || !this.state) return;
+    this.selectAll();
+    this.flashHint(`Je hele leger is gekozen (${this.sel.size}).`);
     this.renderBars(true);
+    if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
   }
 
   flashHint(t) { this.hintMsg = { t, until: performance.now() + 3500 }; }
@@ -369,7 +321,7 @@ export class BattleView {
     const st = this.state;
     const meta = (st && st.meta) || {};
     const side = (s) => {
-      const list = st ? st.units.filter((u) => u.s === s && u.k !== 'wall') : [];
+      const list = st ? st.units.filter((u) => u.s === s) : [];
       const hp = list.reduce((a, u) => a + Math.max(0, u.hp), 0); const hp0 = list.reduce((a, u) => a + u.hp0 * (u.n || 1), 0) || 1;
       const n = list.filter((u) => mobile(u)).reduce((a, u) => a + aliveN(u), 0);
       const info = s ? meta.def : meta.att;
@@ -379,33 +331,50 @@ export class BattleView {
         <span class="bt-count">${icon('people')} ${n}</span></div>`;
     };
     let mid;
-    if (b.status === 'choose') mid = `<b>${esc(b.title)}</b><span class="bt-clock">Wachten op de tegenstander… <b data-askend="${b.chooseUntil}">${mmss(b.chooseUntil - this.o.now())}</b></span>`;
-    else {
-      const left = st ? FB.maxMs - st.n * FB.tick : 0;
-      mid = `<b>Slag bij ${esc(b.title)}</b><span class="bt-clock">${icon('hourglass')} ${b.status === 'done' ? 'Voorbij' : mmss(left)}</span>
+    if (b.status === 'choose' || !st) mid = `<b>${esc(b.title)}</b><span class="bt-clock">Wachten op de tegenstander… <b data-askend="${b.chooseUntil}">${mmss(b.chooseUntil - this.o.now())}</b></span>`;
+    else if (st.phase === 'deploy' && b.status !== 'done') {
+      const waiting = st.ready[this.side] && !st.ready[1 - this.side];
+      mid = `<b>${esc(b.title)}</b><span class="bt-clock">${icon('flag')} Opstelling ${mmss(deployLeft(st))}</span>
+        <span class="bt-mode">${waiting ? 'Wachten op de tegenstander' : this.manual ? 'Zet je troepen klaar' : 'Automatisch'}</span>`;
+    } else {
+      const cap = st.cap > 0 && b.status !== 'done' && st.over == null ? ` · plein nog ${Math.ceil((FB.capMs - st.cap) / 1000)} s` : '';
+      mid = `<b>${esc(b.title)}</b><span class="bt-clock">${icon('hourglass')} ${b.status === 'done' ? 'Voorbij' : mmss(FB.maxMs - battleTime(st))}${cap}</span>
         <span class="bt-mode">${this.manual ? 'Jij voert het bevel' : 'Automatisch'}</span>`;
     }
     setHTML(this.top, `${side(0)}<div class="bt-mid">${mid}</div>${side(1)}`);
 
-    // onderbalk: je troepen per soort en de bevelen
+    // onderbalk: een kaartje per eenheid en de bevelen
     let html = '';
     if (b.status === 'live' && st) {
       if (this.manual) {
-        const kinds = {};
-        for (const u of this.mine()) kinds[u.k] = (kinds[u.k] || 0) + aliveN(u);
-        const selK = new Set([...this.sel].map((id) => { const u = this.unit(id); return u && u.k; }));
         const color = this.side ? (meta.def || {}).color : (meta.att || {}).color;
-        html += `<div class="bt-kinds">${Object.keys(kinds).map((k) => `<button class="bt-kind${selK.has(k) ? ' on' : ''}" data-bact="kind" data-k="${k}" title="Selecteer alle ${esc(UNITS[k] ? UNITS[k].name : k)}">
-          <img src="${this.o.unitThumb(k, color)}" alt=""><b>${kinds[k]}</b></button>`).join('')}</div>`;
-        html += `<div class="bt-cmds">
-          <button class="btn small" data-bact="all">${icon('people')} Alles</button>
-          ${this.sel.size ? `<button class="btn small" data-bact="none">${icon('close')} ${this.sel.size}</button>` : ''}
-          <button class="btn small danger" data-bact="charge" ${this.sel.size ? '' : 'disabled'} title="De geselecteerde troepen vallen de dichtstbijzijnde vijand aan">${icon('swords')} Stormloop</button>
-          ${b.role === 'att' ? `<button class="btn small" data-bact="retreat">${icon('back')} Terugtrekken</button>` : ''}
-          <button class="btn small ghost" data-bact="auto" title="Laat je troepen zelf vechten">Automatisch</button>
-          <button class="btn small ghost" data-bact="close">${icon('close')} Sluiten</button></div>`;
+        const sqs = new Map();
+        for (const u of this.mine()) {
+          const q = sqs.get(u.sq) || { sq: u.sq, k: u.k, n: 0, hp: 0, hp0: 0, on: true };
+          q.n += aliveN(u); q.hp += u.hp; q.hp0 += u.hp0 * (u.n || 1); if (!this.sel.has(u.id)) q.on = false;
+          sqs.set(u.sq, q);
+        }
+        const cards = [...sqs.values()].sort((a, c) => a.sq - c.sq).map((q) => `<button class="bt-card${q.on ? ' on' : ''}" data-bact="sq" data-sq="${q.sq}" title="${esc(UNITS[q.k] ? UNITS[q.k].name : q.k)}">
+          <img src="${this.o.unitThumb(q.k, color)}" alt=""><b>${q.n}</b><i style="width:${Math.round((q.hp / (q.hp0 || 1)) * 100)}%"></i></button>`).join('');
+        html += `<div class="bt-cards">${cards}</div>`;
+        if (st.phase === 'deploy') {
+          html += `<div class="bt-cmds">
+            <button class="btn small primary" data-bact="ready" ${st.ready[this.side] ? 'disabled' : ''}>${icon('flag')} ${st.ready[this.side] ? 'Klaar' : 'Start de slag'}</button>
+            <button class="btn small" data-bact="all">${icon('people')} Alles</button>
+            <button class="btn small ghost" data-bact="auto" title="Laat de computer je troepen leiden">Automatisch</button>
+            <button class="btn small ghost" data-bact="close">${icon('close')} Sluiten</button></div>`;
+        } else {
+          html += `<div class="bt-cmds">
+            <button class="btn small" data-bact="all">${icon('people')} Alles</button>
+            ${this.sel.size ? `<button class="btn small" data-bact="none">${icon('close')} ${this.sel.size}</button>` : ''}
+            <button class="btn small danger" data-bact="charge" ${this.sel.size ? '' : 'disabled'} title="Val de dichtstbijzijnde vijand aan">${icon('swords')} Stormloop</button>
+            <button class="btn small" data-bact="stop" ${this.sel.size ? '' : 'disabled'} title="Blijf staan (S)">${icon('shield')} Halt</button>
+            ${b.role === 'att' ? `<button class="btn small" data-bact="retreat">${icon('back')} Terugtrekken</button>` : ''}
+            <button class="btn small ghost" data-bact="auto" title="Laat de computer je troepen leiden">Automatisch</button>
+            <button class="btn small ghost" data-bact="close">${icon('close')} Sluiten</button></div>`;
+        }
       } else {
-        html += `<div class="bt-cmds"><span class="small">Je kijkt mee; je troepen vechten zelf.</span>
+        html += `<div class="bt-cmds"><span class="small">De computer leidt je troepen.</span>
           <button class="btn small primary" data-bact="manual">${icon('flag')} Zelf besturen</button>
           <button class="btn small ghost" data-bact="close">${icon('close')} Sluiten</button></div>`;
       }
@@ -414,10 +383,11 @@ export class BattleView {
 
     let hint = '';
     if (this.hintMsg && this.hintMsg.until > now) hint = this.hintMsg.t;
-    else if (b.status === 'live' && this.manual && !this.sel.size) hint = matchMedia('(pointer: coarse)').matches
-      ? 'Tik op een troep om hem te kiezen, twee keer tikken = alle van die soort, ingedrukt houden = je hele leger. Tik daarna op de grond of op een vijand. Veeg om rond te kijken.'
-      : 'Klik op een troep (dubbelklik = alle van die soort, ingedrukt houden = je hele leger, of sleep een kader). Klik daarna op de grond om te lopen, of op een vijand om aan te vallen.';
-    else if (b.status === 'live' && this.manual) hint = `${this.sel.size} geselecteerd: klik op een vijand, toren of muur om aan te vallen, of op de grond om te verplaatsen.`;
+    else if (st && b.status === 'live' && this.manual && st.phase === 'deploy' && !st.ready[this.side]) {
+      hint = this.sel.size ? 'Tik in het gekleurde gebied waar ze moeten staan.' : 'Opstelling: kies troepen (kaartje of figuur) en zet ze klaar. Druk dan op Start.';
+    } else if (st && b.status === 'live' && this.manual && st.phase === 'battle' && !this.sel.size && battleTime(st) < 25000) {
+      hint = coarse() ? 'Tik op een troep of kaartje, dan op de grond, een vijand of een muur.' : 'Klik op een troep of kaartje, dan op de grond, een vijand of een muur (rechtsklik werkt ook).';
+    }
     this.hint.textContent = hint;
     this.hint.hidden = !hint;
   }
@@ -434,12 +404,12 @@ export class BattleView {
     this.resultEl.innerHTML = `<div class="bt-res-card ${won ? 'won' : 'lost'}">
       <div class="bt-ask-crest">${icon(won ? 'trophy' : 'shield')}</div>
       <h2>${won ? 'Overwinning!' : 'Nederlaag'}</h2>
-      <p>${r.retreat ? 'Je troepen trokken zich terug. ' : ''}${this.b.role === 'att' ? (won ? 'De verdedigers zijn verslagen.' : 'De aanval is afgeslagen.') : (won ? 'Je stad hield stand!' : 'De vijand brak door je verdediging.')}</p>
+      <p>${r.retreat ? 'Je troepen trokken zich terug. ' : ''}${this.b.role === 'att' ? (won ? 'De stad is ingenomen.' : 'De aanval is afgeslagen.') : (won ? 'Je stad hield stand!' : 'De vijand brak door je verdediging.')}</p>
       <dl class="kv"><dt>Jouw verliezen</dt><dd>${list(lost)}</dd><dt>Vijanden verslagen</dt><dd>${list(kill)}</dd>
       ${loot ? `<dt>${this.b.role === 'att' ? 'Buit' : 'Geplunderd'}</dt><dd>${loot}</dd>` : ''}</dl>
       <div class="bt-ask-btns"><button class="btn primary" data-bact="reports">${icon('scroll')} Rapport</button><button class="btn" data-bact="close">Sluiten</button></div></div>`;
     this.resultEl.hidden = false;
-    if (won) for (let i = 0; i < 4; i++) setTimeout(() => this.particles.confetti(this.worldW() / 2 + (i - 1.5) * 80, this.worldH() * 0.4, 40), i * 250);
+    if (won && this.view.cam) { const c = this.view.cam; for (let i = 0; i < 4; i++) setTimeout(() => this.view.particles.confetti(c.x + (i - 1.5) * 80, c.y - 60, 40), i * 250); }
   }
 
   // ---------- tekenen ----------
@@ -450,396 +420,47 @@ export class BattleView {
     this.lastT = t;
     const st = this.state;
     const now = this.o.now();
-    // verder rekenen tot nu, tik per tik (de server stuurt elke peiling de echte toestand)
     if (st && this.b.status === 'live' && st.over == null) {
+      // verder rekenen tot nu, tik per tik (de server stuurt elke peiling de echte toestand)
       let k = 0;
-      while (st.over == null && st.t + FB.tick <= now && k < 30) {
+      while (st.over == null && st.t + FB.tick <= now && k < 40) {
         for (const u of st.units) this.prev.set(u.id, { x: u.x, y: u.y });
         stepTo(st, st.t + FB.tick, 1);
         k++;
       }
-      if (k >= 30) this.prev.clear();
+      if (k >= 40) this.prev.clear();
     }
-    const alpha = st ? Math.max(0, Math.min(1, (now - st.t) / FB.tick)) : 0;
-    if (st) {
-      for (const u of st.units) {
-        const p = this.prev.get(u.id);
-        this.disp.set(u.id, p && st.over == null ? { x: p.x + (u.x - p.x) * alpha, y: p.y + (u.y - p.y) * alpha } : { x: u.x, y: u.y });
-      }
+    if (st) this.alpha = Math.max(0, Math.min(1, (now - st.t) / FB.tick));
+    // correcties van de server zacht laten verdwijnen
+    if (this.offs.size) {
+      const f = Math.exp(-dt / 180);
+      for (const [id, o] of this.offs) { o.x *= f; o.y *= f; if (Math.abs(o.x) + Math.abs(o.y) < 0.004) this.offs.delete(id); }
     }
-    const ctx = this.ctx;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = '#2a2015'; ctx.fillRect(0, 0, this.w, this.h);
-    if (!st) { this.renderBars(); this.drawWaiting(ctx, t); return; }
-    if (!this.ground) this.ground = this.paintGround(st);
-    ctx.save();
-    ctx.translate(Math.round(this.ox), Math.round(this.oy));
-    ctx.drawImage(this.ground, -this.gm.x, -this.gm.y, this.gm.w, this.gm.h);
-    this.drawScene(ctx, st, t, now);
-    this.particles.update(dt);
-    this.particles.draw(ctx);
-    ctx.restore();
-    const box = this.boxFn();
-    if (box) {
-      ctx.fillStyle = 'rgba(255,225,120,0.12)'; ctx.strokeStyle = 'rgba(255,225,120,0.9)'; ctx.lineWidth = 1;
-      ctx.fillRect(Math.min(box.sx, box.x), Math.min(box.sy, box.y), Math.abs(box.x - box.sx), Math.abs(box.y - box.sy));
-      ctx.strokeRect(Math.min(box.sx, box.x) + 0.5, Math.min(box.sy, box.y) + 0.5, Math.abs(box.x - box.sx), Math.abs(box.y - box.sy));
-    }
+    if (!st) { this.drawWaiting(t); this.renderBars(); return; }
+    // doelwitten van je gekozen troepen en de vijand onder de muis
+    this.targets.clear();
+    for (const id of this.sel) { const u = this.unit(id); if (u && u.tg != null && u.st === 'attack') this.targets.add(u.tg); }
+    const hov = this.view.hoverS;
+    this.hoverU = hov && this.manual && this.sel.size && !coarse() ? this.pick(hov.x, hov.y) : null;
+    if (this.hoverU && this.hoverU.s === this.side) this.hoverU = null;
+    this.hoverWall = hov && this.manual && this.sel.size && !coarse() && this.side === 0 && st.phase === 'battle' && !this.hoverU ? this.pickWall(hov.x, hov.y) : null;
+    if (this.hoverWall === -1) this.hoverWall = null;
+    this.view.setBattle(st);
+    this.view.draw(t, dt, now);
     this.renderBars();
     for (const el of this.root.querySelectorAll('[data-askend]')) el.textContent = mmss(Number(el.dataset.askend) - now);
   }
 
-  drawWaiting(ctx, t) {
+  drawWaiting(t) {
+    const cv = this.cv; const ctx = cv.getContext('2d');
+    const w = cv.clientWidth; const h = cv.clientHeight; const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#2a2015'; ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = '#f4e8cc'; ctx.font = '600 16px Cinzel, Georgia, serif'; ctx.textAlign = 'center';
     const dots = '.'.repeat(1 + Math.floor(t / 400) % 3);
-    ctx.fillText(this.b && this.b.status === 'choose' ? `De legers stellen zich op${dots}` : `Slagveld laden${dots}`, this.w / 2, this.h / 2);
-  }
-
-  // het slagveld zelf: gras, een pad naar de poort, bomen aan de rand en de stad (of het kamp) achteraan
-  paintGround(st) {
-    const S = this.S; const K = this.K;
-    const fw = this.worldW(); const fh = this.worldH();
-    // ook de rand rond het slagveld vullen (bos en gras tot aan de schermrand)
-    const mx = Math.ceil(Math.max(0, (this.w - fw) / 2) / S) + 1;
-    const my = Math.ceil(Math.max(0, (this.h - fh) / 2) / S) + 1;
-    const ww = fw + 2 * mx * S; const wh = fh + 2 * my * S;
-    this.gm = { x: mx * S, y: my * S, w: ww, h: wh };
-    const cv = document.createElement('canvas');
-    const q = Math.min(2, this.dpr);
-    cv.width = Math.round(ww * q); cv.height = Math.round(wh * q);
-    const c = cv.getContext('2d');
-    c.scale(q, q);
-    c.translate(mx * S, my * S);
-    const R = rnd(4242 + (st.kind === 'camp' ? 7 : 0));
-    const g = c.createLinearGradient(0, -my * S, 0, wh - my * S);
-    g.addColorStop(0, '#7a9645'); g.addColorStop(0.5, '#86a64c'); g.addColorStop(1, '#6c8d3e');
-    c.fillStyle = g; c.fillRect(-mx * S, -my * S, ww, wh);
-    // vlekken lichter en donkerder gras
-    for (let i = 0; i < 46; i++) {
-      const x = R() * ww - mx * S; const y = R() * wh - my * S; const r = (0.8 + R() * 2.2) * S;
-      const gr = c.createRadialGradient(x, y, 0, x, y, r);
-      const dark = R() < 0.5;
-      gr.addColorStop(0, dark ? 'rgba(50,80,25,0.22)' : 'rgba(190,200,110,0.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-      c.fillStyle = gr; c.beginPath(); c.ellipse(x, y, r, r * K, 0, 0, TAU); c.fill();
-    }
-    // pad van onder naar de poort en de stad in
-    const gy0 = fh + my * S; const [, gy1] = this.W(0, 0.8);
-    c.save();
-    c.beginPath();
-    const steps = 24;
-    const xAt = (f) => FB.W / 2 + Math.sin(f * 5.2) * 0.7 * (1 - f * 0.6);
-    for (let i = 0; i <= steps; i++) { const f = i / steps; const y = gy0 + (gy1 - gy0) * f; c.lineTo((xAt(f) - 1.05 - Math.sin(i * 1.7) * 0.08) * S, y); }
-    for (let i = steps; i >= 0; i--) { const f = i / steps; const y = gy0 + (gy1 - gy0) * f; c.lineTo((xAt(f) + 1.05 + Math.cos(i * 1.3) * 0.08) * S, y); }
-    c.closePath();
-    c.fillStyle = '#a98b5c'; c.fill();
-    c.clip();
-    c.globalCompositeOperation = 'overlay'; c.globalAlpha = 0.55;
-    c.fillStyle = c.createPattern(N.groundTexture('dirt', 128), 'repeat'); c.fillRect(-mx * S, -my * S, ww, wh);
-    c.restore();
-    // graskorrel over alles
-    c.save(); c.globalCompositeOperation = 'overlay'; c.globalAlpha = 0.5;
-    const pat = c.createPattern(N.groundTexture('grass', 256), 'repeat');
-    c.fillStyle = pat; c.fillRect(-mx * S, -my * S, ww, wh); c.restore();
-    // plukjes, bloemen en steentjes
-    for (let i = 0; i < 160 + mx * 20; i++) {
-      const x = R() * ww - mx * S; const y = R() * wh - my * S; const k = R();
-      if (k < 0.55) N.tuft(c, x, y, 0.8 + R() * 0.6, '#5d8a33', '#a6c45e');
-      else if (k < 0.75) N.flower(c, x, y, ['#f4e04d', '#ffffff', '#d96bb0', '#7fb3e8'][Math.floor(R() * 4)]);
-      else N.pebble(c, x, y, 0.8 + R() * 0.8);
-    }
-    // achtergrond: de stad of het kamp van de verdediger
-    const meta = st.meta || {};
-    const defColor = (meta.def && meta.def.color) || '#c0392b';
-    const civ = meta.style ? meta.style.civ : null;
-    const sc = S / 50;
-    const items = [];
-    if (st.kind === 'town') {
-      const age = Math.max(1, Math.min(4, (meta.style && meta.style.age) || 1));
-      const hl = Math.min(3, age);
-      // plein voor het stadscentrum
-      const [px, py] = this.W(FB.W / 2, 1.4);
-      c.fillStyle = 'rgba(170,140,95,0.55)'; c.beginPath(); c.ellipse(px, py + S * 0.3, S * 3.4, S * 1.3 * K, 0, 0, TAU); c.fill();
-      items.push({ x: FB.W / 2, y: 0.9, spr: A.buildingSprite('tc', age, defColor, civ), s: sc * 1.05 });
-      for (const [x, y, type] of [[4.2, 1.6, 'house'], [7.4, 0.5, 'house'], [16.6, 0.5, 'house'], [19.8, 1.6, 'house'], [1.6, 0.4, 'farm'], [22.4, 0.4, 'lumber'], [9.6, 2.6, 'house'], [14.4, 2.6, 'barracks']]) {
-        items.push({ x, y, spr: A.buildingSprite(type, type === 'house' ? hl : 1, defColor, civ), s: sc * 0.95 });
-      }
-    } else {
-      for (const [x, y, s] of [[5, 0.9, 1], [8.5, 0.2, 0.9], [15.5, 0.2, 0.9], [19, 0.9, 1], [3, 2.6, 0.8], [21, 2.6, 0.8], [10.5, 1.9, 0.85], [13.5, 1.9, 0.85]]) items.push({ x, y, tent: s });
-    }
-    // bomen langs de randen (en een bos daarbuiten)
-    const nTrees = 26 + mx * 18;
-    for (let i = 0; i < nTrees; i++) {
-      const left = i % 2 === 0;
-      const depth = R() * (1.1 + mx);
-      const x = left ? 0.8 - depth : FB.W - 0.8 + depth;
-      const y = -0.6 - my * 0.5 + R() * (FB.H + 0.6 + my);
-      items.push({ x, y, tree: N.treeSprite(R() < 0.4 ? N.CONIFERS[i % 4] : N.LEAFY[i % N.LEAFY.length]), s: sc * (0.8 + R() * 0.35) });
-    }
-    for (let i = 0; i < 6; i++) items.push({ x: 1.5 + R() * 3, y: FB.H - R() * 1.2, tree: N.treeSprite(N.LEAFY[i]), s: sc * 0.8 });
-    for (let i = 0; i < 6; i++) items.push({ x: FB.W - 1.5 - R() * 3, y: FB.H - R() * 1.2, tree: N.treeSprite(N.CONIFERS[i % 4]), s: sc * 0.8 });
-    items.sort((a, b) => a.y - b.y);
-    for (const it of items) {
-      const [x, y] = this.W(it.x, it.y);
-      if (it.spr) A.drawSprite(c, it.spr, x, y, it.s);
-      else if (it.tree) {
-        c.fillStyle = 'rgba(30,40,15,0.25)'; c.beginPath(); c.ellipse(x + 4 * it.s, y, 16 * it.s, 6 * it.s, 0, 0, TAU); c.fill();
-        c.drawImage(it.tree.cv, x - it.tree.ax * it.s, y - it.tree.ay * it.s, it.tree.w * it.s, it.tree.h * it.s);
-      } else if (it.tent) A.tent(c, x, y, it.tent * sc * 1.3, '#7a1b12');
-    }
-    // zachte schaduw aan de randen
-    const v = c.createRadialGradient(fw / 2, fh / 2, Math.min(fw, fh) * 0.4, fw / 2, fh / 2, Math.max(ww, wh) * 0.7);
-    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(20,10,0,0.4)');
-    c.fillStyle = v; c.fillRect(-mx * S, -my * S, ww, wh);
-    return cv;
-  }
-
-  drawScene(ctx, st, t, now) {
-    const bt = now - st.t0; // tijd sinds het begin van de slag
-    const meta = st.meta || {};
-    const colors = [(meta.att && meta.att.color) || '#2e6fb5', (meta.def && meta.def.color) || '#c0392b'];
-    const items = [];
-    for (const u of st.units) {
-      const p = this.disp.get(u.id) || u;
-      if (u.hp <= 0 && mobile(u) && (u.died == null || bt - u.died > 7000)) continue;
-      items.push({ u, p, y: p.y + (u.k === 'wall' ? 0.02 : 0) });
-    }
-    items.sort((a, b) => a.y - b.y || a.u.id - b.u.id);
-    const byId = new Map(st.units.map((u) => [u.id, u]));
-    // markering van het doel van een opdracht
-    if (this.mark && performance.now() - this.mark.at < 900) {
-      const f = (performance.now() - this.mark.at) / 900;
-      const [x, y] = this.W(this.mark.x, this.mark.y);
-      ctx.strokeStyle = this.mark.attack ? `rgba(230,60,40,${1 - f})` : `rgba(150,240,120,${1 - f})`;
-      ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y, (6 + f * 14) * this.fs, (3 + f * 7) * this.fs, 0, 0, TAU); ctx.stroke();
-    }
-    // looplijnen van de geselecteerde troepen
-    if (this.sel.size) {
-      ctx.setLineDash([4, 5]); ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,240,180,0.5)';
-      const flags = new Set();
-      for (const id of this.sel) {
-        const u = byId.get(id); if (!u || u.hp <= 0 || u.mx == null) continue;
-        const p = this.disp.get(id) || u;
-        const [x0, y0] = this.W(p.x, p.y); const [x1, y1] = this.W(u.mx, u.my);
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        flags.add(`${Math.round(u.mx)}:${Math.round(u.my)}`);
-      }
-      ctx.setLineDash([]);
-    }
-    const hoverU = this.hover && this.manual && this.sel.size ? this.pick(this.hover.x, this.hover.y) : null;
-    const targets = new Set();
-    for (const id of this.sel) { const u = byId.get(id); if (u && u.tg != null && u.forced) targets.add(u.tg); }
-    for (const it of items) {
-      const { u, p } = it;
-      const [x, y] = this.W(p.x, p.y);
-      if (u.k === 'wall') { this.drawWall(ctx, u, x, y, t); continue; }
-      if (u.k === 'tower') { this.drawTower(ctx, u, x, y, t, colors[1], civOf(meta), hoverU === u || targets.has(u.id)); continue; }
-      const dead = u.hp <= 0;
-      const fs = this.fs;
-      if (!dead) {
-        // kleur van de kant onder de voeten, ring rond selectie en doelwitten
-        ctx.fillStyle = colors[u.s]; ctx.globalAlpha = 0.32;
-        ctx.beginPath(); ctx.ellipse(x, y + 0.5, (isCav(u.k) ? 10 : 7) * fs, (isCav(u.k) ? 4.6 : 3.4) * fs, 0, 0, TAU); ctx.fill();
-        ctx.globalAlpha = 1;
-        if (this.sel.has(u.id)) { ctx.strokeStyle = 'rgba(255,228,90,0.95)'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.ellipse(x, y + 0.5, (isCav(u.k) ? 12 : 9) * fs, (isCav(u.k) ? 5.6 : 4.4) * fs, 0, 0, TAU); ctx.stroke(); }
-        if (hoverU === u || targets.has(u.id)) { ctx.strokeStyle = 'rgba(235,60,40,0.95)'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.ellipse(x, y + 0.5, 10 * fs, 4.8 * fs, 0, 0, TAU); ctx.stroke(); }
-      }
-      // richting: naar het doelwit of de looprichting
-      const tg = u.tg != null ? byId.get(u.tg) : null;
-      const pv = this.prev.get(u.id);
-      const moving = !dead && pv && Math.hypot(u.x - pv.x, u.y - pv.y) > 0.004;
-      let dir = this.dirs.get(u.id) || (u.s ? 1 : -1);
-      if (moving && Math.abs(u.x - pv.x) > 0.002) dir = u.x > pv.x ? 1 : -1;
-      else if (tg) dir = tg.x >= u.x ? 1 : -1;
-      this.dirs.set(u.id, dir);
-      const age = bt - (u.at ?? -1e9);
-      const swing = !dead && u.at >= 0 && age >= 0 && age < 340 && !isRanged(u.k) ? Math.sin((age / 340) * Math.PI) : 0;
-      if (dead) {
-        const da = Math.min(1, (bt - u.died) / 7000);
-        ctx.save(); ctx.globalAlpha = 1 - da * 0.9;
-        ctx.translate(x, y); ctx.rotate(-dir * Math.min(1.45, (bt - u.died) / 260)); ctx.translate(-x, -y);
-        this.drawFigure(ctx, u, x, y, t, false, dir, colors[u.s]);
-        ctx.restore();
-        continue;
-      }
-      const lx = tg ? Math.sign(tg.x - u.x) * swing * 3 * fs : 0;
-      this.drawFigure(ctx, u, x + lx, y, t, moving || swing > 0, dir, colors[u.s], swing);
-      const n = aliveN(u);
-      const tall = (u.k === 'elephant' ? 54 : isCav(u.k) ? 40 : u.k === 'ram' || u.k === 'stonethrower' ? 26 : 32) * fs;
-      const max = u.hp0 * (u.n || 1);
-      if (u.hp < max || n > 1) {
-        const w = (u.k === 'elephant' ? 20 : 13) * fs;
-        const frac = Math.max(0, u.hp / max);
-        ctx.fillStyle = 'rgba(20,12,6,0.72)'; ctx.fillRect(x - w / 2 - 1, y - tall - 1, w + 2, 4);
-        ctx.fillStyle = u.s === this.side ? (frac > 0.6 ? '#62d44c' : frac > 0.3 ? '#f2c230' : '#e2452f') : (frac > 0.3 ? '#e2452f' : '#9b1c12');
-        ctx.fillRect(x - w / 2, y - tall, w * frac, 2);
-      }
-      if (n > 1) {
-        ctx.font = `700 ${Math.round(9 * Math.max(1, fs * 0.9))}px Inter, sans-serif`; ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(30,20,10,0.78)'; ctx.beginPath(); ctx.roundRect(x - 9 * fs, y - tall - 13 * fs, 18 * fs, 10 * fs, 4); ctx.fill();
-        ctx.fillStyle = '#fff3d6'; ctx.fillText(`×${n}`, x, y - tall - 5 * fs);
-      }
-    }
-    // wie achter een muur staat, blijft als schim zichtbaar
-    if (st.units.some((u) => u.k === 'wall' && u.hp > 0)) {
-      const cols = new Set(st.units.filter((u) => u.k === 'wall' && u.hp > 0).map((u) => Math.floor(u.x)));
-      ctx.save(); ctx.globalAlpha = 0.42;
-      for (const it of items) {
-        const { u, p } = it;
-        if (u.hp <= 0 || !mobile(u) || p.y >= FB.wallY || p.y < FB.wallY - 1.6 || !cols.has(Math.floor(p.x))) continue;
-        const [x, y] = this.W(p.x, p.y);
-        this.drawFigure(ctx, u, x, y, t, false, this.dirs.get(u.id) || 1, colors[u.s]);
-      }
-      ctx.restore();
-    }
-    this.drawShots(ctx, st, bt);
-    this.wallFx(st, bt);
-  }
-
-  drawFigure(ctx, u, x, y, t, moving, dir, team, swing = 0) {
-    const s = 1.05 * this.fs;
-    const o = { s, team, phase: t * 0.012 + u.id, walking: moving };
-    facing(ctx, x, dir, () => {
-      if (u.k === 'stonethrower') { A.stoneThrower(ctx, x, y, 0.8 * this.fs, t); return; }
-      if (u.k === 'barbarian') { A.person(ctx, x, y, { ...o, body: u.id % 2 ? '#4f3a2a' : '#5b4636', weapon: u.id % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.id % 3), team: null }); return; }
-      if (u.k === 'villager') { A.person(ctx, x, y, { ...o, s: s * 0.92, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe', working: swing > 0, walking: moving && !swing }); return; }
-      if (FIG.uniqueUnit(ctx, u.k, x, y, o)) return;
-      switch (u.k) {
-        case 'spear': A.person(ctx, x, y, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
-        case 'sword': A.person(ctx, x, y, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
-        case 'archer': A.person(ctx, x, y, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
-        case 'scout': A.horseman(ctx, x, y, { s: 0.8 * this.fs, team, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b', walking: moving, phase: o.phase }); break;
-        case 'rider': A.horseman(ctx, x, y, { s: 0.85 * this.fs, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear', horse: '#7b4f2c', walking: moving, phase: o.phase }); break;
-        case 'knight': A.horseman(ctx, x, y, { s: 0.9 * this.fs, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530', walking: moving, phase: o.phase }); break;
-        case 'ram': A.ram(ctx, x, y, 0.9 * this.fs); break;
-        default: A.person(ctx, x, y, o);
-      }
-    });
-  }
-
-  // muurblok: houten palissade (niveau 1-2) of stenen muur met kantelen (vanaf niveau 3)
-  drawWall(ctx, u, x, y, t) {
-    const S = this.S; const K = this.K;
-    const x0 = x - S / 2; const w = S;
-    const stone = (u.L || 1) >= 3;
-    const h = S * (stone ? 0.46 + 0.03 * u.L : 0.46);
-    const d = S * K * 0.34;
-    if (u.hp <= 0) {
-      // puin
-      const R = rnd(u.id * 97);
-      for (let i = 0; i < 7; i++) {
-        const px = x0 + R() * w; const py = y - R() * d * 0.6;
-        ctx.fillStyle = stone ? ['#9b9282', '#b4ab98', '#7e766a'][i % 3] : ['#7a5129', '#5e3d1d', '#8f6436'][i % 3];
-        ctx.beginPath(); ctx.ellipse(px, py, S * (0.07 + R() * 0.08), S * 0.05, R() * 3, 0, TAU); ctx.fill();
-      }
-      return;
-    }
-    const frac = u.hp / u.hp0;
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x0, y, w, d * 0.5);
-    if (stone) {
-      ctx.fillStyle = '#d2c8b2'; ctx.fillRect(x0, y - h - d, w, d); // looppad
-      const face = ctx.createLinearGradient(0, y - h, 0, y);
-      face.addColorStop(0, '#c2b8a3'); face.addColorStop(1, '#988f7d');
-      ctx.fillStyle = face; ctx.fillRect(x0, y - h, w, h);
-      ctx.strokeStyle = 'rgba(70,60,45,0.45)'; ctx.lineWidth = 0.8;
-      const rows = 4;
-      for (let r = 1; r < rows; r++) { const yy = y - h + (h * r) / rows; ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x0 + w, yy); ctx.stroke(); }
-      for (let r = 0; r < rows; r++) {
-        const y0 = y - h + (h * r) / rows; const off = r % 2 ? w / 6 : 0;
-        for (let k = off; k < w; k += w / 3) { ctx.beginPath(); ctx.moveTo(x0 + k, y0); ctx.lineTo(x0 + k, y0 + h / rows); ctx.stroke(); }
-      }
-      // kantelen
-      ctx.fillStyle = '#b5ab96';
-      for (let k = 0; k < 3; k++) {
-        if (frac < 0.4 && k === 1) continue;
-        const mx = x0 + k * (w / 3) + w / 12; const mw = w / 6;
-        ctx.fillRect(mx, y - h - S * 0.16, mw, S * 0.16);
-        ctx.fillStyle = '#d6cdb8'; ctx.fillRect(mx, y - h - S * 0.16 - d * 0.35, mw, d * 0.35); ctx.fillStyle = '#b5ab96';
-      }
-    } else {
-      // houten palen met een punt
-      const n = 6; const pw = w / n;
-      for (let i = 0; i < n; i++) {
-        const px = x0 + i * pw; const ph = h * (0.92 + ((u.id * 7 + i * 13) % 5) * 0.03) * (frac < 0.4 && i % 3 === 1 ? 0.6 : 1);
-        ctx.fillStyle = i % 2 ? '#7d532a' : '#8f6232';
-        ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y - ph); ctx.lineTo(px + pw / 2, y - ph - pw * 0.9); ctx.lineTo(px + pw, y - ph); ctx.lineTo(px + pw, y); ctx.closePath(); ctx.fill();
-        ctx.fillStyle = 'rgba(255,230,180,0.18)'; ctx.fillRect(px + 1, y - ph, pw * 0.25, ph);
-      }
-      ctx.fillStyle = '#5e3d1d'; ctx.fillRect(x0, y - h * 0.62, w, S * 0.06);
-    }
-    if (frac < 0.7) {
-      ctx.strokeStyle = 'rgba(40,25,10,0.7)'; ctx.lineWidth = 1.1;
-      ctx.beginPath(); ctx.moveTo(x0 + w * 0.3, y - h); ctx.lineTo(x0 + w * 0.4, y - h * 0.6); ctx.lineTo(x0 + w * 0.32, y - h * 0.3); ctx.stroke();
-      if (frac < 0.4) { ctx.beginPath(); ctx.moveTo(x0 + w * 0.7, y - h * 0.9); ctx.lineTo(x0 + w * 0.62, y - h * 0.45); ctx.lineTo(x0 + w * 0.75, y - h * 0.1); ctx.stroke(); }
-    }
-    if (frac < 1) {
-      const bw = S * 0.6;
-      ctx.fillStyle = 'rgba(20,12,6,0.6)'; ctx.fillRect(x - bw / 2, y - h - d - 7, bw, 3);
-      ctx.fillStyle = frac > 0.5 ? '#d9c68a' : '#e2452f'; ctx.fillRect(x - bw / 2, y - h - d - 7, bw * frac, 3);
-    }
-  }
-
-  drawTower(ctx, u, x, y, t, color, civ, hl) {
-    const S = this.S;
-    if (u.hp <= 0) {
-      const R = rnd(u.id * 31);
-      for (let i = 0; i < 12; i++) {
-        ctx.fillStyle = ['#9b9282', '#b4ab98', '#7e766a', '#6b4a2b'][i % 4];
-        ctx.beginPath(); ctx.ellipse(x + (R() - 0.5) * S * 1.1, y - R() * S * 0.3, S * (0.08 + R() * 0.1), S * 0.06, R() * 3, 0, TAU); ctx.fill();
-      }
-      A.smoke(ctx, x, y - S * 0.3, t, u.id, this.fs);
-      return;
-    }
-    if (hl) { ctx.strokeStyle = 'rgba(235,60,40,0.95)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y, S * 0.6, S * 0.6 * this.K * 0.6, 0, 0, TAU); ctx.stroke(); }
-    const spr = A.buildingSprite('tower', u.L || 1, color, civ);
-    A.drawSprite(ctx, spr, x, y, S / 52);
-    const frac = u.hp / u.hp0;
-    const bw = S * 0.9; const top = y - S * 2.1;
-    ctx.fillStyle = 'rgba(20,12,6,0.72)'; ctx.fillRect(x - bw / 2 - 1, top - 1, bw + 2, 5);
-    ctx.fillStyle = u.s === this.side ? '#62d44c' : '#e2452f'; ctx.fillRect(x - bw / 2, top, bw * frac, 3);
-    if (frac < 0.5) A.smoke(ctx, x + S * 0.1, y - S * 1.4, t, u.id, this.fs * 0.7);
-  }
-
-  // pijlen, stenen en torenschoten
-  drawShots(ctx, st, bt) {
-    for (const u of st.units) {
-      if (u.at == null || u.at < 0 || !(isRanged(u.k) || u.k === 'stonethrower')) continue;
-      if (u.hp <= 0 && u.k !== 'tower') continue;
-      const fly = u.k === 'stonethrower' ? 650 : 420;
-      const age = bt - u.at;
-      if (age < 0 || age > fly) continue;
-      const p = this.disp.get(u.id) || u;
-      const [ax, ay0] = this.W(p.x, p.y);
-      const ay = ay0 - (u.k === 'tower' ? this.S * 1.6 : 16 * this.fs);
-      const [bx, by0] = this.W(u.ax, u.ay);
-      const by = by0 - 10 * this.fs;
-      const f = age / fly;
-      const arc = Math.min(60, Math.hypot(bx - ax, by - ay) * 0.25);
-      const x = ax + (bx - ax) * f; const y = ay + (by - ay) * f - Math.sin(f * Math.PI) * arc;
-      const ang = Math.atan2((by - ay) - Math.cos(f * Math.PI) * arc * Math.PI, bx - ax);
-      ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(this.fs, this.fs);
-      if (u.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill(); }
-      else {
-        ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
-        ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(6.5, 0); ctx.lineTo(4.2, -1.4); ctx.lineTo(4.2, 1.4); ctx.fill();
-        ctx.fillStyle = '#f4efe0'; ctx.fillRect(-6.5, -1.1, 1.8, 2.2);
-      }
-      ctx.restore();
-    }
-  }
-
-  // stof en brokken wanneer muren en torens geraakt worden
-  wallFx(st, bt) {
-    for (const u of st.units) {
-      if (u.k !== 'wall' && u.k !== 'tower') continue;
-      const before = this.lastHp.get(u.id);
-      this.lastHp.set(u.id, u.hp);
-      if (before == null || u.hp >= before) continue;
-      const [x, y] = this.W(u.x, u.y);
-      const top = u.k === 'tower' ? this.S * 1.2 : this.S * 0.4;
-      this.particles.dust(x, y - top * 0.5, u.hp <= 0 ? 14 : 2);
-      if (u.hp <= 0 && bt - (u.died || 0) < 2000) this.particles.dust(x, y - top, 10);
-    }
+    ctx.fillText(this.b && this.b.status === 'choose' ? `De legers stellen zich op${dots}` : `Slagveld laden${dots}`, w / 2, h / 2);
   }
 }
 
-const civOf = (meta) => (meta.style ? meta.style.civ : null);
+export { nav };
