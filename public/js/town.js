@@ -1296,27 +1296,44 @@ export class TownView {
     if (sel.type === 'group') this.onFieldOrder({ action: 'order', id: sel.id, to, target });
     else if (sel.type === 'unit') this.onFieldOrder({ action: 'split', id: sel.id, units: { [sel.kind]: 1 }, to, target });
     else if (sel.type === 'kind' || sel.type === 'army') {
-      // thuis = één nieuwe groep (iedereen samen, aan het tempo van de traagste); in het veld = elke groep (of het deel van die soort)
+      // thuis = één nieuwe groep; in het veld = elke groep (of het deel van die soort).
+      // Alles in één bevel, in formatie (zoals ze nu staan) en aan het tempo van de traagste: samen aankomen.
       const s = this.state;
-      const ops = [];
+      const now = this.now;
+      const parts = [];
       const goingHome = target && target.type === 'home';
+      const door = tcDoor();
       if (sel.type === 'kind') {
         const home = sel.kind === 'villager' ? 0 : (s.units || {})[sel.kind] || 0;
-        if (home && !goingHome) ops.push({ action: 'send', spec: { units: { [sel.kind]: home } }, from: { x: sel.gx, y: sel.gy } });
+        if (home && !goingHome) parts.push({ op: { action: 'send', spec: { units: { [sel.kind]: home } }, from: { x: sel.gx, y: sel.gy } }, pos: { x: sel.gx, y: sel.gy }, units: { [sel.kind]: home } });
         for (const g of s.field || []) {
           if (!g.units[sel.kind]) continue;
-          ops.push(Object.keys(g.units).length === 1 ? { action: 'order', id: g.id } : { action: 'split', id: g.id, units: { [sel.kind]: g.units[sel.kind] } });
+          const op = Object.keys(g.units).length === 1 ? { action: 'order', id: g.id } : { action: 'split', id: g.id, units: { [sel.kind]: g.units[sel.kind] } };
+          parts.push({ op, pos: groupPos(g, now), units: { [sel.kind]: g.units[sel.kind] } });
         }
       } else {
         const home = {};
         for (const k of ARMY_UNITS) if ((s.units || {})[k] > 0) home[k] = s.units[k];
-        if (Object.keys(home).length && !goingHome) ops.push({ action: 'send', spec: { units: home } });
-        for (const g of s.field || []) if (!isVillagerGroup(g)) ops.push({ action: 'order', id: g.id });
+        if (Object.keys(home).length && !goingHome) parts.push({ op: { action: 'send', spec: { units: home } }, pos: { x: door.gx, y: door.gy }, units: home });
+        for (const g of s.field || []) if (!isVillagerGroup(g)) parts.push({ op: { action: 'order', id: g.id }, pos: groupPos(g, now), units: g.units });
       }
-      ops.forEach((op, k) => {
-        const off = k === 0 ? [0, 0] : [Math.cos(k * 2.4) * 0.6 * Math.sqrt(k), Math.sin(k * 2.4) * 0.6 * Math.sqrt(k)];
-        this.onFieldOrder({ ...op, to: to && { x: to.x + off[0], y: to.y + off[1] }, target, keepSel: true });
+      if (!parts.length) return;
+      // formatie: dezelfde onderlinge ligging als nu, maar compact rond het doel
+      const cx = parts.reduce((a, p) => a + p.pos.x, 0) / parts.length;
+      const cy = parts.reduce((a, p) => a + p.pos.y, 0) / parts.length;
+      const far = Math.max(0.001, ...parts.map((p) => Math.hypot(p.pos.x - cx, p.pos.y - cy)));
+      const R = 0.8 + 0.3 * Math.sqrt(parts.length);
+      const k = Math.min(1, R / far);
+      const offs = [];
+      parts.forEach((p, i) => {
+        let ox = (p.pos.x - cx) * k; let oy = (p.pos.y - cy) * k;
+        // staan ze (bijna) op dezelfde plek? dan een eigen plekje ernaast
+        if (offs.some(([x, y]) => Math.hypot(x - ox, y - oy) < 0.5)) { ox += Math.cos(i * 2.4) * 0.6 * Math.sqrt(i); oy += Math.sin(i * 2.4) * 0.6 * Math.sqrt(i); }
+        offs.push([ox, oy]);
       });
+      const pace = parts.length > 1 ? Math.min(...parts.map((p) => Math.min(...Object.keys(p.units).map((u) => FIELD.speed[u] || 1)))) : null;
+      const list = parts.map((p, i) => ({ ...p.op, to: to && { x: to.x + offs[i][0], y: to.y + offs[i][1] }, target, pace, keepSel: true }));
+      if (this.onFieldOrders) this.onFieldOrders(list); else list.forEach((o) => this.onFieldOrder(o));
       if (sel.type === 'kind') this.selectKind(sel.kind); else this.selectArmy();
     }
     else if (sel.type === 'walker') { sel.w.leaving = true; this.onFieldOrder({ action: 'send', spec: { villager: sel.w.job }, from: { x: sel.w.gx, y: sel.w.gy }, to, target }); }
