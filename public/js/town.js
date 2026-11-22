@@ -2272,20 +2272,60 @@ export class TownView {
     }
   }
 
-  // rand van je bouwgrond (en gekapte stukken) zacht aanduiden
-  drawBuildArea(ctx) {
+  // Omtrek van al je bouwgrond: het bouwvierkant + gekochte loten + gekapte stukken (één stippellijn errond).
+  // Berekend als de randen tussen bouwgrond en de rest, samengevoegd tot lange lijnen; bewaard tot er iets verandert.
+  buildOutline() {
     const s = this.state;
     const k = buildRing(s);
+    const key = `${k}|${s.terr ? s.terr.cl.length : 0}|${s.terr ? JSON.stringify(s.terr.lots || []) : ''}`;
+    if (this.outline && this.outline.key === key) return this.outline;
+    const cl = s.terr ? clearedSet(s) : new Set();
+    const ok = (i, j) => (ringOf(i, j) <= k) || (!!s.terr && i >= T_MIN && j >= T_MIN && i < T_MAX && j < T_MAX && cl.has(tileIndex(i, j)));
+    const lo = Math.min(-k, T_MIN); const hi = Math.max(N + k, T_MAX);
+    const hor = new Map(); const ver = new Map(); // y -> [x...], x -> [y...]
+    const extra = [];
+    for (let j = lo; j < hi; j++) {
+      for (let i = lo; i < hi; i++) {
+        if (!ok(i, j)) continue;
+        if (ringOf(i, j) > k) extra.push([i, j]);
+        if (!ok(i, j - 1)) (hor.get(j) || hor.set(j, []).get(j)).push(i);
+        if (!ok(i, j + 1)) (hor.get(j + 1) || hor.set(j + 1, []).get(j + 1)).push(i);
+        if (!ok(i - 1, j)) (ver.get(i) || ver.set(i, []).get(i)).push(j);
+        if (!ok(i + 1, j)) (ver.get(i + 1) || ver.set(i + 1, []).get(i + 1)).push(j);
+      }
+    }
+    // aaneengesloten stukjes samenvoegen tot lange lijnen (dan lopen de stippels mooi door)
+    const runs = (m, horiz) => {
+      const out = [];
+      for (const [c, list] of m) {
+        list.sort((a, b) => a - b);
+        let a = list[0]; let b = a + 1;
+        for (let n = 1; n <= list.length; n++) {
+          if (n < list.length && list[n] === b) { b++; continue; }
+          out.push(horiz ? [a, c, b, c] : [c, a, c, b]);
+          if (n < list.length) { a = list[n]; b = a + 1; }
+        }
+      }
+      return out;
+    };
+    this.outline = { key, segs: [...runs(hor, true), ...runs(ver, false)], extra };
+    return this.outline;
+  }
+
+  // rand van je bouwgrond zacht aanduiden
+  drawBuildArea(ctx) {
+    const o = this.buildOutline();
     ctx.save();
     ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-    ctx.strokeStyle = 'rgba(255,248,220,0.3)'; ctx.lineWidth = 0.05; ctx.setLineDash([0.3, 0.2]);
-    ctx.strokeRect(-k, -k, N + 2 * k, N + 2 * k);
-    ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(255,240,190,0.08)';
-    for (const idx of s.terr ? clearedSet(s) : []) {
-      const { i, j } = tileOf(idx);
-      if (ringOf(i, j) > k) ctx.fillRect(i, j, 1, 1);
-    }
+    for (const [i, j] of o.extra) ctx.fillRect(i, j, 1, 1);
+    ctx.beginPath();
+    for (const [x0, y0, x1, y1] of o.segs) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
+    // donkere schaduw + lichte stippels: goed zichtbaar op licht en donker gras
+    ctx.setLineDash([0.3, 0.2]);
+    ctx.strokeStyle = 'rgba(40,28,10,0.28)'; ctx.lineWidth = 0.1; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,250,225,0.72)'; ctx.lineWidth = 0.05; ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -2427,10 +2467,8 @@ export class TownView {
       ctx.beginPath(); ctx.moveTo(i, -k); ctx.lineTo(i, N + k); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(-k, i); ctx.lineTo(N + k, i); ctx.stroke();
     }
-    for (const idx of s.terr ? s.terr.cl : []) {
-      const { i, j } = tileOf(idx);
-      if (ringOf(i, j) > k) { ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(i, j, 1, 1); ctx.strokeRect(i, j, 1, 1); }
-    }
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    for (const [i, j] of this.buildOutline().extra) { ctx.fillRect(i, j, 1, 1); ctx.strokeRect(i, j, 1, 1); }
     ctx.restore();
   }
 
