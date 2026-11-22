@@ -387,6 +387,7 @@ function buildQueueHtml(app, live) {
     html += `<div class="qitem"><img src="${buildingThumb(b.type, j.to, app.data.team.color)}" alt="">
       <div><div class="nm">${name}</div>${bar(j.start, j.end)}</div>${timer(j.end)}</div>`;
   }
+  if (age(live) < 3) html += `<p class="small muted" style="margin:6px 0 0">Meer bouwers? In het ${AGES[3].name} (stadscentrum niveau 3) krijg je er een derde bij.</p>`;
   return html + '</div>';
 }
 
@@ -460,7 +461,7 @@ function unlocksHtml(a, civ) {
   const bs = BUILD_ORDER.filter((t) => BUILDINGS[t].age === a).map((t) => BUILDINGS[t].name);
   const us = Object.keys(UNITS).filter((k) => UNITS[k].age === a && UNITS[k].building && (!UNITS[k].civ || UNITS[k].civ === civ)).map((k) => UNITS[k].name);
   if (a === CASTLE_LEVEL && CIVS[civ]) us.push('het kasteel');
-  const more = a >= 3 ? ['een derde bouwer'] : [];
+  const more = a === 3 ? ['een derde bouwer'] : [];
   const all = [...bs, ...us, ...more, 'hogere gebouwniveaus', '+10% productie'];
   return `<p class="small" style="margin:6px 0 0"><b>Ontgrendelt:</b> ${all.join(', ')}.</p>`;
 }
