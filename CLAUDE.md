@@ -1,6 +1,7 @@
 # Rijken van de Vallei — instructies voor Claude
 
 Browser-strategiespel (isometrisch, "bouw je rijk") voor een kleine vriendengroep.
+**Lees ook `context.md`**: spelregels, voorkeuren van de gebruiker, wat al gebouwd is en hoe je test. Werk het bij na grote wijzigingen.
 Draait op **Cloudflare Pages + Pages Functions + D1** (gratis plan). Alle tekst in het spel is **Nederlands**.
 
 ## Zo komt een wijziging online (automatisch)
