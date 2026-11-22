@@ -71,7 +71,9 @@ Daarom:
   voetvolk achter de bedreigde poort; rammen op de poort). Winnen: alle verdedigers weg, of het plein (`plaza`) `FB.capMs` houden.
   Bevelen gaan via `/battle/order` met de tik `at` in een wachtrij (`queueOrder`, `st.q`); de server rekent `FB.delay` achter op de
   klok zodat ze op dezelfde tik uitgevoerd worden als in de browser. De browser (`battleview.js` + `siegeview.js`, een `TownView`
-  met `battleMode`) peilt `/battle?id=` elke 1,2 s, rekent zelf verder en werkt verschillen zacht weg. De server rekent per verzoek
+  met `battleMode`) peilt `/battle?id=` elke `FB.pollMs` (0,6 s), rekent zelf verder en laat verschillen bijglijden (max. 2,5 tegels/s).
+  Een bevel gaat `FB.lead` tikken na de tik in, zodat de tegenstander het meestal al kent. Aanraakscherm: met troepen gekozen is
+  een tik altijd een bevel (andere troep kiezen = kaartje of dubbeltik); muis: links klikken kiest, rechts klikken = bevel. De server rekent per verzoek
   hooguit `FB.maxTicksPerCall` tikken. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af.
   Het einde (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override` (zelfde buit, rapporten en punten).
 - Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en

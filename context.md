@@ -163,6 +163,13 @@ registratie; oude spelers kregen een vast willekeurig volk.
     niets besturen; de verdediger verdedigt in zijn stad en reageert op de kant van de aanval, zoals Rome Total War").
     Nieuwe `fieldbattle.js` (raster, routes, opstelling, AI per kant, plein), `siegeview.js` (TownView in `battleMode`),
     bevelen met tik + wachtrij, server `FB.delay` achter. Muurstukken worden nu als afbeelding gecachet (ook sneller in de stad).
+19. Belegering vlotter na een echte test van de gebruiker ("troepen wilden niet verplaatsen bij de opstelling, aanval chaotisch"):
+    oorzaak = een tik tussen je eigen troepen koos een andere troep, en tikken buiten de smalle strook deed niets zichtbaars.
+    Nu: met troepen gekozen is een tik op een gsm altijd een bevel; opstelgebied breder, met rand, op een open veld (bos
+    voor de muur gekapt); melding bij tikken buiten het gebied; samen lopen in het tempo van de traagste; minder
+    wisselen van doelwit en minder duwen; verdedigers blijven binnen tot er een bres is; geen ×n-labels meer.
+    Peilen 0,6 s, bevelen 0,2 s vertraagd, correcties glijden bij. Getest met echte tikken (Playwright, aanraakscherm)
+    en twee spelers met 600–900 ms vertraging: beide zien exact hetzelfde, geen sprongen (scripts: taps/duo in scratchpad).
 
 ## 8. Bekende beperkingen en ideeën
 
