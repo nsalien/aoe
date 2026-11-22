@@ -4,11 +4,11 @@
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
-  LAND, landCost, WALL_TILE,
+  LAND, landCost, WALL_TILE, GATE, DEMOLISH,
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
 import {
-  territory, ringOf, ringForAge, tileIndex, inTerr, T_MIN, T_MAX, TILE, exDecode, exEncode, revealCircle, revealSegment,
+  territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, TILE, exDecode, exEncode, revealCircle, revealSegment,
 } from './territory.js';
 import { resolveBattle, computeLoot, carryCapacity } from './battle.js';
 import { combatants, runFight, fightEnd, survivorsByGroup } from './skirmish.js';
@@ -316,6 +316,18 @@ export function ensureTerritory(s, seed) {
       }
     }
   }
+  // een volledig ommuurde stad zonder poort (van voor de poorten) krijgt er een, zodat je troepen er nog door kunnen
+  if (s.walls.length && !(s.gates || []).length && wallEnclosed(s)) {
+    const set = wallSet(s); const d = tcDoor();
+    let best = null;
+    for (const idx of s.walls) {
+      const { i, j } = tileOf(idx);
+      if (!gateAxis(set, i, j)) continue;
+      const dist = Math.hypot(i + 0.5 - d.gx, j + 0.5 - d.gy);
+      if (!best || dist < best.dist) best = { idx, dist };
+    }
+    if (best) { s.walls = s.walls.filter((x) => x !== best.idx); s.gates = [best.idx]; }
+  }
   // steden van voor de volkeren krijgen een willekeurig (maar vast) volk
   if (!CIVS[s.civ]) s.civ = CIV_IDS[(Math.imul(seed | 0, 2654435761) >>> 0) % CIV_IDS.length];
   if (!s.field) s.field = [];
@@ -381,13 +393,15 @@ export function doBuyLot(s, li, lj) {
   lots.push([li, lj]);
 }
 
-// ---------- muren, tegel per tegel ----------
-export const wallSet = (s) => new Set(s.walls || []);
+// ---------- muren, tegel per tegel (en poorten) ----------
+// muur én poorten samen: een dichte poort houdt de stad even goed dicht als een muur
+export const wallSet = (s) => new Set([...(s.walls || []), ...(s.gates || [])]);
+export const gateSet = (s) => new Set(s.gates || []);
 
-// tegels die door het stadscentrum tot aan de rand van de bouwgrond+marge lopen zonder muur: is je stad dicht?
-export function wallEnclosed(s) {
-  const walls = wallSet(s);
-  if (!walls.size) return false;
+// Binnenkant van de stad: alle tegels die je vanaf het stadscentrum bereikt zonder door een muur of poort te gaan.
+// Komt die vulling tot buiten de bouwgrond (+ marge), dan is de stad niet dicht (null).
+export function insideSet(s, walls = wallSet(s)) {
+  if (!walls.size) return null;
   const k = ringForAge(age(s));
   const lim = k + 6;
   const start = [TC_POS.x, TC_POS.y];
@@ -395,14 +409,76 @@ export function wallEnclosed(s) {
   const q = [start];
   while (q.length) {
     const [i, j] = q.pop();
-    if (ringOf(i, j) >= lim) return false;
+    if (ringOf(i, j) >= lim) return null;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const ni = i + dx; const nj = j + dy; const key = `${ni},${nj}`;
       if (seen.has(key) || (inTerr(ni, nj) && walls.has(tileIndex(ni, nj)))) continue;
       seen.add(key); q.push([ni, nj]);
     }
   }
-  return true;
+  return seen;
+}
+
+export const wallEnclosed = (s) => !!insideSet(s);
+
+// Ligt tegel (i, j) in een recht stuk muur? 'x' = de muur loopt langs x (je gaat er langs y door), 'y' = omgekeerd.
+export function gateAxis(set, i, j) {
+  const has = (a, b) => inTerr(a, b) && set.has(tileIndex(a, b));
+  const x = has(i - 1, j) && has(i + 1, j);
+  const y = has(i, j - 1) && has(i, j + 1);
+  return x && !y ? 'x' : y && !x ? 'y' : null;
+}
+
+export function checkPlaceGate(s, i, j) {
+  if (!bLevel(s, 'wall')) return 'Bouw eerst de stadsmuur.';
+  if (!Number.isInteger(i) || !Number.isInteger(j) || !inTerr(i, j)) return 'Ongeldige plaats.';
+  if (!isBuildable(s, i, j)) return 'Een poort kan enkel op je eigen bouwgrond.';
+  const gates = s.gates || [];
+  if (gates.length >= GATE.max) return `Je hebt al ${GATE.max} poorten.`;
+  const idx = tileIndex(i, j);
+  if (gates.includes(idx)) return 'Hier staat al een poort.';
+  if (!(s.walls || []).includes(idx) && occupied(s).has(`${i},${j}`)) return 'Daar staat een gebouw.';
+  if (!gateAxis(wallSet(s), i, j)) return 'Een poort moet in een recht stuk muur staan, met aan beide kanten een muurstuk.';
+  if (!canAfford(s.res, GATE.cost)) return 'Niet genoeg grondstoffen.';
+  return null;
+}
+
+// van een muurstuk (of een gat van één tegel tussen twee muurstukken) een poort maken
+export function doPlaceGate(s, i, j) {
+  const err = checkPlaceGate(s, i, j);
+  if (err) throw new GameError(err);
+  pay(s.res, GATE.cost);
+  const idx = tileIndex(i, j);
+  s.walls = (s.walls || []).filter((x) => x !== idx);
+  if (!s.gates) s.gates = [];
+  s.gates.push(idx);
+}
+
+// Moet een groep van 'from' naar 'to' door de stadsmuur? Dan via de dichtstbijzijnde poort: [voor de poort, achter de poort].
+export function gateRoute(s, from, to) {
+  const gates = s.gates || [];
+  if (!gates.length) return null;
+  const walls = wallSet(s);
+  const inside = insideSet(s, walls);
+  if (!inside) return null;
+  const key = (p) => `${Math.floor(p.x)},${Math.floor(p.y)}`;
+  const a = inside.has(key(from)); const b = inside.has(key(to));
+  if (a === b) return null;
+  let best = null;
+  for (const idx of gates) {
+    const { i, j } = tileOf(idx);
+    const ax = gateAxis(walls, i, j);
+    if (!ax) continue;
+    const cx = i + 0.5; const cy = j + 0.5;
+    const p1 = ax === 'x' ? { x: cx, y: cy - 0.9 } : { x: cx - 0.9, y: cy };
+    const p2 = ax === 'x' ? { x: cx, y: cy + 0.9 } : { x: cx + 0.9, y: cy };
+    const in1 = inside.has(key(p1));
+    const pin = in1 ? p1 : p2; const pout = in1 ? p2 : p1;
+    const [first, second] = a ? [pin, pout] : [pout, pin];
+    const d = Math.hypot(first.x - from.x, first.y - from.y) + 1.8 + Math.hypot(to.x - second.x, to.y - second.y);
+    if (!best || d < best.d) best = { d, via: [first, second] };
+  }
+  return best ? best.via : null;
 }
 
 // muurwaarde in gevechten: volledig als de stad dicht is, anders maar een stukje
@@ -428,6 +504,11 @@ export function checkPlaceWalls(s, tiles) {
     seen.add(`${i},${j}`);
   }
   if (!canAfford(s.res, WALL_TILE.cost[L], tiles.length)) return 'Niet genoeg grondstoffen voor zoveel muur.';
+  if (!(s.gates || []).length) {
+    const after = wallSet(s);
+    for (const [i, j] of tiles) after.add(tileIndex(i, j));
+    if (insideSet(s, after)) return 'Zo is je stad helemaal dicht zonder poort. Laat één tegel open in een recht stuk muur en maak er een poort.';
+  }
   return null;
 }
 
@@ -439,10 +520,12 @@ export function doPlaceWalls(s, tiles) {
   for (const [i, j] of tiles) s.walls.push(tileIndex(i, j));
 }
 
+// muurstukken (en poorten) afbreken
 export function doRemoveWalls(s, tiles) {
   const rm = new Set((tiles || []).filter((t) => Array.isArray(t) && inTerr(t[0], t[1])).map(([i, j]) => tileIndex(i, j)));
   if (!rm.size) throw new GameError('Kies welke muur weg moet.');
   s.walls = (s.walls || []).filter((x) => !rm.has(x));
+  if (s.gates) s.gates = s.gates.filter((x) => !rm.has(x));
 }
 
 export function buildRing(s) {
@@ -623,11 +706,18 @@ function setPath(g, from, to, t, pace = null) {
   g.pending = true;
 }
 
+// lopen van 'from' naar 'dest', zo nodig via een poort (dan eerst naar de poort, daarna verder)
+function travel(s, g, from, dest, t, pace = null) {
+  const via = gateRoute(s, from, dest);
+  if (pace) g.pace = pace; else delete g.pace;
+  if (via) { g.via = [via[1], { x: dest.x, y: dest.y }]; setPath(g, from, via[0], t, pace); } else { delete g.via; setPath(g, from, dest, t, pace); }
+}
+
 function goHome(s, g, t) {
   const d = tcDoor();
   g.order = { type: 'home' };
   g.work = null;
-  setPath(g, { x: g.x1, y: g.y1 }, { x: d.gx, y: d.gy }, t);
+  travel(s, g, { x: g.x1, y: g.y1 }, { x: d.gx, y: d.gy }, t);
 }
 
 function disband(s, g) {
@@ -646,6 +736,13 @@ function disband(s, g) {
 
 function fieldArrive(s, g, t, speed) {
   withEx(s, (b) => revealSegment(b, g.x0, g.y0, g.x1, g.y1, groupVision(g)));
+  // tussenstop (een poort): gewoon verder naar het volgende punt, met dezelfde opdracht
+  if (g.via && g.via.length) {
+    const next = g.via.shift();
+    if (!g.via.length) delete g.via;
+    setPath(g, { x: g.x1, y: g.y1 }, next, t, g.pace || null);
+    return;
+  }
   g.pending = false;
   g.x0 = g.x1; g.y0 = g.y1; g.t0 = g.t1;
   const o = g.order || {};
@@ -711,7 +808,7 @@ function ambush(s, g, t) {
   const p = groupPos(g, t);
   withEx(s, (b) => revealSegment(b, g.x0, g.y0, p.x, p.y, groupVision(g)));
   g.x0 = p.x; g.y0 = p.y; g.x1 = p.x; g.y1 = p.y; g.t0 = t; g.t1 = t;
-  g.pending = false; g.order = null; g.work = null;
+  g.pending = false; g.order = null; g.work = null; delete g.via;
   engage(s, g, { type: 'camp', id: 0 }, t);
 }
 
@@ -991,7 +1088,7 @@ export function doFieldOrder(s, id, to, target, now, pace = null) {
     dest = clampToTerr(Number(to.x), Number(to.y));
     g.order = { type: 'move' };
   }
-  setPath(g, pos, dest, now, Number(pace) > 0 ? Number(pace) : null);
+  travel(s, g, pos, dest, now, Number(pace) > 0 ? Number(pace) : null);
   return g;
 }
 
@@ -1099,6 +1196,44 @@ export function doUpgrade(s, bid, now, speed) {
   const to = b.level + 1;
   pay(s.res, levelCost(b.type, to));
   s.builds.push({ bid, to, start: now, end: now + levelTime(b.type, to, speed) });
+}
+
+// ---------- afbreken ----------
+
+export function checkDemolish(s, bid) {
+  const b = s.buildings.find((x) => x.id === bid);
+  if (!b) return 'Gebouw niet gevonden.';
+  if (b.type === 'tc') return 'Je stadscentrum kan je niet afbreken.';
+  if (b.type === 'wall') return 'Muren breek je stuk per stuk af: tik op een muurstuk.';
+  if ((s.queues[b.type] || []).length) return 'Er wordt nog getraind in dit gebouw. Wacht tot dat klaar is.';
+  return null;
+}
+
+// wat je terugkrijgt: een deel van wat het gebouw kostte (een lopende bouw voor de helft)
+export function demolishRefund(s, b) {
+  const out = {};
+  const add = (cost, f) => { for (const r of RES) if (cost[r]) out[r] = (out[r] || 0) + cost[r] * f; };
+  for (let L = 1; L <= b.level; L++) add(levelCost(b.type, L), DEMOLISH.built);
+  const job = s.builds.find((j) => j.bid === b.id);
+  if (job) add(levelCost(b.type, job.to), DEMOLISH.job);
+  for (const r of Object.keys(out)) out[r] = Math.floor(out[r]);
+  return out;
+}
+
+export function doDemolish(s, bid) {
+  const err = checkDemolish(s, bid);
+  if (err) throw new GameError(err);
+  const b = s.buildings.find((x) => x.id === bid);
+  const refund = demolishRefund(s, b);
+  s.buildings = s.buildings.filter((x) => x !== b);
+  s.builds = s.builds.filter((j) => j.bid !== bid);
+  addRes(s, refund);
+  // werkplekken die wegvallen: die dorpelingen worden vrij
+  const sl = slots(s);
+  for (const r of RES) {
+    if (s.villagers[r] > sl[r]) { s.villagers.idle += s.villagers[r] - sl[r]; s.villagers[r] = sl[r]; }
+  }
+  return refund;
 }
 
 export function checkTrain(s, unit, n, awayPop = 0) {

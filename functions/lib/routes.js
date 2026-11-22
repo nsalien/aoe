@@ -11,7 +11,7 @@ import {
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary,
   townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder, doFieldSplit,
-  doBuyLot, doPlaceWalls, doRemoveWalls,
+  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -285,6 +285,18 @@ async function townAction(ctx, fn) {
 route('POST', '/build', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   return townAction(ctx, (s) => doBuild(s, String(body.type), int(body.x, -1), int(body.y, -1), ctx.now, ctx.world.speed));
+});
+
+// gebouw afbreken (een deel van de kosten komt terug)
+route('POST', '/demolish', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  return townAction(ctx, (s) => doDemolish(s, int(body.id)));
+});
+
+// poort in de stadsmuur (op een muurstuk of in een gat van één tegel)
+route('POST', '/gate', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  return townAction(ctx, (s) => doPlaceGate(s, int(body.i, -9999), int(body.j, -9999)));
 });
 
 route('POST', '/upgrade', { auth: true, active: true }, async (ctx) => {
