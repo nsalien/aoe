@@ -37,6 +37,70 @@ const app = {
 };
 window.__app = app; // handig bij het debuggen in de console
 
+// ---------- meldingen op je gsm (web push) ----------
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const onIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standaloneApp = () => !!navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+Object.defineProperty(app, 'pushState', {
+  get() {
+    if (onIOS && !standaloneApp() && !pushSupported()) return 'ios-home';
+    if (!pushSupported()) return onIOS ? 'ios-home' : 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    return app.pushOn ? 'on' : 'off';
+  },
+});
+const unb64 = (s) => { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+
+// bij het opstarten: bestaande inschrijving opnieuw doorgeven (nieuwe speler, vernieuwde sleutel, ...)
+async function initPush() {
+  if (!pushSupported()) return;
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const sub = await reg.pushManager.getSubscription();
+    if (sub && Notification.permission === 'granted') {
+      await post('/push/subscribe', sub.toJSON());
+      app.pushOn = true;
+      renderPanel(true);
+    }
+  } catch (e) { console.warn('meldingen', e); }
+}
+
+async function enablePush() {
+  if (onIOS && !standaloneApp()) { toast('Zet het spel eerst op je beginscherm (Safari › Delen › Zet op beginscherm) en open het van daar.', 'err', 'bell'); return; }
+  if (!pushSupported()) { toast('Deze browser kan geen meldingen tonen.', 'err', 'bell'); return; }
+  // eerst de toestemming vragen (moet meteen na de tik gebeuren)
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast('Meldingen zijn niet toegestaan. Zet ze aan in de instellingen van je browser of de app.', 'err', 'bell'); renderPanel(true); return; }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const { key } = await get('/push/key');
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64(key) });
+    }
+    await post('/push/subscribe', sub.toJSON());
+    app.pushOn = true;
+    const r = await post('/push/test', {});
+    toast(r.sent ? 'Meldingen staan aan. Je kreeg net een proefmelding.' : 'Meldingen staan aan.', 'ok', 'bell');
+  } catch (e) { toast(`Meldingen aanzetten lukte niet: ${e.message}`, 'err', 'bell'); }
+  renderPanel(true);
+  // in het venster 'aanvallen' verdwijnt de vraag zodra de meldingen aan staan
+  const card = document.querySelector('#modalBody .push-card');
+  if (card && app.pushOn) card.remove();
+}
+
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) { await post('/push/unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+  } catch (e) { console.warn('meldingen', e); }
+  app.pushOn = false;
+  toast('Meldingen staan uit op dit toestel.', '', 'bell');
+  renderPanel(true);
+}
+
 let town = null;
 let world = null;
 let authWorld = null;
@@ -163,6 +227,9 @@ function startGame(data) {
   town.centerOn(tc);
   setInterval(tick, 1000);
   setInterval(poll, 20000);
+  initPush();
+  // geopend vanuit een melding: het adres opruimen (de aftelbalk toont de rest)
+  if (location.search) history.replaceState(null, '', location.pathname);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
   maybeShowIntro();
 }
@@ -365,6 +432,7 @@ function tick() {
     if (app.view === 'town') renderPanel();
     renderBuildBar();
   }
+  renderArrival();
   updateTimers();
   renderAlert();
   const w = app.data.world;
@@ -383,6 +451,22 @@ function tick() {
   if (tickN % 5 === 0 && (app.data.battles || []).some((b) => b.status !== 'done') && !(battle && battle.open)) poll();
   // legers die net aankwamen: even later opnieuw ophalen
   if (app.data.marches.some((m) => m.arriveAt <= now && m.arriveAt > now - 1000)) setTimeout(refresh, 1500);
+}
+
+// aftelbalk: je eigen aanval komt binnen 2 minuten aan
+function renderArrival() {
+  const now = app.now();
+  const ms = app.data.marches.filter((m) => m.own && m.kind === 'attack' && m.status === 'out' && m.arriveAt > now && m.arriveAt - now <= 120000)
+    .sort((a, b) => a.arriveAt - b.arriveAt);
+  let el = $('#arrivalBar');
+  if (!ms.length || (battle && battle.open)) { if (el) el.hidden = true; return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'arrivalBar'; el.className = 'arrival';
+    $('#stage').appendChild(el);
+  }
+  el.hidden = false;
+  setHTML(el, UI.arrivalHtml(app, ms[0], ms.length - 1));
 }
 
 function updateTimers() {
@@ -1147,6 +1231,21 @@ const actions = {
     if (t) { world.selected = { kind: 'town', obj: t }; renderPanel(); }
   },
   battleGo(el) { openBattle(Number(el.dataset.id)); },
+  pushOn() { enablePush(); },
+  pushOff() { disablePush(); },
+  async pushTest() {
+    try { const r = await post('/push/test', {}); toast(r.sent ? 'Proefmelding verstuurd.' : 'Geen toestel gevonden: zet de meldingen opnieuw aan.', r.sent ? 'ok' : 'err', 'bell'); } catch (e) { toast(e.message, 'err'); }
+  },
+  async prechoose(el) {
+    const id = Number(el.dataset.id); const mode = el.dataset.mode;
+    const m = app.data.marches.find((x) => x.id === id);
+    const next = m && m.pref === mode ? null : mode; // nog eens tikken = keuze ongedaan maken
+    try {
+      await post('/march/mode', { id, mode: next });
+      if (m) m.pref = next;
+      renderArrival();
+    } catch (e) { toast(e.message, 'err'); }
+  },
   toggleBuildbar() {
     app.bbMin = !app.bbMin;
     store.set('rvs-buildbar-min', app.bbMin);

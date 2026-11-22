@@ -691,11 +691,43 @@ function marchCargo(m) {
   return res ? `${units} · buit: ${res}` : units;
 }
 
+// meldingen op je gsm: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt)
+export function pushCardHtml(app) {
+  const st = app.pushState;
+  if (st === 'unsupported') return '';
+  const head = `<h3>${icon('bell')} Meldingen op je gsm</h3>`;
+  if (st === 'on') {
+    return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Staan aan op dit toestel: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt) krijg je een melding.</p>
+      <div class="actions"><button class="btn small" data-action="pushTest">Proefmelding</button><button class="btn small ghost" data-action="pushOff">Uitzetten</button></div></div>`;
+  }
+  if (st === 'ios-home') {
+    return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Op een iPhone kan dat enkel vanuit de app op je beginscherm:
+      tik in Safari op <b>Delen</b> › <b>Zet op beginscherm</b>, open het spel van daar en zet hier de meldingen aan.</p></div>`;
+  }
+  if (st === 'denied') {
+    return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Meldingen zijn geblokkeerd voor dit spel. Zet ze aan in de instellingen van je browser of de app, en kom dan hier terug.</p></div>`;
+  }
+  return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Krijg ±2 minuten voor je leger aankomt een melding, zodat je op tijd zelf kan kiezen: zelf besturen of automatisch.</p>
+    <div class="actions"><button class="btn primary small" data-action="pushOn">${icon('bell')} Meldingen aanzetten</button></div></div>`;
+}
+
+// aftelbalk: je leger komt binnen 2 minuten aan; kies nu al hoe de slag moet verlopen
+export function arrivalHtml(app, m, more) {
+  const pref = m.pref;
+  return `<div class="arr-head">${icon('swords')} Je leger komt aan bij <b>${esc(m.to.name)}</b></div>
+    <div class="arr-count"><span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span></div>
+    <div class="arr-choose"><span class="small">Bij aankomst:</span>
+      <button class="btn small ${pref === 'manual' ? 'primary' : ''}" data-action="prechoose" data-id="${m.id}" data-mode="manual">${icon('flag')} Zelf besturen</button>
+      <button class="btn small ${pref === 'auto' ? 'primary' : ''}" data-action="prechoose" data-id="${m.id}" data-mode="auto">${icon('hourglass')} Automatisch</button></div>
+    <div class="small arr-note">${pref === 'manual' ? 'De slag begint meteen als je leger aankomt.' : pref === 'auto' ? 'De slag wordt automatisch uitgerekend.' : 'Kies je niets, dan krijg je bij aankomst nog 45 seconden.'}${more ? ` · +${more} andere aanval${more > 1 ? 'len' : ''}` : ''}</div>`;
+}
+
 function worldOverviewHtml(app) {
   const d = app.data;
   return `<div class="ph"><div><h2>De Vallei</h2><div class="lvl">Wereldkaart</div></div></div>
     <p class="desc">Klik op een stad of roverskamp. Bondgenoten herken je aan de kleur van hun gebied: <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></p>
     <div class="card"><h3>${icon('flag')} Onderweg</h3>${marchesHtml(app)}</div>
+    ${pushCardHtml(app)}
     <div class="card small"><b>Legende</b><br>${icon('castle')} steden met teamkleur · ${icon('tent')} roverskampen (altijd aan te vallen) · gestippelde lijnen: legers onderweg (rood = vijandelijke aanval)</div>
     <div class="actions"><button class="btn" data-action="home">⌂ Naar mijn stad op de kaart</button></div>`;
 }
@@ -726,6 +758,7 @@ export function sendHtml(app, live, target, kind) {
     }
   }
   html += `<div id="sendSummary" class="summary"></div>
+    ${kind === 'attack' && app.pushState === 'off' ? pushCardHtml(app) : ''}
     <div class="actions"><button class="btn ${kind === 'attack' ? 'danger' : 'primary'} big" data-action="dosend" data-kind="${kind}">Vertrekken</button></div>`;
   return html;
 }
@@ -909,6 +942,10 @@ export function helpHtml(w) {
     <li><b>Muren</b> houden aanvallers tegen tot ze een bres slaan; verdedigers kunnen er net overheen vechten. Een open muur heeft een poort in het midden.</li></ul>
     <h3>Gevechten</h3>
     <p>Speerdragers zijn sterk tegen ruiters, boogschutters verdedigen goed tegen voetvolk. Muren, torens en de smidse versterken je verdediging. De sterkste kant wint; de winnaar verliest minder naarmate zijn overmacht groter is.</p>
+    <h3>Meldingen op je gsm</h3>
+    <p>Zet op de wereldkaart (of bij een aanval) de <b>meldingen</b> aan. ±2 minuten voor je leger aankomt, krijg je een melding op je gsm,
+    ook als het spel dicht is; de verdediger krijgt er ook een. Open je het spel, dan zie je een aftelling en kan je al kiezen:
+    <b>zelf besturen</b> of <b>automatisch</b>. Op een iPhone werkt dit enkel vanuit de app op je beginscherm.</p>
     <h3>Muren, poorten en afbreken</h3>
     <p>Muren plaats je tegel per tegel. Een <b>poort</b> maak je in een recht stuk muur: tik op een muurstuk en kies <b>Poort van maken</b>,
     of laat een gat van één tegel en kies <b>Poort maken</b>. Is je stad helemaal ommuurd, dan gaan je troepen enkel via een poort naar binnen

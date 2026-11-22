@@ -732,3 +732,25 @@ body.in-battle #toasts { top: 74px; }
   .bt-kind img { width: 30px; height: 30px; }
   .bt-hint { font-size: 11px; bottom: 4px; padding: 4px 10px; }
 }
+
+/* aftelbalk: je leger komt binnen 2 minuten aan */
+.arrival {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 7; width: min(420px, calc(100% - 24px));
+  background: linear-gradient(170deg, #fbf3df, #ecdcb6); color: var(--ink); border: 2px solid #8b6a3a; border-radius: 14px;
+  padding: 8px 12px 9px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); text-align: center; animation: tin 0.3s ease-out;
+}
+.arrival .arr-head { font-size: 13px; display: flex; gap: 6px; align-items: center; justify-content: center; }
+.arrival .arr-head .ic { width: 18px; height: 18px; }
+.arrival .arr-count { font-family: 'Cinzel', Georgia, serif; font-weight: 800; font-size: 30px; color: #7a2716; line-height: 1.1; margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+.arrival .arr-choose { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.arrival .arr-choose .btn .ic { width: 15px; height: 15px; }
+.arrival .arr-note { color: var(--ink2); margin-top: 4px; }
+.push-card .actions { margin-top: 8px; }
+@media (max-width: 900px) {
+  .arrival { top: 138px; left: 8px; right: 56px; width: auto; transform: none; }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .arrival { top: 6px; width: min(380px, calc(100% - 300px)); padding: 5px 10px 6px; }
+  .arrival .arr-count { font-size: 22px; margin: 0 0 2px; }
+  .arrival .arr-note { display: none; }
+}
