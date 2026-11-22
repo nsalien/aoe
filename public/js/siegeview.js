@@ -6,7 +6,7 @@ import { TownView } from './town.js';
 import { isoFns } from './iso.js';
 import { UNITS } from '../shared/rules.js';
 import { tileOf } from '../shared/territory.js';
-import { FB, nav, inZone, cellOf, aliveN, isRangedK, mobile } from '../shared/fieldbattle.js';
+import { FB, nav, inZone, cellOf, isRangedK, mobile } from '../shared/fieldbattle.js';
 
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
 const TAU = Math.PI * 2;
@@ -55,6 +55,7 @@ export class SiegeView extends TownView {
       this.fake = fakeTown(v);
       this.wallsOrig = [...this.fake.walls]; this.gatesOrig = [...this.fake.gates];
       this.townKey = null;
+      this.bst = st;
       this.setTown(v.seed, defColor);
       this.setState(this.fake);
       const b = st.box;
@@ -65,6 +66,15 @@ export class SiegeView extends TownView {
     }
     this.team = defColor;
     this.syncDamage(st);
+  }
+
+  // bomen die het leger voor de slag kapte (open veld voor de muur), niet tekenen
+  refreshTrees() {
+    super.refreshTrees();
+    const st = this.bst;
+    if (!st || !this.visTrees) return;
+    this.visTrees = this.visTrees.filter((t) => { const c = cellOf(st, t.i + 0.5, t.j + 0.5); return c < 0 || st.grid[c] === 'f'; });
+    this.stumps = [];
   }
 
   // camera op je eigen troepen (en een beetje richting de stad)
@@ -143,7 +153,18 @@ export class SiegeView extends TownView {
       if (this.zoneKey !== zk) {
         this.zoneKey = zk;
         this.zone = [];
-        for (let c = 0; c < nv.N; c++) if (inZone(st, nv, bv.side, c)) this.zone.push(c);
+        const set = new Set();
+        for (let c = 0; c < nv.N; c++) if (inZone(st, nv, bv.side, c)) { this.zone.push(c); set.add(c); }
+        // rand van het gebied: zijden van een zonetegel waar geen zonetegel naast ligt
+        this.zoneEdge = [];
+        const w = st.box.w;
+        for (const c of this.zone) {
+          const i = st.box.x0 + (c % w); const j = st.box.y0 + Math.floor(c / w);
+          if (!set.has(c - w) || c < w) this.zoneEdge.push([i, j, i + 1, j]);
+          if (!set.has(c + w)) this.zoneEdge.push([i, j + 1, i + 1, j + 1]);
+          if (c % w === 0 || !set.has(c - 1)) this.zoneEdge.push([i, j, i, j + 1]);
+          if ((c + 1) % w === 0 || !set.has(c + 1)) this.zoneEdge.push([i + 1, j, i + 1, j + 1]);
+        }
       }
       const pulse = 0.26 + Math.sin(t * 0.004) * 0.06;
       ctx.fillStyle = bv.side ? `rgba(120,200,255,${pulse})` : `rgba(255,220,90,${pulse})`;
@@ -154,6 +175,10 @@ export class SiegeView extends TownView {
         ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(d.x, d.y); ctx.lineTo(e.x, e.y); ctx.closePath();
       }
       ctx.fill();
+      ctx.strokeStyle = bv.side ? 'rgba(150,215,255,0.95)' : 'rgba(255,225,110,0.95)'; ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      for (const [i0, j0, i1, j1] of this.zoneEdge) { const a = toWorld(i0, j0); const b = toWorld(i1, j1); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      ctx.stroke();
     }
     // het plein: wie het lang genoeg houdt, wint
     const P = toWorld(st.plaza.x, st.plaza.y);
@@ -194,7 +219,7 @@ export class SiegeView extends TownView {
     if (m && performance.now() - m.at < 900) {
       const f = (performance.now() - m.at) / 900;
       const p = toWorld(m.x, m.y);
-      ctx.strokeStyle = m.attack ? `rgba(230,60,40,${1 - f})` : `rgba(150,240,120,${1 - f})`;
+      ctx.strokeStyle = m.attack ? `rgba(230,60,40,${1 - f})` : m.warn ? `rgba(255,170,40,${1 - f})` : `rgba(150,240,120,${1 - f})`;
       ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(p.x, p.y, 8 + f * 18, 4 + f * 9, 0, 0, TAU); ctx.stroke();
     }
   }
@@ -281,20 +306,14 @@ export class SiegeView extends TownView {
     const lx = swing ? dir * swing * 3 : 0;
     this.figure(ctx, u, x + lx, y, t, moving || swing > 0, dir, color);
     // levens en aantal
-    const n = aliveN(u);
     const max = u.hp0 * (u.n || 1);
     const tall = u.k === 'elephant' ? 54 : cav ? 40 : u.k === 'ram' || u.k === 'stonethrower' ? 28 : 32;
-    if (u.hp < max || n > 1) {
+    if (u.hp < max - 0.01) {
       const bw = u.k === 'elephant' ? 20 : 13;
       const frac = Math.max(0, u.hp / max);
       ctx.fillStyle = 'rgba(20,12,6,0.72)'; ctx.fillRect(x - bw / 2 - 1, y - tall - 1, bw + 2, 4);
       ctx.fillStyle = u.s === bv.side ? (frac > 0.6 ? '#62d44c' : frac > 0.3 ? '#f2c230' : '#e2452f') : (frac > 0.3 ? '#e2452f' : '#9b1c12');
       ctx.fillRect(x - bw / 2, y - tall, bw * frac, 2);
-    }
-    if (n > 1) {
-      ctx.font = '700 8px Inter, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(30,20,10,0.78)'; ctx.beginPath(); ctx.roundRect(x - 8, y - tall - 12, 16, 9, 4); ctx.fill();
-      ctx.fillStyle = '#fff3d6'; ctx.fillText(`×${n}`, x, y - tall - 5);
     }
   }
 
