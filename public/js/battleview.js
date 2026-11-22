@@ -2,7 +2,7 @@
 // tussen twee peilingen exact hetzelfde verder (fieldbattle.js is deterministisch) zodat alles vloeiend beweegt.
 // Je eigen bevelen gaan meteen in, met het tijdstip (tik) waarop je tikte; de server voert ze op dezelfde tik uit.
 import { UNITS } from '../shared/rules.js';
-import { stepTo, queueOrder, FB, mobile, aliveN, battleTime, deployLeft, nav, cellOf } from '../shared/fieldbattle.js';
+import { stepTo, queueOrder, FB, mobile, aliveN, battleTime, deployLeft, nav, cellOf, inZone } from '../shared/fieldbattle.js';
 import { SiegeView, toWorld } from './siegeview.js';
 import { icon } from './icons.js';
 import { setHTML } from './dom.js';
@@ -73,7 +73,7 @@ export class BattleView {
     if (battle) this.apply(battle);
     this.poll();
     clearInterval(this.pollTimer);
-    this.pollTimer = setInterval(() => this.poll(), 1200);
+    this.pollTimer = setInterval(() => this.poll(), FB.pollMs);
     if (!this.raf) this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -159,7 +159,8 @@ export class BattleView {
     const needIds = !(o.ready || o.retreat || o.ai != null);
     if (needIds && !ids.length) return;
     const cid = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-    const at = st.n + 1;
+    // heel even later uitvoeren: zo kent de tegenstander het bevel meestal al vóór het gebeurt (minder correcties)
+    const at = st.n + FB.lead;
     const list = needIds ? ids : null;
     queueOrder(st, this.side, list, o, at, cid); // meteen tonen; de server voert het op dezelfde tik uit
     this.pending.push({ cid, at, ids: list, o, sent: performance.now() });
@@ -226,15 +227,17 @@ export class BattleView {
   }
 
   // ---------- klikken op het slagveld ----------
-  pick(sx, sy) {
+  // eenheid onder de vinger; own = enkel je eigen troepen of enkel vijanden, r = zoekstraal op het scherm
+  pick(sx, sy, { own = null, r = null } = {}) {
     const st = this.state;
     if (!st) return null;
     const cam = this.view.cam;
     const w = cam.screenToWorld(sx, sy);
-    const rad = (coarse() ? 24 : 15) / cam.zoom;
+    const rad = (r ?? (coarse() ? 24 : 15)) / cam.zoom;
     let best = null; let bd = Infinity;
     for (const u of st.units) {
       if (u.hp <= 0) continue;
+      if (own != null && (u.s === this.side) !== own) continue;
       if (u.k === 'tower') {
         const c = toWorld(u.x, u.y);
         if (Math.abs(w.x - c.x) < 26 && w.y < c.y + 10 && w.y > c.y - 90) { const d = rad * 0.8; if (d < bd) { bd = d; best = u; } }
@@ -262,11 +265,19 @@ export class BattleView {
 
   click(sx, sy, e) {
     if (!this.state) return;
-    const u = this.pick(sx, sy);
     const now = performance.now();
-    if (u && u.s === this.side && mobile(u)) {
+    // met troepen gekozen is een tik een bevel; enkel wie precies op een andere eigen troep tikt, kiest die.
+    // Twee keer snel op een troep tikken kiest altijd alle troepen van die soort.
+    // Aanraakscherm: met troepen gekozen is een tik altijd een bevel (een andere troep kies je met een kaartje of
+    // door twee keer te tikken). Muis: links klikken op een eigen troep kiest die, zoals in Age of Empires.
+    const has = this.sel.size > 0;
+    const touch = e && e.pointerType ? e.pointerType !== 'mouse' : coarse();
+    const near = this.pick(sx, sy, { own: true });
+    const dbl = !!near && !!this.lastClick && now - this.lastClick.t < 380 && this.lastClick.k === near.k;
+    let u = dbl ? near : has ? (touch ? null : this.pick(sx, sy, { own: true, r: 9 })) : near;
+    if (u && has && !dbl && this.sel.has(u.id)) u = null;
+    if (u && mobile(u)) {
       if (!this.manual) { this.flashHint('De computer leidt je troepen. Kies "Zelf besturen" om ze zelf te leiden.'); return; }
-      const dbl = this.lastClick && now - this.lastClick.t < 380 && this.lastClick.k === u.k;
       this.lastClick = { t: now, k: u.k };
       if (dbl) this.selectKind(u.k);
       else if (e && (e.shiftKey || e.ctrlKey || e.metaKey)) { if (this.sel.has(u.id)) this.sel.delete(u.id); else this.sel.add(u.id); }
@@ -274,11 +285,12 @@ export class BattleView {
       this.renderBars(true);
       return;
     }
-    this.lastClick = null;
-    if (this.sel.size) this.command(sx, sy, u);
+    this.lastClick = { t: now, k: near ? near.k : null };
+    if (has) this.command(sx, sy);
+    else if (this.manual) this.flashHint(coarse() ? 'Kies eerst troepen: tik op een kaartje onderaan of op een figuur.' : 'Kies eerst troepen: klik op een kaartje onderaan of op een figuur.');
   }
 
-  command(sx, sy, u = this.pick(sx, sy)) {
+  command(sx, sy, u = this.pick(sx, sy, { own: false })) {
     const st = this.state;
     if (!this.manual || !this.sel.size || !st) return;
     const battle = st.phase === 'battle';
@@ -296,9 +308,13 @@ export class BattleView {
     }
     let { gx, gy } = this.view.screenTile(sx, sy);
     if (wk >= 0 && this.side === 1) { gx = st.walls[wk].i + 0.5; gy = st.walls[wk].j + 0.5; }
-    if (cellOf(st, gx, gy) < 0) return;
+    const c = cellOf(st, gx, gy);
+    if (c < 0) { this.flashHint('Dat ligt buiten het slagveld.'); return; }
+    // opstelling: buiten je gebied komen ze zo dicht mogelijk bij die plek
+    const outside = !battle && !inZone(st, nav(st), this.side, c);
+    if (outside) this.flashHint('Dat ligt buiten je opstelgebied (gekleurd). Je troepen staan zo dicht mogelijk bij die plek.');
     this.order({ x: Math.round(gx * 100) / 100, y: Math.round(gy * 100) / 100 });
-    this.mark = { x: gx, y: gy, at: performance.now(), attack: false };
+    this.mark = { x: gx, y: gy, at: performance.now(), attack: false, warn: outside };
   }
 
   longPress() {
@@ -384,7 +400,7 @@ export class BattleView {
     let hint = '';
     if (this.hintMsg && this.hintMsg.until > now) hint = this.hintMsg.t;
     else if (st && b.status === 'live' && this.manual && st.phase === 'deploy' && !st.ready[this.side]) {
-      hint = this.sel.size ? 'Tik in het gekleurde gebied waar ze moeten staan.' : 'Opstelling: kies troepen (kaartje of figuur) en zet ze klaar. Druk dan op Start.';
+      hint = this.sel.size ? 'Tik in het gekleurde gebied waar ze moeten staan.' : 'Opstelling: tik op een kaartje onderaan en dan in het gekleurde gebied. Druk daarna op Start.';
     } else if (st && b.status === 'live' && this.manual && st.phase === 'battle' && !this.sel.size && battleTime(st) < 25000) {
       hint = coarse() ? 'Tik op een troep of kaartje, dan op de grond, een vijand of een muur.' : 'Klik op een troep of kaartje, dan op de grond, een vijand of een muur (rechtsklik werkt ook).';
     }
@@ -432,9 +448,15 @@ export class BattleView {
     }
     if (st) this.alpha = Math.max(0, Math.min(1, (now - st.t) / FB.tick));
     // correcties van de server zacht laten verdwijnen
+    // (exponentieel, maar nooit sneller dan ±2,5 tegels per seconde: zo glijdt een troep bij in plaats van te springen)
     if (this.offs.size) {
-      const f = Math.exp(-dt / 180);
-      for (const [id, o] of this.offs) { o.x *= f; o.y *= f; if (Math.abs(o.x) + Math.abs(o.y) < 0.004) this.offs.delete(id); }
+      const f = 1 - Math.exp(-dt / 220); const cap = 2.5 * dt / 1000;
+      for (const [id, o] of this.offs) {
+        const m = Math.sqrt(o.x * o.x + o.y * o.y);
+        const k = m > 0 ? Math.max(0, m - Math.min(m * f + 0.0005, cap)) / m : 0;
+        o.x *= k; o.y *= k;
+        if (m * k < 0.004) this.offs.delete(id);
+      }
     }
     if (!st) { this.drawWaiting(t); this.renderBars(); return; }
     // doelwitten van je gekozen troepen en de vijand onder de muis
