@@ -696,8 +696,13 @@ export function pushCardHtml(app) {
   const st = app.pushState;
   if (st === 'unsupported') return '';
   const head = `<h3>${icon('bell')} Meldingen op je gsm</h3>`;
+  const note = (t, cls) => (t ? `<p class="push-msg ${cls}">${icon(cls === 'ok' ? 'star' : 'bell')}<span>${esc(t)}</span></p>` : '');
+  if (app.pushBusy) {
+    return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Bezig met aanzetten… Tik op <b>Toestaan</b> als je gsm het vraagt.</p>
+      <div class="actions"><button class="btn primary small" disabled><span class="spin"></span> Bezig…</button></div></div>`;
+  }
   if (st === 'on') {
-    return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Staan aan op dit toestel: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt) krijg je een melding.</p>
+    return `<div class="card push-card on">${head}${note(app.pushNote, 'ok')}<p class="small muted" style="margin:0">Staan aan op dit toestel: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt) krijg je een melding.</p>
       <div class="actions"><button class="btn small" data-action="pushTest">Proefmelding</button><button class="btn small ghost" data-action="pushOff">Uitzetten</button></div></div>`;
   }
   if (st === 'ios-home') {
@@ -705,10 +710,16 @@ export function pushCardHtml(app) {
       tik in Safari op <b>Delen</b> › <b>Zet op beginscherm</b>, open het spel van daar en zet hier de meldingen aan.</p></div>`;
   }
   if (st === 'denied') {
-    return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Meldingen zijn geblokkeerd voor dit spel. Zet ze aan in de instellingen van je browser of de app, en kom dan hier terug.</p></div>`;
+    const how = app.inApp && app.inApp()
+      ? 'Ga op je gsm naar <b>Instellingen › Apps › Rijken van de Vallei › Meldingen</b> en zet ze aan. Werkt dat niet, installeer dan de nieuwste app (1.1) over de oude heen.'
+      : app.onAndroid
+        ? 'Tik in Chrome op het <b>slotje</b> (of ⋮ › Site-instellingen) naast het adres › <b>Meldingen</b> › <b>Toestaan</b>. In de app: <b>Instellingen › Apps › Rijken van de Vallei › Meldingen</b>.'
+        : 'Klik op het <b>slotje</b> naast het adres › <b>Meldingen</b> › <b>Toestaan</b>.';
+    return `<div class="card push-card err">${head}${note('Meldingen zijn geblokkeerd voor dit spel.', 'err')}<p class="small muted" style="margin:0">${how} Kom daarna terug en tik op <b>Opnieuw proberen</b>.</p>
+      <div class="actions"><button class="btn small" data-action="pushOn">${icon('bell')} Opnieuw proberen</button></div></div>`;
   }
-  return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Krijg ±2 minuten voor je leger aankomt een melding, zodat je op tijd zelf kan kiezen: zelf besturen of automatisch.</p>
-    <div class="actions"><button class="btn primary small" data-action="pushOn">${icon('bell')} Meldingen aanzetten</button></div></div>`;
+  return `<div class="card push-card${app.pushErr ? ' err' : ''}">${head}${note(app.pushErr, 'err')}<p class="small muted" style="margin:0">Krijg ±2 minuten voor je leger aankomt een melding, zodat je op tijd zelf kan kiezen: zelf besturen of automatisch.</p>
+    <div class="actions"><button class="btn primary small" data-action="pushOn">${icon('bell')} ${app.pushErr ? 'Opnieuw proberen' : 'Meldingen aanzetten'}</button></div></div>`;
 }
 
 // aftelbalk: je leger komt binnen 2 minuten aan; kies nu al hoe de slag moet verlopen
@@ -758,7 +769,7 @@ export function sendHtml(app, live, target, kind) {
     }
   }
   html += `<div id="sendSummary" class="summary"></div>
-    ${kind === 'attack' && app.pushState === 'off' ? pushCardHtml(app) : ''}
+    ${kind === 'attack' && (app.pushState !== 'on' || app.pushNote) ? pushCardHtml(app) : ''}
     <div class="actions"><button class="btn ${kind === 'attack' ? 'danger' : 'primary'} big" data-action="dosend" data-kind="${kind}">Vertrekken</button></div>`;
   return html;
 }

@@ -757,6 +757,14 @@ body.in-battle #toasts { top: 74px; }
 .arrival .arr-choose .btn .ic { width: 15px; height: 15px; }
 .arrival .arr-note { color: var(--ink2); margin-top: 4px; }
 .push-card .actions { margin-top: 8px; }
+.push-card .actions .btn[disabled] { opacity: 0.85; display: inline-flex; align-items: center; gap: 6px; }
+.push-msg { display: flex; gap: 6px; align-items: flex-start; margin: 0 0 6px; padding: 6px 8px; border-radius: 8px; font-size: 13px; font-weight: 600; line-height: 1.35; }
+.push-msg .ic { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
+.push-msg.ok { background: rgba(70, 140, 50, 0.16); color: #2f6a1e; border: 1px solid rgba(70, 140, 50, 0.4); }
+.push-msg.err { background: rgba(190, 60, 40, 0.12); color: #8a2216; border: 1px solid rgba(190, 60, 40, 0.35); }
+.push-card.on { border-color: rgba(70, 140, 50, 0.55); }
+.spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(60, 40, 15, 0.3); border-top-color: #5a3a12; display: inline-block; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 900px) {
   .arrival { top: 138px; left: 8px; right: 56px; width: auto; transform: none; }
 }
