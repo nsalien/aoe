@@ -72,6 +72,17 @@ Daarom:
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
 - `public/js/ui.js` — HTML-sjablonen; `icons.js` — SVG-iconen (gebruik deze, geen emoji); `main.js` — spelverloop in de browser.
 
+## Android-app
+
+- `android/` is een 'Trusted Web Activity': de app opent https://rijken-van-de-vallei.pages.dev volledig scherm in Chrome
+  (valt terug op een WebView als Chrome ontbreekt). Spelupdates komen dus vanzelf; de APK opnieuw bouwen hoeft enkel
+  bij een nieuwe naam, icoon of instelling.
+- Bouwen: `android/build-apk.sh` (JDK 17+, Gradle, Android SDK met platform 35 + build-tools 35 in `ANDROID_HOME`).
+  Het zet de APK in `public/rijken-van-de-vallei.apk` (downloadlink in de hulp en op het aanmeldscherm).
+- De sleutel `android/keystore/rijken.jks` staat niet in git. Een nieuwe sleutel = de oude app eerst verwijderen en
+  de nieuwe SHA-256-vingerafdruk (die het script toont) toevoegen in `public/.well-known/assetlinks.json`;
+  zonder geldige vingerafdruk toont de app een adresbalk. Verhoog `versionCode` in `android/app/build.gradle` bij een update.
+
 ## Ontwerpregels
 
 - Het spel moet werken op **pc (hoofdgebruik, browser) én gsm**. Test beide: 1440×900 en 390×844.

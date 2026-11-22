@@ -852,6 +852,10 @@ export function helpHtml(w) {
     <li><b>Muren</b> houden aanvallers tegen tot ze een bres slaan; verdedigers kunnen er net overheen vechten. Een open muur heeft een poort in het midden.</li></ul>
     <h3>Gevechten</h3>
     <p>Speerdragers zijn sterk tegen ruiters, boogschutters verdedigen goed tegen voetvolk. Muren, torens en de smidse versterken je verdediging. De sterkste kant wint; de winnaar verliest minder naarmate zijn overmacht groter is.</p>
+    <h3>Op je gsm als app</h3>
+    <p><b>Android:</b> <a href="/rijken-van-de-vallei.apk" download>download de app</a>, open het bestand en kies <b>Installeren</b>
+    (de eerste keer vraagt je gsm om installaties uit je browser toe te staan). De app opent het spel volledig scherm;
+    updates van het spel krijg je vanzelf. <b>iPhone:</b> open de site in Safari, tik op Delen en kies <b>Zet op beginscherm</b>.</p>
     <h3>Punten</h3>
     <p>Gebouwen, dorpelingen en troepen geven opbouwpunten; het <b>Monument</b> levert per niveau 1500 extra punten. Verslagen vijanden en rovers geven gevechtspunten.</p></div>`;
 }

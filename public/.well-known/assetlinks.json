@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "dev.pages.rijkenvandevallei",
+      "sha256_cert_fingerprints": ["11:38:08:2D:4E:EA:12:E6:58:33:87:D9:29:67:D5:65:DF:F2:15:D2:EA:9D:74:E7:99:DB:A6:14:B8:3F:93:E2"]
+    }
+  }
+]
