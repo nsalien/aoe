@@ -128,7 +128,8 @@ function startGame(data) {
   if (!town) {
     town = new TownView($('#townCanvas'));
     world = new WorldView($('#worldCanvas'));
-    town.onSelect = (b) => { app.selBuilding = b ? b.id : null; renderPanel(); openPanelMobile(!!b); };
+    town.onSelect = (b) => { app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
+    town.onGate = async (i, j) => { const r = await act('/gate', { i, j }, 'Poort gebouwd'); if (r) setMode(null); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
@@ -480,6 +481,7 @@ function setMode(mode) {
   town.clearSel();
   app.mode = mode;
   town.landMode = mode === 'land';
+  town.gateMode = mode === 'gate';
   town.wallMode = mode === 'wall' ? 'build' : mode === 'wallremove' ? 'remove' : null;
   town.wallStart = null;
   const hint = $('#placeHint');
@@ -487,6 +489,8 @@ function setMode(mode) {
   hint.hidden = false;
   if (mode === 'land') {
     setHTML(hint, `<span><b>Grond kopen</b> <span class="muted">Tik op een gouden lot naast je bouwgrond.</span></span><button class="btn small" data-action="modeDone">Klaar</button>`);
+  } else if (mode === 'gate') {
+    setHTML(hint, `<span><b>Poort maken</b> <span class="muted">Tik op een muurstuk of een gat van één tegel in een recht stuk muur.</span></span><button class="btn small" data-action="modeDone">Klaar</button>`);
   } else {
     const rm = mode === 'wallremove';
     setHTML(hint, `<span><b>${rm ? 'Muur afbreken' : 'Muur bouwen'}</b> <span class="muted">Tik op een begintegel en daarna op een eindtegel.</span></span>
@@ -636,7 +640,7 @@ function renderBuildBar(force = false) {
 
 function renderPanel(force = false) {
   const panel = $('#panel');
-  const key = `${app.view}|${app.selBuilding}|${world && world.selected ? world.selected.kind + world.selected.obj.id : ''}`;
+  const key = `${app.view}|${app.selBuilding}|${app.selWall ? `${app.selWall.i},${app.selWall.j}` : ''}|${world && world.selected ? world.selected.kind + world.selected.obj.id : ''}`;
   const newContext = key !== app.panelKey;
   if (!newContext && !force && isBusy('panel')) { pending.panel = true; return; }
   pending.panel = false;
@@ -995,6 +999,21 @@ const actions = {
   cancelPlace,
   wallMode(el) { if (el && el.classList.contains('locked')) { toast(el.title, 'err'); return; } setMode(app.mode === 'wall' ? null : 'wall'); },
   wallRemove() { setMode('wallremove'); },
+  gateMode() { setMode(app.mode === 'gate' ? null : 'gate'); },
+  async gateHere(el) {
+    const r = await act('/gate', { i: Number(el.dataset.i), j: Number(el.dataset.j) }, 'Poort gebouwd');
+    if (r) { town.selWall = { ...town.selWall, gate: true }; app.selWall = town.selWall; renderPanel(true); }
+  },
+  async wallTileRemove(el) {
+    const r = await act('/walls', { tiles: [[Number(el.dataset.i), Number(el.dataset.j)]], remove: true }, app.selWall && app.selWall.gate ? 'Poort afgebroken' : 'Muurstuk afgebroken');
+    if (r) { town.selWall = null; app.selWall = null; renderPanel(true); }
+  },
+  async demolish(el) {
+    const stop = el.dataset.stop === '1';
+    if (!confirm(stop ? `De bouw van ${el.dataset.name} stoppen? Je krijgt de helft van de grondstoffen terug.` : `${el.dataset.name} afbreken? Je krijgt een deel van de grondstoffen terug.`)) return;
+    const r = await act('/demolish', { id: Number(el.dataset.id) }, stop ? 'Bouw gestopt' : `${el.dataset.name} afgebroken`);
+    if (r) actions.deselect();
+  },
   landMode() { setMode(app.mode === 'land' ? null : 'land'); },
   modeDone() { setMode(null); },
   // de gekozen troepen naar huis (een groep, één troep uit een groep, alle van een soort of het hele leger)
@@ -1062,7 +1081,7 @@ const actions = {
     if (r) refresh();
   },
   deselect() {
-    app.selBuilding = null; town.selected = null;
+    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null;
     if (world) world.selected = null;
     renderPanel();
   },
