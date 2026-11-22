@@ -1,0 +1,14 @@
+# Kleine worker met een tijdschema: elke minuut meldingen versturen (zie cron/worker.js).
+# database_id vult scripts/deploy.sh zelf in, net als in de wrangler.toml van het spel.
+name = "rijken-van-de-vallei-meldingen"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rijken-db"
+database_id = "00000000-0000-0000-0000-000000000000"
