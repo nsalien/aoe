@@ -199,8 +199,24 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
   .place-hint > span { flex: 1 1 100%; }
 }
 
+/* bouwmenu met een tabje om het in te klappen (meer zicht op je stad) */
+.buildwrap {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3;
+  display: flex; flex-direction: column; align-items: flex-start; pointer-events: none;
+}
+.buildwrap > * { pointer-events: auto; }
+.bb-toggle {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; padding: 4px 12px 5px;
+  background: rgba(42, 32, 21, 0.9); color: var(--gold2); border: 1px solid #6e5228; border-bottom: 0;
+  border-radius: 10px 10px 0 0; font-size: 12px; font-weight: 700; box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.25);
+}
+.bb-toggle .ic { width: 16px; height: 16px; }
+.bb-toggle .chev { width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); margin-left: 2px; }
+.buildwrap.min .bb-toggle { border-bottom: 1px solid #6e5228; border-radius: 10px; margin-left: 0; padding: 6px 12px; }
+.buildwrap.min .bb-toggle .chev { transform: translateY(2px) rotate(-135deg); }
+.buildwrap.min .buildbar { display: none; }
 .buildbar {
-  position: absolute; left: 10px; right: 10px; bottom: 10px;
+  position: relative; align-self: stretch;
   display: flex; gap: 8px; overflow-x: auto; padding: 8px; scrollbar-width: thin;
   background: rgba(42, 32, 21, 0.82); border: 1px solid #6e5228; border-radius: 14px; box-shadow: var(--shadow);
   backdrop-filter: blur(4px);
@@ -379,7 +395,9 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
     border: 1px solid #8b6a3a; background: #f4e8cc; border-radius: 999px; padding: 7px 14px; font-weight: 700; box-shadow: var(--shadow);
   }
   .hud { top: 58px; }
-  .buildbar { bottom: 6px; left: 6px; right: 6px; padding: 5px; gap: 5px; border-radius: 12px; }
+  .buildwrap { bottom: 6px; left: 6px; right: 6px; }
+  .buildbar { padding: 5px; gap: 5px; border-radius: 12px; }
+  .bb-toggle { margin-left: 10px; font-size: 11px; padding: 3px 10px 4px; }
   .bcard { width: 66px; padding: 2px 2px 4px; border-radius: 8px; }
   .bcard img { width: 44px; height: 36px; }
   .bcard .bn { font-size: 9.5px; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -626,3 +644,78 @@ body.in-battle #toasts { top: 74px; }
 
 .app-link { text-align: center; margin: 10px 0 0; font-size: 13px; }
 .app-link a { color: var(--ink2); font-weight: 600; }
+
+/* =====================================================================
+   Gsm liggend (landschap): weinig hoogte. Menu als smalle kolom links, één dunne balk bovenaan,
+   het detailpaneel schuift van rechts in en het bouwmenu is compacter (en in te klappen).
+   ===================================================================== */
+@media (orientation: landscape) and (max-height: 540px) {
+  :root { --topbar: 40px; --nav: 56px; }
+  #game {
+    grid-template-columns: calc(var(--nav) + env(safe-area-inset-left)) 1fr;
+    grid-template-rows: var(--topbar) 1fr;
+    grid-template-areas: 'nav top' 'nav stage';
+  }
+  #topbar { flex-wrap: nowrap; padding: 4px 10px; gap: 6px; height: var(--topbar); padding-right: calc(10px + env(safe-area-inset-right)); }
+  .brand { display: none; }
+  .resbar { order: 0; flex: 1 1 auto; flex-basis: auto; gap: 4px; }
+  .phase { order: 1; font-size: 10.5px; padding: 3px 8px; white-space: nowrap; flex: none; }
+  .phase .ic { width: 14px; height: 14px; }
+  .alert { order: 2; font-size: 11px; padding: 3px 8px; }
+  .res { padding: 1px 8px 1px 2px; gap: 3px; }
+  .res .sub { display: none; }
+  .res .ico { width: 18px; height: 18px; }
+  .res .amt { font-size: 12.5px; }
+  #nav {
+    flex-direction: column; justify-content: flex-start; gap: 1px; overflow-y: auto; scrollbar-width: none;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom)) calc(4px + env(safe-area-inset-left));
+    border-top: 0; border-right: 2px solid #1a130b; position: relative; z-index: 30;
+  }
+  #nav::-webkit-scrollbar { display: none; }
+  .navbtn { flex: none; padding: 5px 0; font-size: 8.5px; gap: 0; }
+  .navbtn .ni .ic { width: 22px; height: 22px; }
+  .navbtn.bottom { margin-top: auto; }
+  .badge { top: 0; right: 2px; min-width: 15px; height: 15px; line-height: 15px; font-size: 9.5px; }
+  .badge.dot { top: 3px; right: 8px; }
+  .panel {
+    position: fixed; top: 0; right: 0; bottom: 0; left: auto; z-index: 20; width: min(380px, 62vw); max-height: none;
+    padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); padding-right: calc(12px + env(safe-area-inset-right));
+    border-top: 0; border-left: 2px solid #8b6a3a; border-radius: 16px 0 0 16px; box-shadow: -8px 0 30px rgba(0, 0, 0, 0.4);
+    transform: translateX(105%); transition: transform 0.25s;
+  }
+  .panel.open { transform: none; }
+  .panel::before { display: none; }
+  .panel-toggle {
+    display: inline-flex; align-items: center; gap: 4px; position: absolute; right: 8px; top: 6px; z-index: 3;
+    border: 1px solid #8b6a3a; background: #f4e8cc; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; box-shadow: var(--shadow);
+  }
+  .hud { top: 40px; right: 8px; gap: 4px; }
+  .hudbtn { width: 32px; height: 32px; font-size: 16px; border-radius: 8px; }
+  .hudbtn .ic { width: 18px; height: 18px; }
+  .view-title { top: 6px; left: 8px; font-size: 13px; padding: 3px 9px 4px; max-width: 34vw; }
+  .view-title small { font-size: 10px; }
+  .place-hint { top: 6px; left: 50%; right: auto; transform: translateX(-50%); max-width: calc(100% - 290px); font-size: 11px; padding: 5px 9px; flex-wrap: nowrap; }
+  .place-hint > span { flex: 1 1 auto; }
+  .buildwrap { left: 6px; right: 50px; bottom: 4px; }
+  .bb-toggle { margin-left: 8px; font-size: 10.5px; padding: 2px 9px 3px; }
+  .buildwrap.min .bb-toggle { padding: 4px 10px; }
+  .buildbar { padding: 4px; gap: 4px; border-radius: 10px; }
+  .bcard { width: 60px; padding: 1px 2px 3px; border-radius: 7px; gap: 0; }
+  .bcard img { width: 36px; height: 26px; }
+  .bcard .bn { font-size: 9px; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bcard .bc { font-size: 8.5px; gap: 0 3px; }
+  .bcard .bc img { width: 11px; height: 11px; }
+  .bcard .cnt { font-size: 8px; top: 1px; right: 3px; }
+  .toasts { top: 46px; }
+  .modal { padding: 8px; }
+  .modal-card { max-height: calc(100vh - 16px); padding: 14px 16px; }
+  /* slagveld */
+  .bt-top { padding: 3px 10px; gap: 8px; }
+  .bt-mid > b { font-size: 13px; }
+  .bt-mode { display: none; }
+  .bt-bar { height: 6px; }
+  .bt-bottom { padding: 3px 8px; gap: 6px; }
+  .bt-kind { width: 36px; height: 36px; }
+  .bt-kind img { width: 30px; height: 30px; }
+  .bt-hint { font-size: 11px; bottom: 4px; padding: 4px 10px; }
+}

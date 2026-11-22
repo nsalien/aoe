@@ -32,6 +32,7 @@ const app = {
   seenReports: 0,
   knownHostile: new Set(),
   chat: { chan: 'team', seen: store.get('rvs-chat-seen') || {}, last: {} },
+  bbMin: !!store.get('rvs-buildbar-min'),
   now() { return Date.now() + this.offset; },
 };
 window.__app = app; // handig bij het debuggen in de console
@@ -650,8 +651,10 @@ document.getElementById('panel').addEventListener('focusout', () => setTimeout(f
 
 function renderBuildBar(force = false) {
   const bb = $('#buildbar');
-  bb.hidden = app.view !== 'town' || !app.canAct;
-  if (bb.hidden) return;
+  const wrap = $('#buildwrap');
+  wrap.hidden = app.view !== 'town' || !app.canAct;
+  if (wrap.hidden) return;
+  renderBuildToggle();
   if (!force && isBusy('buildbar')) { pending.buildbar = true; return; }
   pending.buildbar = false;
   setHTML(bb, UI.buildBarHtml(app.live, app.placing || (app.mode === 'wallremove' ? 'wall' : app.mode), app.data.team.color));
@@ -710,8 +713,23 @@ function renderLightBtn() {
   b.title = { auto: 'Dag en nacht volgen je klok', day: 'Altijd dag', night: 'Altijd nacht' }[m];
 }
 
+// is het zijpaneel een schuifpaneel? (gsm rechtop of liggend; zie de CSS)
+const sheetPanel = () => window.innerWidth <= 900 || matchMedia('(orientation: landscape) and (max-height: 540px)').matches;
+
+// bouwmenu in- of uitklappen (onthouden per toestel)
+function renderBuildToggle() {
+  const min = !!app.bbMin && !app.placing && !app.mode;
+  const wrap = $('#buildwrap');
+  wrap.classList.toggle('min', min);
+  const btn = $('#bbToggle');
+  btn.setAttribute('aria-expanded', String(!min));
+  btn.title = min ? 'Bouwmenu tonen' : 'Bouwmenu inklappen';
+  const html = `${UI.icon('hammer')} Bouwen <i class="chev"></i>`;
+  if (btn.innerHTML !== html) btn.innerHTML = html;
+}
+
 function openPanelMobile(open) {
-  if (window.innerWidth > 900) return;
+  if (!sheetPanel()) return;
   $('#panel').classList.toggle('open', open);
 }
 
@@ -1127,6 +1145,11 @@ const actions = {
     if (t) { world.selected = { kind: 'town', obj: t }; renderPanel(); }
   },
   battleGo(el) { openBattle(Number(el.dataset.id)); },
+  toggleBuildbar() {
+    app.bbMin = !app.bbMin;
+    store.set('rvs-buildbar-min', app.bbMin);
+    renderBuildToggle();
+  },
   async alertGo(el) {
     switchView('world');
     if (!app.map) await loadMap();

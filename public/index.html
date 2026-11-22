@@ -79,7 +79,10 @@
         <button class="hudbtn" id="lightBtn" data-action="lightMode" title="Dag en nacht"></button>
       </div>
       <div id="placeHint" class="place-hint" hidden></div>
-      <div id="buildbar" class="buildbar"></div>
+      <div id="buildwrap" class="buildwrap">
+        <button id="bbToggle" class="bb-toggle" data-action="toggleBuildbar" aria-expanded="true"></button>
+        <div id="buildbar" class="buildbar"></div>
+      </div>
       <button id="panelToggle" class="panel-toggle" data-action="togglePanel" data-icon="menu"> Details</button>
     </main>
     <aside id="panel" class="panel"></aside>
