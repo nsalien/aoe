@@ -3,13 +3,14 @@ import * as A from './art.js';
 import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
-  LAND, landCost, WALL_TILE, TOWER,
+  LAND, landCost, WALL_TILE, TOWER, GATE,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
+  checkDemolish, demolishRefund, checkPlaceGate,
 } from '../shared/sim.js';
 import { territory, exHas } from '../shared/territory.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
@@ -411,6 +412,12 @@ function trainQueueHtml(app, queues) {
   return html + '</div>';
 }
 
+// grondstoffen die je terugkrijgt (geen kleur voor 'te duur')
+function refundHtml(res) {
+  const parts = RES.filter((r) => res[r] > 0).map((r) => `<span class="chip">${resImg(r)} ${fmt(res[r])}</span>`);
+  return parts.length ? parts.join(' ') : 'niets';
+}
+
 // ---------- gebouwpaneel ----------
 export function buildingPanelHtml(app, live, b) {
   const d = app.data;
@@ -439,6 +446,16 @@ export function buildingPanelHtml(app, live, b) {
   } else if (lvl >= def.maxLevel) {
     html += `<p class="small muted">${icon('star')} Maximaal niveau bereikt.</p>`;
   }
+  if (b.type !== 'tc' && b.type !== 'wall') {
+    // afbreken (of een bouw stoppen): een deel van de grondstoffen komt terug
+    const err = checkDemolish(live, b.id);
+    const back = demolishRefund(live, b);
+    const stop = lvl === 0;
+    html += `<div class="card demolish"><h3>${icon('hammer')} ${stop ? 'Bouw stoppen' : 'Afbreken'}</h3>
+      <div class="small muted">Je krijgt terug: ${refundHtml(back)}</div>
+      ${err ? `<p class="req">${err}</p>` : ''}
+      <div class="actions"><button class="btn danger small" data-action="demolish" data-id="${b.id}" data-name="${esc(def.name)}" data-stop="${stop ? 1 : 0}" ${!canAct || err ? 'disabled' : ''}>${stop ? 'Bouw stoppen' : `${def.name} afbreken`}</button></div></div>`;
+  }
   html += '<div class="actions"><button class="btn ghost" data-action="deselect">← Terug naar overzicht</button></div>';
   return html;
 }
@@ -464,6 +481,24 @@ function unlocksHtml(a, civ) {
   const more = a === 3 ? ['een derde bouwer'] : [];
   const all = [...bs, ...us, ...more, 'hogere gebouwniveaus', '+10% productie'];
   return `<p class="small" style="margin:6px 0 0"><b>Ontgrendelt:</b> ${all.join(', ')}.</p>`;
+}
+
+// het muurstuk of de poort die je aantikte
+function wallTileHtml(app, live) {
+  const w = app.selWall;
+  if (!w) return '';
+  const canAct = app.canAct;
+  if (w.gate) {
+    return `<div class="card"><h3>${icon('castle')} Deze poort</h3>
+      <p class="small muted" style="margin:0">Gaat vanzelf open als je troepen erdoor willen en weer dicht als ze voorbij zijn.</p>
+      <div class="actions"><button class="btn danger small" data-action="wallTileRemove" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>Poort afbreken</button></div></div>`;
+  }
+  const err = checkPlaceGate(live, w.i, w.j);
+  return `<div class="card"><h3>${icon('hammer')} Dit muurstuk</h3>
+    <div class="small muted">Poort maken: ${costHtml(GATE.cost, live.res)}</div>
+    ${err && !/grondstoffen/.test(err) ? `<p class="req">${err}</p>` : ''}
+    <div class="actions"><button class="btn small" data-action="gateHere" data-i="${w.i}" data-j="${w.j}" ${canAct && !err ? '' : 'disabled'}>Poort van maken</button>
+      <button class="btn danger small" data-action="wallTileRemove" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>Afbreken</button></div></div>`;
 }
 
 function buildingInfo(app, live, b) {
@@ -498,8 +533,10 @@ function buildingInfo(app, live, b) {
         <dt>Je stad is</dt><dd>${!n ? 'niet ommuurd' : closed ? '<b style="color:#3f8f3c">volledig ommuurd</b>' : '<b style="color:#b2372a">nog open</b>'}</dd>
         <dt>Verdedigingsbonus</dt><dd>${L ? `+${8 * L}% en +${30 * L}${closed ? '' : ' (30% zolang er een gat is)'}` : '—'}</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Plaats muren zelf, tegel per tegel. Een gesloten ring rond je stadscentrum verdedigt volledig.
+      Is je stad helemaal ommuurd, dan gaan je troepen enkel via een <b>poort</b> naar binnen en buiten.
       Vanaf niveau 3 worden houten palissades stenen muren; een hoger tijdperk laat sterkere muren toe.</p>
-      <div class="actions"><button class="btn primary" data-action="wallMode" ${L && app.canAct ? '' : 'disabled'}>${icon('hammer')} Muren plaatsen</button></div></div>`;
+      <div class="actions" style="flex-wrap:wrap"><button class="btn primary" data-action="wallMode" ${L && app.canAct ? '' : 'disabled'}>${icon('hammer')} Muren plaatsen</button>
+        <button class="btn" data-action="gateMode" ${L && app.canAct ? '' : 'disabled'}>Poort maken</button></div></div>${wallTileHtml(app, live)}`;
     }
     case 'monument': return `<div class="card"><dl class="kv"><dt>Punten van dit monument</dt><dd>${fmt(1500 * L)}+</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Bescherm het goed: vijandelijke rammen kunnen het afbreken.</p></div>`;
@@ -852,6 +889,11 @@ export function helpHtml(w) {
     <li><b>Muren</b> houden aanvallers tegen tot ze een bres slaan; verdedigers kunnen er net overheen vechten. Een open muur heeft een poort in het midden.</li></ul>
     <h3>Gevechten</h3>
     <p>Speerdragers zijn sterk tegen ruiters, boogschutters verdedigen goed tegen voetvolk. Muren, torens en de smidse versterken je verdediging. De sterkste kant wint; de winnaar verliest minder naarmate zijn overmacht groter is.</p>
+    <h3>Muren, poorten en afbreken</h3>
+    <p>Muren plaats je tegel per tegel. Een <b>poort</b> maak je in een recht stuk muur: tik op een muurstuk en kies <b>Poort van maken</b>,
+    of laat een gat van één tegel en kies <b>Poort maken</b>. Is je stad helemaal ommuurd, dan gaan je troepen enkel via een poort naar binnen
+    en buiten; die gaat vanzelf open en dicht. Een gebouw of muurstuk dat je aantikt, krijgt een gouden pijl; in het paneel kan je het
+    ook <b>afbreken</b> (je krijgt een deel van de grondstoffen terug).</p>
     <h3>Op je gsm als app</h3>
     <p><b>Android:</b> <a href="/rijken-van-de-vallei.apk" download>download de app</a>, open het bestand en kies <b>Installeren</b>
     (de eerste keer vraagt je gsm om installaties uit je browser toe te staan). De app opent het spel volledig scherm;

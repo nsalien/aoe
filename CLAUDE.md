@@ -51,6 +51,11 @@ Daarom:
   een gezamenlijk tempo (`pace`) zodat iedereen samen aankomt.
   Selecteren in de stad (`town.js`): 1 klik = 1 troep (`unit`), dubbelklik = alle van die soort (`kind`), ingedrukt houden
   = het hele leger (`army`, via `Camera.onLongPress` in `iso.js`).
+- Muren en poorten: `s.walls` en `s.gates` (tegelnummers). `wallSet()` = muren + poorten (een dichte poort sluit de stad).
+  `insideSet()` = de binnenkant van een volledig ommuurde stad. Een poort staat in een recht stuk muur (`gateAxis`).
+  Een stad helemaal dichtmaken zonder poort mag niet; oude dichte steden krijgen in `ensureTerritory()` een poort.
+  Groepen en dorpelingen lopen via `gateRoute()` door de poort (tussenstops in `g.via`, `fieldArrive` loopt verder).
+  Gebouwen afbreken: `doDemolish` (deel van de kosten terug, zie `DEMOLISH` in `rules.js`).
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
   (binnen `FIELD.aggro` van het barbarenkamp) en het einde van een gevecht. De browser tekent het verloop met `runFight(f, nu)`.

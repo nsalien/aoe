@@ -7,6 +7,7 @@ import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, 
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
+  gateAxis, checkPlaceGate, gateRoute,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -273,7 +274,7 @@ export class TownView {
 
   setSel(sel) {
     this.sel = sel;
-    if (sel) { this.selected = null; }
+    if (sel) { this.selected = null; this.selWall = null; }
     if (this.onSelChange) this.onSelChange(sel);
   }
 
@@ -800,21 +801,26 @@ export class TownView {
         continue;
       }
       if (!w.target) {
+        let tg;
         if (w.job === 'idle') {
-          w.target = { gx: N / 2 + (Math.random() - 0.5) * 4, gy: N / 2 + 1.5 + Math.random() * 2 };
+          tg = { gx: N / 2 + (Math.random() - 0.5) * 4, gy: N / 2 + 1.5 + Math.random() * 2 };
         } else if (w.phase === 'out') {
           const ts = this.jobTargets(w.job);
-          const tg = ts[Math.floor(Math.random() * ts.length)];
-          w.target = { gx: tg.gx + (Math.random() - 0.5) * 0.4, gy: tg.gy + (Math.random() - 0.5) * 0.4 };
+          const t0 = ts[Math.floor(Math.random() * ts.length)];
+          tg = { gx: t0.gx + (Math.random() - 0.5) * 0.4, gy: t0.gy + (Math.random() - 0.5) * 0.4 };
         } else {
-          w.target = { gx: door.gx + (Math.random() - 0.5) * 0.8, gy: door.gy + Math.random() * 0.3 };
+          tg = { gx: door.gx + (Math.random() - 0.5) * 0.8, gy: door.gy + Math.random() * 0.3 };
         }
+        // in een ommuurde stad: via de poort naar buiten en weer binnen
+        const via = gateRoute(this.state, { x: w.gx, y: w.gy }, { x: tg.gx, y: tg.gy });
+        if (via) { w.target = { gx: via[0].x, gy: via[0].y }; w.queue = [{ gx: via[1].x, gy: via[1].y }, tg]; } else { w.target = tg; w.queue = null; }
       }
       const dx = w.target.gx - w.gx; const dy = w.target.gy - w.gy;
       const d = Math.hypot(dx, dy);
       const sp = 0.0009 * dt;
       if (d <= sp) {
         w.gx = w.target.gx; w.gy = w.target.gy; w.target = null;
+        if (w.queue && w.queue.length) { w.target = w.queue.shift(); continue; } // tussenstop aan de poort
         if (w.job === 'idle') { w.wait = 1500 + Math.random() * 4000; continue; }
         if (w.phase === 'out') { w.phase = 'work'; w.wait = 2500 + Math.random() * 3500; }
         else { w.phase = 'out'; w.wait = 600 + Math.random() * 1200; }
@@ -1008,29 +1014,113 @@ export class TownView {
 
   // ---------- muur ----------
 
-  // muurstukken uit de muurtegels: een paal per tegel en een stuk muur naar elke buur
+  // muurstukken uit de muurtegels: een paal per tegel en een stuk muur naar elke buur; poorten als poortgebouw
   wallSegments(level) {
     const s = this.state;
-    const list = s.walls || [];
-    if (!list.length) return [];
-    if (this.wallCache && this.wallCache.key === list.length + ':' + list[0] + ':' + list[list.length - 1]) return this.wallCache.segs;
-    const set = new Set(list);
+    const list = s.walls || []; const gl = s.gates || [];
+    if (!list.length && !gl.length) return [];
+    const key = `${list.length}:${list[0]}:${list[list.length - 1]}|${gl.join(',')}`;
+    if (this.wallCache && this.wallCache.key === key) return this.wallCache.segs;
+    const set = new Set([...list, ...gl]); const gates = new Set(gl);
     const segs = [];
-    const th = 0.09; const pw = 0.14;
+    const th = 0.09; const pw = 0.14; const gt = 0.34; // gt: afstand van het midden van de poort tot een poorttoren
     for (const idx of list) {
       const { i, j } = tileOf(idx);
       const cx = i + 0.5; const cy = j + 0.5;
-      const e = set.has(tileIndex(i + 1, j)); const so = set.has(tileIndex(i, j + 1));
-      const w = set.has(tileIndex(i - 1, j)); const n = set.has(tileIndex(i, j - 1));
-      if (e) segs.push({ x0: cx, y0: cy - th, x1: cx + 1, y1: cy + th });
-      if (so) segs.push({ x0: cx - th, y0: cy, x1: cx + th, y1: cy + 1 });
+      const has = (a, b) => set.has(tileIndex(a, b));
+      const isG = (a, b) => gates.has(tileIndex(a, b));
+      const e = has(i + 1, j); const so = has(i, j + 1); const w = has(i - 1, j); const n = has(i, j - 1);
+      if (e) segs.push({ x0: cx, y0: cy - th, x1: cx + 1 - (isG(i + 1, j) ? gt : 0), y1: cy + th });
+      if (so) segs.push({ x0: cx - th, y0: cy, x1: cx + th, y1: cy + 1 - (isG(i, j + 1) ? gt : 0) });
+      if (w && isG(i - 1, j)) segs.push({ x0: cx - 1 + gt, y0: cy - th, x1: cx, y1: cy + th });
+      if (n && isG(i, j - 1)) segs.push({ x0: cx - th, y0: cy - 1 + gt, x1: cx + th, y1: cy });
       if (!e && !so && !w && !n) segs.push({ x0: cx - 0.36, y0: cy - th, x1: cx + 0.36, y1: cy + th });
       const corner = (e || w) && (n || so);
       const end = (e ? 1 : 0) + (w ? 1 : 0) + (n ? 1 : 0) + (so ? 1 : 0) <= 1;
       if (corner || end || (i + j) % 4 === 0) segs.push({ x0: cx - pw, y0: cy - pw, x1: cx + pw, y1: cy + pw, tower: true, gate: (corner || end) && (i * 7 + j * 3) % 3 === 0 });
     }
-    this.wallCache = { key: list.length + ':' + list[0] + ':' + list[list.length - 1], segs };
+    for (const idx of gl) {
+      const { i, j } = tileOf(idx);
+      segs.push({ gateTile: true, idx, i, j, ax: gateAxis(set, i, j) || 'x', x0: i + 0.1, y0: j + 0.1, x1: i + 0.9, y1: j + 0.9 });
+    }
+    this.wallCache = { key, segs };
     return segs;
+  }
+
+  // poort: open zolang er troepen vlakbij zijn (zacht open en dicht)
+  gateOpenness(seg, now) {
+    if (!this.gateOpen) this.gateOpen = new Map();
+    const cx = seg.i + 0.5; const cy = seg.j + 0.5;
+    let near = false;
+    for (const g of this.state.field || []) {
+      const p = groupPos(g, now);
+      if (Math.hypot(p.x - cx, p.y - cy) < 1.5) { near = true; break; }
+    }
+    if (!near) for (const w of this.walkers) if (Math.hypot(w.gx - cx, w.gy - cy) < 1.1) { near = true; break; }
+    const tnow = performance.now();
+    const st = this.gateOpen.get(seg.idx) || { v: 0, at: tnow };
+    const dt = Math.min(200, tnow - st.at);
+    st.v = near ? Math.min(1, st.v + dt / 450) : Math.max(0, st.v - dt / 700);
+    st.at = tnow;
+    this.gateOpen.set(seg.idx, st);
+    return st.v * st.v * (3 - 2 * st.v);
+  }
+
+  drawGate(ctx, seg, level) {
+    const stone = level >= 3;
+    const cx = seg.i + 0.5; const cy = seg.j + 0.5;
+    const gt = 0.34; const tw = 0.15;
+    const along = seg.ax === 'x'; // muur loopt langs x: torens links en rechts, doorgang langs y
+    const th = stone ? 36 + level * 3 : 30;
+    const hDoor = stone ? 20 : 18;
+    const wallC = stone ? (level >= 5 ? '#d3cbb8' : '#b9b1a1') : '#9a6a38';
+    const capC = stone ? '#a39a89' : '#7a5129';
+    const t1 = along ? { x: cx - gt, y: cy } : { x: cx, y: cy - gt };
+    const t2 = along ? { x: cx + gt, y: cy } : { x: cx, y: cy + gt };
+    const open = this.gateOpenness(seg, this.now);
+    const tower = (p) => {
+      A.box(ctx, p.x - tw, p.y - tw, p.x + tw, p.y + tw, 0, th, wallC);
+      A.box(ctx, p.x - tw - 0.03, p.y - tw - 0.03, p.x + tw + 0.03, p.y + tw + 0.03, th, th + 4, capC);
+      if (!stone) {
+        const [px, py] = A.P(p.x, p.y, th + 4);
+        ctx.fillStyle = '#b07d45'; ctx.beginPath(); ctx.moveTo(px - 6, py + 2); ctx.lineTo(px, py - 8); ctx.lineTo(px + 6, py + 2); ctx.closePath(); ctx.fill();
+      }
+    };
+    // achterste toren eerst (verder weg in de isometrie)
+    const [back, front] = t1.x + t1.y <= t2.x + t2.y ? [t1, t2] : [t2, t1];
+    tower(back);
+    // deurvleugels: scharnier bij de torens, draaien naar binnen open
+    const leaf = (hinge, toward) => {
+      const L = gt - tw;
+      const ang = open * 1.35;
+      const dx = toward.x - hinge.x; const dy = toward.y - hinge.y; const dl = Math.hypot(dx, dy) || 1;
+      const ux = dx / dl; const uy = dy / dl; // langs de muur
+      const px = along ? 0 : 1; const py = along ? 1 : 0; // dwars op de muur (de doorgang)
+      const ex = hinge.x + (ux * Math.cos(ang) + px * Math.sin(ang)) * L;
+      const ey = hinge.y + (uy * Math.cos(ang) + py * Math.sin(ang)) * L;
+      const a = A.P(hinge.x, hinge.y, 0); const b = A.P(ex, ey, 0); const c = A.P(ex, ey, hDoor); const d = A.P(hinge.x, hinge.y, hDoor);
+      ctx.fillStyle = stone ? '#6b4524' : '#7a5129';
+      ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.lineTo(...d); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(40,25,10,0.55)'; ctx.lineWidth = 0.8; ctx.stroke();
+      // ijzeren banden
+      ctx.strokeStyle = '#3b3733'; ctx.lineWidth = 1.2;
+      for (const f of [0.3, 0.72]) {
+        const z = hDoor * f;
+        const p1 = A.P(hinge.x, hinge.y, z); const p2 = A.P(ex, ey, z);
+        ctx.beginPath(); ctx.moveTo(...p1); ctx.lineTo(...p2); ctx.stroke();
+      }
+    };
+    const hinge1 = along ? { x: t1.x + tw, y: cy } : { x: cx, y: t1.y + tw };
+    const hinge2 = along ? { x: t2.x - tw, y: cy } : { x: cx, y: t2.y - tw };
+    leaf(hinge1, { x: cx, y: cy });
+    leaf(hinge2, { x: cx, y: cy });
+    // boog boven de doorgang
+    if (along) A.box(ctx, t1.x + tw, cy - 0.08, t2.x - tw, cy + 0.08, hDoor, hDoor + 8, wallC);
+    else A.box(ctx, cx - 0.08, t1.y + tw, cx + 0.08, t2.y - tw, hDoor, hDoor + 8, wallC);
+    tower(front);
+    // vlag bovenop
+    const top = A.P(cx, cy, hDoor + 8);
+    A.flag(ctx, top[0], top[1], 16, this.team || '#c0392b', performance.now(), 0.7);
   }
 
   wallHeight(seg, level) {
@@ -1039,6 +1129,7 @@ export class TownView {
   }
 
   drawWallPiece(ctx, seg, level) {
+    if (seg.gateTile) { this.drawGate(ctx, seg, Math.max(1, level)); return; }
     const stone = level >= 3;
     const h = this.wallHeight(seg, level);
     if (!stone) {
@@ -1098,11 +1189,14 @@ export class TownView {
     }
     // een muurtegel aanklikken = het muurpaneel
     const wall = s.buildings.find((b) => b.type === 'wall');
-    if (wall && (s.walls || []).length) {
+    if (wall && ((s.walls || []).length || (s.gates || []).length)) {
       const set = wallSet(s);
       for (const [dx, dy] of [[0, 0], [0, 0.35], [0.35, 0], [0.35, 0.35]]) {
         const i = Math.floor(g.gx + dx); const j = Math.floor(g.gy + dy);
-        if (i >= T_MIN && j >= T_MIN && i < T_MAX && j < T_MAX && set.has(tileIndex(i, j))) return wall;
+        if (i >= T_MIN && j >= T_MIN && i < T_MAX && j < T_MAX && set.has(tileIndex(i, j))) {
+          this.pickedWall = { i, j, gate: (s.gates || []).includes(tileIndex(i, j)) };
+          return wall;
+        }
       }
     }
     return null;
@@ -1117,6 +1211,11 @@ export class TownView {
     if (this.landMode) {
       const g = toGrid(w.x, w.y);
       if (this.onBuyLot) this.onBuyLot(Math.floor(g.gx / LAND.size), Math.floor(g.gy / LAND.size));
+      return;
+    }
+    if (this.gateMode) {
+      const g = toGrid(w.x, w.y);
+      if (this.onGate) this.onGate(Math.floor(g.gx), Math.floor(g.gy));
       return;
     }
     if (this.wallMode) {
@@ -1168,7 +1267,7 @@ export class TownView {
         if (so) { if (dbl) this.selectKind(so.kind, so); else this.setSel({ type: 'soldier', kind: so.kind, gx: so.gx, gy: so.gy }); return; }
         const b = this.pick(sx, sy);
         if (b && b.type === 'tc' && ['group', 'unit', 'kind', 'army', 'groups'].includes(sel.type)) { this.issue(sel, null, { type: 'home' }); return; }
-        if (b) { this.setSel(null); this.selected = b.id; if (this.onSelect) this.onSelect(b); return; }
+        if (b) { this.setSel(null); this.selected = b.id; this.selWall = b.type === 'wall' ? this.pickedWall : null; if (this.onSelect) this.onSelect(b); return; }
       }
       const g = toGrid(w.x, w.y);
       this.issue(sel, { x: g.gx, y: g.gy }, null);
@@ -1184,8 +1283,10 @@ export class TownView {
     if (v) { this.setSel({ type: 'walker', w: v }); return; }
     const so = this.pickSoldier(w);
     if (so) { this.setSel({ type: 'soldier', kind: so.kind, gx: so.gx, gy: so.gy }); return; }
+    this.pickedWall = null;
     const b = this.pick(sx, sy);
     this.selected = b ? b.id : null;
+    this.selWall = b && b.type === 'wall' ? this.pickedWall : null;
     if (this.onSelect) this.onSelect(b);
   }
 
@@ -1647,8 +1748,10 @@ export class TownView {
     if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
     if (this.landMode) this.drawLandLots(ctx);
     if (this.wallMode) this.drawWallPreview(ctx);
+    if (this.gateMode) this.drawGatePreview(ctx);
+    this.drawWallSel(ctx, t);
     const wall = s.buildings.find((b) => b.type === 'wall');
-    const wallLevel = wall ? Math.max(wall.level, (s.walls || []).length ? 1 : 0) : 0;
+    const wallLevel = wall ? Math.max(wall.level, (s.walls || []).length || (s.gates || []).length ? 1 : 0) : 0;
     const segs = this.wallSegments(wallLevel);
     this.drawShadows(ctx, segs, wallLevel, light, vis);
 
@@ -1765,7 +1868,68 @@ export class TownView {
     this.drawWorkProgress(ctx, now);
     if (this.fighting && this.fighting.length) this.drawProjectiles(ctx, this.fighting, now);
     this.drawHover(ctx);
+    this.drawSelMarker(ctx, t);
     if (this.landMode) this.drawLandLabel(ctx);
+  }
+
+  // gekozen muurstuk of poort: gouden tegel op de grond
+  drawWallSel(ctx, t) {
+    const w = this.selWall;
+    if (!w || this.selected == null) return;
+    const pulse = 0.55 + Math.sin(t * 0.006) * 0.25;
+    ctx.save();
+    ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    ctx.fillStyle = `rgba(255,215,90,${pulse * 0.45})`; ctx.fillRect(w.i - 0.08, w.j - 0.08, 1.16, 1.16);
+    ctx.strokeStyle = `rgba(255,232,140,${pulse + 0.25})`; ctx.lineWidth = 0.07; ctx.strokeRect(w.i - 0.08, w.j - 0.08, 1.16, 1.16);
+    ctx.restore();
+  }
+
+  // gouden pijl boven het gekozen gebouw of muurstuk (altijd bovenop, zodat je ziet wat je koos)
+  drawSelMarker(ctx, t) {
+    const s = this.state;
+    let p = null; let h = 0;
+    if (this.selWall && this.selected != null) {
+      p = toWorld(this.selWall.i + 0.5, this.selWall.j + 0.5); h = this.selWall.gate ? 52 : 40;
+    } else if (this.selected != null) {
+      const b = s.buildings.find((x) => x.id === this.selected);
+      if (!b || !isPlaced(b)) return;
+      p = this.footprintCenter(b); h = (b.level > 0 ? (SPRITE_H[b.type] || 58) : 36) + 8;
+    }
+    if (!p) return;
+    if (this.selWall) {
+      // de tegel zelf, bovenop de muur, met een gouden rand
+      const pulse = 0.65 + Math.sin(t * 0.006) * 0.25;
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,210,80,0.9)'; ctx.shadowBlur = 6;
+      A.diamond(ctx, p.x, p.y, A.TW + 6, A.TH + 3, null, `rgba(255,228,120,${pulse})`);
+      ctx.lineWidth = 2.4; ctx.stroke();
+      ctx.restore();
+    }
+    const y = p.y - h + Math.sin(t * 0.006) * 3;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
+    ctx.fillStyle = '#ffd34d'; ctx.strokeStyle = '#5a3a0c'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(p.x - 8, y - 11); ctx.lineTo(p.x + 8, y - 11); ctx.lineTo(p.x, y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  // poort maken: de tegel onder de muis groen (kan) of rood (kan niet)
+  drawGatePreview(ctx) {
+    const h = this.hoverTile;
+    if (!h) return;
+    const i = Math.floor(h.gx); const j = Math.floor(h.gy);
+    const err = checkPlaceGate(this.state, i, j);
+    ctx.save();
+    ctx.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    ctx.fillStyle = err ? 'rgba(230,90,70,0.45)' : 'rgba(120,230,110,0.5)';
+    ctx.fillRect(i + 0.06, j + 0.06, 0.88, 0.88);
+    ctx.restore();
+    const p = toWorld(i + 0.5, j + 0.5);
+    const txt = err && !/grondstoffen/.test(err) ? 'Hier kan geen poort' : err ? 'Niet genoeg grondstoffen' : 'Poort hier maken';
+    ctx.font = '700 11px Inter, sans-serif'; ctx.textAlign = 'center';
+    const tw = ctx.measureText(txt).width + 16;
+    ctx.fillStyle = 'rgba(28,20,12,0.88)'; ctx.beginPath(); ctx.roundRect(p.x - tw / 2, p.y - 44, tw, 20, 8); ctx.fill();
+    ctx.fillStyle = err ? '#ffb4a4' : '#ffe28a'; ctx.fillText(txt, p.x, p.y - 30);
   }
 
   // ---------- wildernis tekenen ----------
@@ -2059,9 +2223,10 @@ export class TownView {
       ctx.beginPath(); ctx.ellipse(p.x + 4, p.y + 3, 18, 9, 0, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
       if (moving && !part) {
-        const d = toWorld(g.x1, g.y1);
+        const pts = [{ x: g.x1, y: g.y1 }, ...(g.via || [])].map((q) => toWorld(q.x, q.y));
         ctx.setLineDash([5, 5]); ctx.strokeStyle = 'rgba(255,240,180,0.65)'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(d.x, d.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); for (const d of pts) ctx.lineTo(d.x, d.y); ctx.stroke(); ctx.setLineDash([]);
+        const d = pts[pts.length - 1];
         A.flag(ctx, d.x, d.y, 16, '#ffe28a', t, 0.6);
       }
     }
@@ -2537,6 +2702,16 @@ export class TownView {
     } else {
       A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ), c.x, c.y);
       this.drawOverlay(ctx, b, c, t);
+      if (sel) {
+        // voorste randen van de voet in goud, over het gebouw heen: zo zie je duidelijk wat gekozen is
+        const pulse = 0.7 + Math.sin(t * 0.006) * 0.25;
+        const w = (size * A.TW) / 2 + 5; const hh = (size * A.TH) / 2 + 2.5;
+        ctx.save();
+        ctx.shadowColor = 'rgba(255,210,80,0.9)'; ctx.shadowBlur = 8;
+        ctx.strokeStyle = `rgba(255,228,120,${pulse})`; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.moveTo(c.x - w, c.y); ctx.lineTo(c.x, c.y + hh); ctx.lineTo(c.x + w, c.y); ctx.stroke();
+        ctx.restore();
+      }
       if (job && emit) this.particles.dust(c.x, c.y + 6, 1);
       if (b.type === 'smithy' && emit && Math.random() < 0.6) {
         const [gx, gy] = A.P(0.36, 0.3, 6);
