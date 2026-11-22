@@ -84,7 +84,10 @@ registratie; oude spelers kregen een vast willekeurig volk.
      geleden, dan krijgen zij 45 s om te kiezen: **zelf besturen** of **automatisch**. Zonder keuze → automatisch.
   3. Is niemand van beiden online (of werd de aankomst pas later verwerkt), dan wordt de slag **meteen automatisch**
      uitgerekend (`resolveBattle`). Er wordt dus **niet gewacht** tot de aanvaller online komt.
-  3b. Daarom: **melding op je gsm** ±2 minuten voor aankomst (aanvaller en verdediger; cron-worker elke minuut) en in het
+  3b. Daarom: **melding op je gsm** ±2 minuten voor aankomst (aanvaller en verdediger; cron-worker elke minuut), ±1 min
+     vooraf stil bijgewerkt met de resterende tijd. De gebruiker wil de melding echt op de gsm (meldingenbalk/vergrendelscherm,
+     ook met het spel dicht), niet enkel in het spel. Zonder het tokenrecht 'Workers Scripts · Edit' draait de cron-worker
+     niet en gaan meldingen enkel uit als iemand het spel open heeft. Daarnaast in het
      spel een **aftelbalk** vanaf 120 s waar je al kiest. Vooraf 'zelf besturen' + verdediger offline → de slag begint meteen;
      vooraf 'automatisch' + verdediger offline → meteen uitgerekend.
   4. Live slag: slagveld 24×18 (`fieldbattle.js`), max. 4 minuten; kijkt niemand meer (30 s), dan rekent de server de
