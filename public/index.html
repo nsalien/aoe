@@ -8,7 +8,12 @@
   <meta name="description" content="Bouw samen met je bondgenoot een rijk op, en trek na drie weken vrede ten strijde.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M10 58V26h8v8h6V26h8v8h0V26h8v8h6v-8h8v32z' fill='%23b9b1a1'/%3E%3Cpath d='M28 58V44a4 4 0 0 1 8 0v14z' fill='%233d2a1a'/%3E%3Cpath d='M32 6v18' stroke='%233b2a18' stroke-width='2'/%3E%3Cpath d='M33 6h14l-4 5 4 5H33z' fill='%23d64545'/%3E%3C/svg%3E">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <!-- iPhone/iPad: 'Zet op beginscherm' geeft een app met eigen icoon, volledig scherm en zonder adresbalk -->
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Rijken">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -46,7 +51,7 @@
         <button class="btn primary big" type="submit">Sticht mijn rijk</button>
       </form>
       <p id="authError" class="error" role="alert"></p>
-      <p class="app-link"><a href="/rijken-van-de-vallei.apk" download>Android-app downloaden</a></p>
+      <p id="appLink" class="app-link"><a href="/rijken-van-de-vallei.apk" download>Android-app downloaden</a></p>
     </div>
   </section>
 
