@@ -1,12 +1,12 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
   advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
-  towerDefense, townBaseDef, effectiveWall, wallEnclosed,
+  towerDefense, townBaseDef, effectiveWall,
 } from '../../public/shared/sim.js';
 import {
   resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits, subtractUnits,
 } from '../../public/shared/battle.js';
-import { createBattle, stepTo, giveOrder, battleOutcome, FB } from '../../public/shared/fieldbattle.js';
+import { createBattle, stepTo, queueOrder, battleOutcome, FB } from '../../public/shared/fieldbattle.js';
 import {
   RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue,
 } from '../../public/shared/rules.js';
@@ -448,7 +448,7 @@ async function maybeOfferBattle(db, world, m, now) {
   ).bind(m.id, m.player_id, defPlayer, m.target_kind, m.target_id, title, now + FB.chooseMs, pref, now, now).run();
   // het leger wacht op het slagveld; lukt het afronden nooit, dan neemt processDue het later over
   await db.prepare("UPDATE marches SET status = 'battle', lock_until = ? WHERE id = ?")
-    .bind(now + FB.chooseMs + FB.maxMs + 600000, m.id).run();
+    .bind(now + FB.chooseMs + FB.deployMs + FB.maxMs + 600000, m.id).run();
   // al gekozen voor zelf besturen en niemand anders hoeft te kiezen: de slag begint meteen
   if (pref === 'manual' && !defOn) {
     const b = await loadBattle(db, ins.meta.last_row_id);
@@ -515,22 +515,28 @@ async function startBattle(db, world, b, now) {
     const sup = (await db.prepare('SELECT id, units FROM support WHERE host_town = ?').bind(b.target_id).all()).results;
     const defGroups = [{ key: 'home', units: { ...s.units } }, ...sup.map((r) => ({ key: r.id, units: JSON.parse(r.units) }))];
     setup = {
-      kind: 'town', att: m.units, defGroups, smithyA, smithyD: bLevel(s, 'smithy'),
-      towers: s.buildings.filter((x) => x.type === 'tower' && x.level > 0).slice(0, 6).map((x) => ({ id: x.id, level: x.level })),
-      wall: (s.walls || []).length ? bLevel(s, 'wall') : 0, enclosed: wallEnclosed(s),
+      kind: 'town', att: m.units, defGroups, smithyA, smithyD: bLevel(s, 'smithy'), town: s, townId: town.id,
       style: { civ: s.civ, age: bLevel(s, 'tc') },
+      // de stad zoals ze getekend wordt (enkel wat de browser nodig heeft)
+      view: {
+        seed: town.id, civ: s.civ || null,
+        buildings: s.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+        walls: s.walls || [], gates: s.gates || [], cl: (s.terr && s.terr.cl) || [], lots: (s.terr && s.terr.lots) || [],
+      },
     };
   } else {
     const c = await loadCamp(db, b.target_id, now);
     if (!c) return autoBattle(db, world, b, now);
-    setup = { kind: 'camp', att: m.units, defGroups: [{ key: 'camp', units: { ...c.state.units } }], smithyA, level: c.level };
+    setup = { kind: 'camp', att: m.units, defGroups: [{ key: 'camp', units: { ...c.state.units } }], smithyA, level: c.level, campSeed: 50000 + c.id, view: { seed: 50000 + c.id, camp: true } };
   }
-  const state = createBattle({ ...setup, now });
+  // de aanvaller komt uit de richting van zijn eigen stad
+  const dir = { x: (m.from_x ?? m.to_x) - m.to_x, y: (m.from_y ?? m.to_y) - m.to_y };
+  const state = createBattle({ ...setup, dir, aiAtt: b.att_mode !== 'manual', aiDef: b.def_mode !== 'manual', now });
   // namen en kleuren voor het slagveld in de browser
   const side = (pid) => (pid ? db.prepare('SELECT p.name, tm.color FROM players p LEFT JOIN teams tm ON tm.id = p.team_id WHERE p.id = ?').bind(pid).first() : null);
   const pa = await side(b.att_player); const pd = await side(b.def_player);
   state.meta = {
-    attInit: m.units, defInit: Object.fromEntries(setup.defGroups.map((g) => [g.key, g.units])), style: setup.style || null, level: setup.level || 0,
+    attInit: m.units, defInit: Object.fromEntries(setup.defGroups.map((g) => [g.key, g.units])), style: setup.style || null, level: setup.level || 0, view: setup.view,
     att: { name: pa ? pa.name : '?', color: (pa && pa.color) || '#2e6fb5' },
     def: { name: pd ? pd.name : 'Rovers', color: pd ? pd.color || '#c0392b' : '#7a1b12' },
   };
@@ -605,7 +611,10 @@ async function finishBattle(db, world, b, now, abandoned = false) {
 async function tickBattle(db, world, b, now) {
   if (b.status === 'choose' && now >= b.choose_until) { await startBattle(db, world, b, now); return; }
   if (b.status !== 'live') return;
-  stepTo(b.state, now, FB.maxTicksPerCall);
+  // slag van een oudere versie: automatisch afronden
+  if (!b.state || b.state.v !== 2) { await finishBattle(db, world, b, now, true); return; }
+  // de server rekent iets achter op de klok, zodat bevelen van beide spelers op tijd binnen zijn
+  stepTo(b.state, now - FB.delay, FB.maxTicksPerCall);
   if (b.state.over != null) await finishBattle(db, world, b, now);
   else await saveBattle(db, b, now);
 }
@@ -621,8 +630,22 @@ export async function battleView(db, world, id, playerId, now) {
   if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
   const role = battleRole(b, playerId);
   if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
-  await tickBattle(db, world, b, now);
+  try {
+    await tickBattle(db, world, b, now);
+  } catch (e) {
+    // iemand anders bewaarde net (de tegenstander peilde of gaf een bevel): toon gewoon de nieuwste stand
+    if (e.status !== 409) throw e;
+    const fresh = await loadBattle(db, id);
+    if (fresh) return publicBattle(fresh, role);
+  }
   return publicBattle(b, role);
+}
+
+// een wijziging aan de slag opnieuw proberen als iemand anders net bewaarde
+async function retry(fn) {
+  for (let k = 0; ; k++) {
+    try { return await fn(); } catch (e) { if (e.status !== 409 || k >= 3) throw e; }
+  }
 }
 
 export function publicBattle(b, role) {
@@ -633,6 +656,10 @@ export function publicBattle(b, role) {
 }
 
 export async function setBattleMode(db, world, id, playerId, mode, now) {
+  return retry(() => setBattleModeOnce(db, world, id, playerId, mode, now));
+}
+
+async function setBattleModeOnce(db, world, id, playerId, mode, now) {
   const b = await loadBattle(db, id);
   if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
   const role = battleRole(b, playerId);
@@ -640,6 +667,11 @@ export async function setBattleMode(db, world, id, playerId, mode, now) {
   if (mode !== 'manual' && mode !== 'auto') throw new GameError('Kies zelf of automatisch.');
   if (b.status === 'done') return publicBattle(b, role);
   if (role === 'att') b.att_mode = mode; else b.def_mode = mode;
+  // tijdens de slag: de computer neemt het over (of geeft het bevel terug)
+  if (b.status === 'live' && b.state && b.state.v === 2) {
+    stepTo(b.state, now - FB.delay, FB.maxTicksPerCall);
+    queueOrder(b.state, role === 'att' ? 0 : 1, null, { ai: mode === 'auto' });
+  }
   if (b.status === 'choose') {
     // wie niet (meer) online is, laat de slag automatisch verlopen
     const decided = async (pid, mode) => {
@@ -653,17 +685,32 @@ export async function setBattleMode(db, world, id, playerId, mode, now) {
 }
 
 export async function battleOrder(db, world, id, playerId, body, now) {
+  return retry(() => battleOrderOnce(db, world, id, playerId, body, now));
+}
+
+async function battleOrderOnce(db, world, id, playerId, body, now) {
   const b = await loadBattle(db, id);
   if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
   const role = battleRole(b, playerId);
   if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
   if (b.status !== 'live') return publicBattle(b, role);
   if ((role === 'att' ? b.att_mode : b.def_mode) !== 'manual') throw new GameError('Je laat deze slag automatisch verlopen.');
-  stepTo(b.state, now, FB.maxTicksPerCall);
+  if (!b.state || b.state.v !== 2) return publicBattle(b, role);
+  stepTo(b.state, now - FB.delay, FB.maxTicksPerCall);
   const ids = Array.isArray(body.ids) ? body.ids.slice(0, 300).map(Number).filter(Number.isFinite) : null;
-  const o = { x: Number(body.x), y: Number(body.y), target: body.target != null ? Number(body.target) : null, charge: !!body.charge, retreat: !!body.retreat };
-  if (!o.charge && !o.retreat && o.target == null && !(Number.isFinite(o.x) && Number.isFinite(o.y))) throw new GameError('Ongeldig bevel.');
-  giveOrder(b.state, role === 'att' ? 0 : 1, ids, o);
+  const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+  const o = {};
+  if (body.ready) o.ready = true;
+  else if (body.retreat) { if (role !== 'att') throw new GameError('Enkel de aanvaller kan zich terugtrekken.'); o.retreat = true; }
+  else if (body.charge) o.charge = true;
+  else if (body.stop) o.stop = true;
+  else if (num(body.target) != null) o.target = num(body.target);
+  else if (num(body.wall) != null) o.wall = num(body.wall);
+  else if (num(body.x) != null && num(body.y) != null) { o.x = num(body.x); o.y = num(body.y); }
+  else throw new GameError('Ongeldig bevel.');
+  const cid = typeof body.cid === 'string' ? body.cid.slice(0, 24) : null;
+  // uitvoeren op de tik waarop de speler tikte (de server loopt iets achter, dus dat is meestal nog niet voorbij)
+  queueOrder(b.state, role === 'att' ? 0 : 1, ids, o, num(body.at) ?? b.state.n, cid);
   if (b.state.over != null) await finishBattle(db, world, b, now);
   else await saveBattle(db, b, now);
   return publicBattle(b, role);
