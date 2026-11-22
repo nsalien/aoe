@@ -462,42 +462,16 @@ function raidIncoming() {
 }
 
 // uitleg bovenaan als je een dorpeling, soldaat of groep gekozen hebt
+// Gekozen troepen: geen uitleg meer, enkel 'Naar huis' (als ze buiten zijn) en 'Klaar', klein rechts onderaan.
 function renderSelHint() {
-  if (app.placing) return;
-  const hint = $('#placeHint');
+  const box = $('#selActions');
   const sel = town.sel;
   const g = sel && (sel.type === 'group' || sel.type === 'unit') ? town.selGroup() : null;
-  if (!sel || ((sel.type === 'group' || sel.type === 'unit') && !g)) { hint.hidden = true; return; }
-  let who; let extra = '';
-  if (sel.type === 'walker') who = `Dorpeling${sel.w.job === 'idle' ? '' : ` (${RES_NAMES[sel.w.job].toLowerCase()})`}`;
-  else if (sel.type === 'soldier') who = UNITS[sel.kind].name;
-  else if (sel.type === 'soldiers') who = `${sel.n} × ${UNITS[sel.kind].name.toLowerCase()}`;
-  else if (sel.type === 'villagers') who = `${sel.n} dorpelingen${sel.job === 'idle' ? '' : ` (${RES_NAMES[sel.job].toLowerCase()})`}`;
-  else if (sel.type === 'unit') {
-    who = `1 ${UNITS[sel.kind].name.toLowerCase()}`;
-    extra = `<button class="btn small" data-action="fieldHome" data-id="${g.id}">${UI.icon('home')} Groep naar huis</button>`;
-  } else if (sel.type === 'kind') {
-    who = `${sel.n} × ${UNITS[sel.kind].name.toLowerCase()} (alle)`;
-    if (sel.ids.length) extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
-  } else if (sel.type === 'army') {
-    who = `Je hele leger (${sel.n} man)`;
-    if (sel.ids.length) extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
-  } else if (sel.type === 'groups') {
-    who = `${sel.ids.length} groepen met ${UNITS[sel.kind].name.toLowerCase()}s`;
-    extra = `<button class="btn small" data-action="groupsHome">${UI.icon('home')} Naar huis</button>`;
-  } else {
-    who = UI.unitsText(g.units);
-    if (!(g.order && g.order.type === 'home' && g.pending)) extra = `<button class="btn small" data-action="fieldHome" data-id="${g.id}">${UI.icon('home')} Naar huis</button>`;
-  }
-  const villager = town.selIsVillager();
-  const what = villager
-    ? `Tik op de grond, een boom aan de rand${sel.type === 'walker' ? ', een vondst' : ''} of een bron.`
-    : 'Tik op de grond, een everzwijn of het barbarenkamp.';
-  hint.hidden = false;
-  const touch = matchMedia('(pointer: coarse)').matches;
-  const tip = sel.type === 'army' ? '' : villager ? ` ${touch ? 'Dubbel tikken' : 'Dubbelklik'}: alle van deze soort.`
-    : ` ${touch ? 'Dubbel tikken' : 'Dubbelklik'}: alle van deze soort · ingedrukt houden: hele leger.`;
-  setHTML(hint, `<span><b>${UI.esc(who)}</b> <span class="muted">${what}${tip}</span></span>${extra}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
+  if (!sel || app.placing || ((sel.type === 'group' || sel.type === 'unit') && !g)) { box.hidden = true; return; }
+  const out = (sel.type === 'group' && !(g.order && g.order.type === 'home' && g.pending)) || sel.type === 'unit'
+    || ((sel.type === 'kind' || sel.type === 'army' || sel.type === 'groups') && sel.ids.length);
+  box.hidden = false;
+  setHTML(box, `${out ? `<button class="btn small" data-action="selHome">${UI.icon('home')} Naar huis</button>` : ''}<button class="btn small" data-action="cancelVillager">Klaar</button>`);
 }
 
 // muren plaatsen of grond kopen (aparte modus op de kaart)
@@ -1023,6 +997,15 @@ const actions = {
   wallRemove() { setMode('wallremove'); },
   landMode() { setMode(app.mode === 'land' ? null : 'land'); },
   modeDone() { setMode(null); },
+  // de gekozen troepen naar huis (een groep, één troep uit een groep, alle van een soort of het hele leger)
+  selHome() {
+    const sel = town.sel;
+    if (!sel) return;
+    if (sel.type === 'group') fieldOrder({ action: 'order', id: sel.id, target: { type: 'home' } });
+    else if (sel.type === 'groups') fieldOrders(sel.ids.map((id) => ({ action: 'order', id, target: { type: 'home' }, keepSel: true })));
+    else town.issue(sel, null, { type: 'home' });
+    town.clearSel();
+  },
   groupsHome() {
     const sel = town.sel;
     if (sel && (sel.type === 'groups' || sel.type === 'army')) fieldOrders(sel.ids.map((id) => ({ action: 'order', id, target: { type: 'home' }, keepSel: true })));
