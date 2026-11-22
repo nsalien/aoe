@@ -1205,5 +1205,19 @@ document.addEventListener('submit', async (e) => {
   try { await post('/chat', { channel: app.chat.chan, text }); loadChat(); } catch (err) { toast(err.message, 'err'); }
 });
 
+// Op een iPhone/iPad: uitleg om het spel als app op het beginscherm te zetten (in plaats van de Android-app).
+// Al geopend vanaf het beginscherm? Dan tonen we niets.
+(function appLink() {
+  const el = $('#appLink');
+  if (!el) return;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (standalone) { el.hidden = true; return; }
+  if (ios) {
+    el.classList.add('ios');
+    el.innerHTML = `<b>Als app op je iPhone:</b> tik in Safari onderaan op <span class="share-ic" aria-label="Delen"></span> <b>Delen</b> en kies <b>Zet op beginscherm</b>.`;
+  }
+})();
+
 for (const el of document.querySelectorAll('[data-icon]')) el.insertAdjacentHTML('afterbegin', UI.icon(el.dataset.icon));
 boot();

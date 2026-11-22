@@ -855,7 +855,8 @@ export function helpHtml(w) {
     <h3>Op je gsm als app</h3>
     <p><b>Android:</b> <a href="/rijken-van-de-vallei.apk" download>download de app</a>, open het bestand en kies <b>Installeren</b>
     (de eerste keer vraagt je gsm om installaties uit je browser toe te staan). De app opent het spel volledig scherm;
-    updates van het spel krijg je vanzelf. <b>iPhone:</b> open de site in Safari, tik op Delen en kies <b>Zet op beginscherm</b>.</p>
+    updates van het spel krijg je vanzelf. <b>iPhone of iPad:</b> open de site in <b>Safari</b>, tik onderaan op <b>Delen</b> en kies
+    <b>Zet op beginscherm</b>. Het spel krijgt dan een eigen icoon en opent volledig scherm, net als een app.</p>
     <h3>Punten</h3>
     <p>Gebouwen, dorpelingen en troepen geven opbouwpunten; het <b>Monument</b> levert per niveau 1500 extra punten. Verslagen vijanden en rovers geven gevechtspunten.</p></div>`;
 }
