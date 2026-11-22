@@ -561,7 +561,7 @@ function practiceTown(now, civ) {
   for (const [type, x, y, level] of [['house', 1, 2, 2], ['house', 2, 2, 2], ['house', 9, 2, 2], ['barracks', 2, 8, 2], ['range', 9, 8, 1],
     ['farm', 8, 10, 1], ['farm', 9, 10, 1], ['market', 3, 4, 1], ['tower', 0, 0, 2], ['tower', 11, 11, 2], ['smithy', 8, 4, 1]]) s.buildings.push({ id: id++, type, x, y, level });
   s.walls = []; s.gates = [];
-  const gate = (i, j) => (i === 5 && (j === -1 || j === 12)) || (j === 6 && (i === -1 || i === 12));
+  const gate = (i, j) => ((i === 5 || i === 6) && (j === -1 || j === 12)) || ((j === 5 || j === 6) && (i === -1 || i === 12)); // poorten van 2 tegels
   for (let i = -1; i <= 12; i++) for (const j of [-1, 12]) (gate(i, j) ? s.gates : s.walls).push(tileIndex(i, j));
   for (let j = 0; j <= 11; j++) for (const i of [-1, 12]) (gate(i, j) ? s.gates : s.walls).push(tileIndex(i, j));
   return s;
@@ -591,7 +591,11 @@ export async function startPractice(db, world, player, role, now) {
     kind: 'town', att: PRACTICE.att, defGroups: [{ key: 'home', units: { ...PRACTICE.def } }], town, townId: seed, dir,
     aiAtt: role !== 'att', aiDef: role !== 'def', now,
   });
-  const foe = { name: 'Computer', color: '#7a1b12' }; const mine = { name: player.name, color: myColor };
+  // de computer krijgt een kleur die duidelijk verschilt van de jouwe
+  const rgb = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); const v = m ? parseInt(m[1], 16) : 0; return [v >> 16, (v >> 8) & 255, v & 255]; };
+  const me3 = rgb(myColor);
+  const foeColor = ['#2e6fb5', '#c0392b', '#d4a017', '#7d3c98', '#1e8449'].map((c) => ({ c, d: rgb(c).reduce((a, v, i) => a + (v - me3[i]) ** 2, 0) })).sort((a, b) => b.d - a.d)[0].c;
+  const foe = { name: 'Computer', color: foeColor }; const mine = { name: player.name, color: myColor };
   state.meta = {
     practice: true, attInit: PRACTICE.att, defInit: { home: PRACTICE.def }, style: { civ: town.civ, age: bLevel(town, 'tc') }, level: 0,
     view: {

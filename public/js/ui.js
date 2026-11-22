@@ -490,12 +490,12 @@ function wallTileHtml(app, live) {
   const canAct = app.canAct;
   if (w.gate) {
     return `<div class="card"><h3>${icon('castle')} Deze poort</h3>
-      <p class="small muted" style="margin:0">Gaat vanzelf open als je troepen erdoor willen en weer dicht als ze voorbij zijn.</p>
+      <p class="small muted" style="margin:0">2 tegels breed. Gaat vanzelf open als je troepen erdoor willen en weer dicht als ze voorbij zijn.</p>
       <div class="actions"><button class="btn danger small" data-action="wallTileRemove" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>Poort afbreken</button></div></div>`;
   }
   const err = checkPlaceGate(live, w.i, w.j);
   return `<div class="card"><h3>${icon('hammer')} Dit muurstuk</h3>
-    <div class="small muted">Poort maken: ${costHtml(GATE.cost, live.res)}</div>
+    <div class="small muted">Poort maken (2 tegels breed, met het muurstuk ernaast): ${costHtml(GATE.cost, live.res)}</div>
     ${err && !/grondstoffen/.test(err) ? `<p class="req">${err}</p>` : ''}
     <div class="actions"><button class="btn small" data-action="gateHere" data-i="${w.i}" data-j="${w.j}" ${canAct && !err ? '' : 'disabled'}>Poort van maken</button>
       <button class="btn danger small" data-action="wallTileRemove" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>Afbreken</button></div></div>`;
@@ -965,8 +965,8 @@ export function helpHtml(w) {
     ook als het spel dicht is; de verdediger krijgt er ook een. Open je het spel, dan zie je een aftelling en kan je al kiezen:
     <b>zelf besturen</b> of <b>automatisch</b>. Op een iPhone werkt dit enkel vanuit de app op je beginscherm.</p>
     <h3>Muren, poorten en afbreken</h3>
-    <p>Muren plaats je tegel per tegel. Een <b>poort</b> maak je in een recht stuk muur: tik op een muurstuk en kies <b>Poort van maken</b>,
-    of laat een gat van één tegel en kies <b>Poort maken</b>. Is je stad helemaal ommuurd, dan gaan je troepen enkel via een poort naar binnen
+    <p>Muren plaats je tegel per tegel. Een <b>poort</b> is <b>2 tegels breed</b> en komt in een recht stuk muur: tik op een muurstuk en kies
+    <b>Poort van maken</b> (het muurstuk ernaast wordt mee de poort), of laat een gat van twee tegels en kies <b>Poort maken</b>. Is je stad helemaal ommuurd, dan gaan je troepen enkel via een poort naar binnen
     en buiten; die gaat vanzelf open en dicht. Een gebouw of muurstuk dat je aantikt, krijgt een gouden pijl; in het paneel kan je het
     ook <b>afbreken</b> (je krijgt een deel van de grondstoffen terug).</p>
     <h3>Op je gsm als app</h3>
