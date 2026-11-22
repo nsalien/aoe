@@ -1128,8 +1128,34 @@ export class TownView {
     return seg.tower ? (stone ? 30 + level * 3 : 26) : (stone ? 16 + level * 2 : 15);
   }
 
+  // muurstukken één keer tekenen en daarna als afbeelding hergebruiken (stenen textuur is duur)
   drawWallPiece(ctx, seg, level) {
     if (seg.gateTile) { this.drawGate(ctx, seg, Math.max(1, level)); return; }
+    if (!this.wallSprites || this.wallSprites.level !== level) this.wallSprites = { level, map: new Map() };
+    const key = `${seg.x0},${seg.y0},${seg.x1},${seg.y1},${seg.tower ? 1 : 0}${seg.gate ? 1 : 0}`;
+    let spr = this.wallSprites.map.get(key);
+    if (!spr) {
+      const top = this.wallHeight(seg, level) + 14;
+      let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+      for (const gx of [seg.x0 - 0.05, seg.x1 + 0.05]) {
+        for (const gy of [seg.y0 - 0.05, seg.y1 + 0.05]) {
+          for (const z of [0, top]) { const [px, py] = A.P(gx, gy, z); x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py); }
+        }
+      }
+      x0 = Math.floor(x0 - 3); y0 = Math.floor(y0 - 3); x1 = Math.ceil(x1 + 3); y1 = Math.ceil(y1 + 3);
+      const Q = 2.5;
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round((x1 - x0) * Q)); cv.height = Math.max(1, Math.round((y1 - y0) * Q));
+      const c = cv.getContext('2d');
+      c.scale(Q, Q); c.translate(-x0, -y0);
+      this.drawWallPieceRaw(c, seg, level);
+      spr = { cv, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      this.wallSprites.map.set(key, spr);
+    }
+    ctx.drawImage(spr.cv, spr.x, spr.y, spr.w, spr.h);
+  }
+
+  drawWallPieceRaw(ctx, seg, level) {
     const stone = level >= 3;
     const h = this.wallHeight(seg, level);
     if (!stone) {
@@ -1733,7 +1759,7 @@ export class TownView {
     this.birds.update(dt);
     this.clouds.update(dt);
     this.adaptQuality(dt);
-    if (now - this.fogAt > 120 || now < this.fogAt) this.updateFog(now);
+    if (!this.battleMode && (now - this.fogAt > 120 || now < this.fogAt)) this.updateFog(now);
     cam.apply(ctx);
     const gnd = this.ground;
     const vis = this.viewRect(2);
@@ -1745,7 +1771,8 @@ export class TownView {
     const v = this.viewRect();
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
     this.treeMip = cam.zoom * cam.dpr < 0.95;
-    if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
+    if (this.battleMode) this.underlay(ctx, t, now); // slagveld: opstelplaats en looplijnen op de grond
+    else if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
     if (this.landMode) this.drawLandLots(ctx);
     if (this.wallMode) this.drawWallPreview(ctx);
     if (this.gateMode) this.drawGatePreview(ctx);
@@ -1779,7 +1806,7 @@ export class TownView {
       if (pos) items.push({ depth: pos.gx + pos.gy, kind: 'harvester', hv, pos });
     }
     for (const b of s.buildings) {
-      if (!isPlaced(b)) continue;
+      if (!isPlaced(b) || b.hide) continue;
       const size = BUILDINGS[b.type].size;
       items.push({ depth: b.x + b.y + size, kind: 'building', b });
     }
@@ -1787,7 +1814,7 @@ export class TownView {
     for (const w of this.walkers) if (w.wait <= 0 || w.phase === 'work' || w.job === 'idle') items.push({ depth: w.gx + w.gy, kind: 'walker', w });
     for (const sol of this.soldierSpots()) items.push({ depth: sol.gx + sol.gy, kind: 'soldier', sol });
     for (const sh of this.sheep) items.push({ depth: sh.gx + sh.gy, kind: 'sheep', sh });
-    if (s.terr) {
+    if (s.terr && !this.battleMode) {
       const terr = this.terr;
       for (const d of terr.deposits) {
         if (depLeft(s, d) <= 0 || !this.isExplored(d.x, d.y) || !inView(toWorld(d.x, d.y))) continue;
@@ -1813,6 +1840,7 @@ export class TownView {
       }
       this.fightEffects(scene, now);
     }
+    if (this.battleMode) this.battleItems(items, now, inView); // troepen, puin en tenten op het slagveld
     items.sort((a, b) => a.depth - b.depth);
 
     const jobs = new Map(s.builds.map((j) => [j.bid, j]));
@@ -1838,6 +1866,7 @@ export class TownView {
         case 'raid': this.drawRaid(ctx, it.raid, t); break;
         case 'group': this.drawGroup(ctx, it.g, it.p, t, now, emit); break;
         case 'fighter': this.drawFighter(ctx, it.u, it.sc, t, now); break;
+        case 'x': it.draw(ctx); break;
         default: { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, t); }
       }
     }
@@ -1849,7 +1878,7 @@ export class TownView {
     if (this.flutter && night < 0.5) this.flutter.draw(ctx, t, night);
     this.clouds.drawShadows(ctx, 0.12 * (1 - night));
     this.birds.draw(ctx, t, 90);
-    this.drawFog(ctx, vis);
+    if (!this.battleMode) this.drawFog(ctx, vis);
 
     // licht en donker
     FX.applyLight(ctx, this.canvas.width, this.canvas.height, light);
@@ -1867,6 +1896,7 @@ export class TownView {
     if (wall && jobs.has(wall.id)) this.drawWallProgress(ctx, jobs.get(wall.id), now);
     this.drawWorkProgress(ctx, now);
     if (this.fighting && this.fighting.length) this.drawProjectiles(ctx, this.fighting, now);
+    if (this.battleMode) this.overlay(ctx, t, now);
     this.drawHover(ctx);
     this.drawSelMarker(ctx, t);
     if (this.landMode) this.drawLandLabel(ctx);
@@ -2333,7 +2363,7 @@ export class TownView {
   drawHover(ctx) {
     const w = this.hoverW;
     const s = this.state;
-    if (!w || !s.terr || this.placing) return;
+    if (!w || !s.terr || this.placing || this.battleMode) return;
     let label = null; let at = null;
     for (const d of this.terr.deposits) {
       if (depLeft(s, d) <= 0 || !this.isExplored(d.x, d.y)) continue;
