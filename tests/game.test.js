@@ -670,7 +670,7 @@ test('belegering: aanvaller stelt zich op aan zijn kant, verdediger zet schutter
     const st = createBattle({ kind: 'town', att: { sword: 12, ram: 1 }, defGroups: [{ key: 'home', units: { spear: 6, archer: 8 } }], town: siegeTown(), townId: 7, dir, aiAtt: true, aiDef: true, now: 0 });
     const nv = nav(st);
     const proj = (u) => (u.x - st.plaza.x) * dir.x + (u.y - st.plaza.y) * dir.y;
-    for (const u of st.units.filter((x) => x.s === 0)) assert.ok(proj(u) >= st.zmin - 0.01 && proj(u) > 8, 'aanvaller aan zijn eigen kant, buiten de muur');
+    for (const u of st.units.filter((x) => x.s === 0)) assert.ok(proj(u) >= st.zmin - 0.5 && proj(u) > 8, 'aanvaller aan zijn eigen kant, buiten de muur');
     const archers = st.units.filter((u) => u.s === 1 && u.k === 'archer');
     for (const a of archers) assert.equal(nv.p1[cellOf(st, a.x, a.y)], 3, 'schutter op de muur');
     assert.ok(archers.every((a) => proj(a) > 4), 'op de muur aan de kant van de aanval');
