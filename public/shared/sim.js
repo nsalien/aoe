@@ -318,15 +318,34 @@ export function ensureTerritory(s, seed) {
   }
   // een volledig ommuurde stad zonder poort (van voor de poorten) krijgt er een, zodat je troepen er nog door kunnen
   if (s.walls.length && !(s.gates || []).length && wallEnclosed(s)) {
-    const set = wallSet(s); const d = tcDoor();
+    const d = tcDoor();
     let best = null;
     for (const idx of s.walls) {
       const { i, j } = tileOf(idx);
-      if (!gateAxis(set, i, j)) continue;
+      const span = gateSpan(s, i, j);
+      if (!span || span.score < 2) continue;
       const dist = Math.hypot(i + 0.5 - d.gx, j + 0.5 - d.gy);
-      if (!best || dist < best.dist) best = { idx, dist };
+      if (!best || dist < best.dist) best = { span, dist };
     }
-    if (best) { s.walls = s.walls.filter((x) => x !== best.idx); s.gates = [best.idx]; }
+    if (best) {
+      const idxs = best.span.tiles.map(([a, b]) => tileIndex(a, b));
+      s.walls = s.walls.filter((x) => !idxs.includes(x)); s.gates = idxs;
+    }
+  }
+  // poorten van vroeger (1 tegel breed) worden gratis 2 tegels breed als het naastliggende muurstuk dat toelaat
+  for (const g of gateList(s)) {
+    if (g.w !== 1) continue;
+    const [i, j] = g.tiles[0];
+    const dx = g.ax === 'x' ? 1 : 0; const dy = 1 - dx;
+    const walls = new Set(s.walls);
+    const isW = (a, b) => inTerr(a, b) && walls.has(tileIndex(a, b));
+    for (const sgn of [1, -1]) {
+      const p = [i + sgn * dx, j + sgn * dy]; const anchor = [i + 2 * sgn * dx, j + 2 * sgn * dy];
+      if (!isW(p[0], p[1]) || !isW(anchor[0], anchor[1])) continue;
+      const idx = tileIndex(p[0], p[1]);
+      s.walls = s.walls.filter((x) => x !== idx); s.gates.push(idx);
+      break;
+    }
   }
   // steden van voor de volkeren krijgen een willekeurig (maar vast) volk
   if (!CIVS[s.civ]) s.civ = CIV_IDS[(Math.imul(seed | 0, 2654435761) >>> 0) % CIV_IDS.length];
@@ -429,35 +448,77 @@ export function gateAxis(set, i, j) {
   return x && !y ? 'x' : y && !x ? 'y' : null;
 }
 
+// Een poort is 2 tegels breed. gateList(s): elke poort als groep aangrenzende poorttegels (oude poorten: 1 tegel),
+// met de as van de muur ('x' = de muur loopt langs x, je gaat er langs y door) en het midden (cx, cy).
+export function gateList(s) {
+  const gates = s.gates || [];
+  if (!gates.length) return [];
+  const set = new Set(gates); const seen = new Set(); const walls = wallSet(s); const out = [];
+  for (const idx of [...gates].sort((a, b) => a - b)) {
+    if (seen.has(idx)) continue;
+    const { i, j } = tileOf(idx);
+    const tiles = [[i, j]]; seen.add(idx);
+    const ex = inTerr(i + 1, j) ? tileIndex(i + 1, j) : -1; const so = inTerr(i, j + 1) ? tileIndex(i, j + 1) : -1;
+    if (ex >= 0 && set.has(ex) && !seen.has(ex)) { tiles.push([i + 1, j]); seen.add(ex); }
+    else if (so >= 0 && set.has(so) && !seen.has(so)) { tiles.push([i, j + 1]); seen.add(so); }
+    const last = tiles[tiles.length - 1];
+    const ax = tiles.length === 2 ? (last[0] !== i ? 'x' : 'y') : gateAxis(walls, i, j) || 'x';
+    out.push({ idx, tiles, ax, w: tiles.length, cx: (i + last[0]) / 2 + 0.5, cy: (j + last[1]) / 2 + 0.5 });
+  }
+  return out;
+}
+
+// Welke 2 tegels worden de poort als je op (i, j) tikt? Ze liggen in een recht stuk muur, met aan beide kanten
+// een muurstuk; elk van de twee is een muurstuk of nog vrije bouwgrond (een gat in de muur). null = kan niet.
+export function gateSpan(s, i, j) {
+  const walls = new Set(s.walls || []); const gates = new Set(s.gates || []);
+  const isW = (a, b) => inTerr(a, b) && walls.has(tileIndex(a, b));
+  const any = (a, b) => inTerr(a, b) && (walls.has(tileIndex(a, b)) || gates.has(tileIndex(a, b)));
+  const occ = occupied(s); const cl = clearedSet(s);
+  const ok = (a, b) => inTerr(a, b) && !gates.has(tileIndex(a, b)) && (walls.has(tileIndex(a, b)) || (!occ.has(`${a},${b}`) && isBuildable(s, a, b, cl)));
+  let best = null;
+  for (const ax of ['x', 'y']) {
+    const dx = ax === 'x' ? 1 : 0; const dy = 1 - dx;
+    for (const off of [0, -1]) {
+      const a = [i + off * dx, j + off * dy]; const b = [a[0] + dx, a[1] + dy];
+      if (!isW(a[0] - dx, a[1] - dy) || !isW(b[0] + dx, b[1] + dy)) continue; // muur voor en na de poort
+      if (!ok(a[0], a[1]) || !ok(b[0], b[1])) continue;
+      if ([a, b].some(([u, v]) => any(u + dy, v + dx) || any(u - dy, v - dx))) continue; // geen hoek of kruising
+      const score = (isW(a[0], a[1]) ? 1 : 0) + (isW(b[0], b[1]) ? 1 : 0) + (off === 0 ? 0.1 : 0);
+      if (!best || score > best.score) best = { ax, tiles: [a, b], score };
+    }
+  }
+  return best;
+}
+
 export function checkPlaceGate(s, i, j) {
   if (!bLevel(s, 'wall')) return 'Bouw eerst de stadsmuur.';
   if (!Number.isInteger(i) || !Number.isInteger(j) || !inTerr(i, j)) return 'Ongeldige plaats.';
   if (!isBuildable(s, i, j)) return 'Een poort kan enkel op je eigen bouwgrond.';
-  const gates = s.gates || [];
-  if (gates.length >= GATE.max) return `Je hebt al ${GATE.max} poorten.`;
   const idx = tileIndex(i, j);
-  if (gates.includes(idx)) return 'Hier staat al een poort.';
+  if ((s.gates || []).includes(idx)) return 'Hier staat al een poort.';
+  if (gateList(s).length >= GATE.max) return `Je hebt al ${GATE.max} poorten.`;
   if (!(s.walls || []).includes(idx) && occupied(s).has(`${i},${j}`)) return 'Daar staat een gebouw.';
-  if (!gateAxis(wallSet(s), i, j)) return 'Een poort moet in een recht stuk muur staan, met aan beide kanten een muurstuk.';
+  if (!gateSpan(s, i, j)) return 'Een poort is 2 tegels breed en moet in een recht stuk muur staan, met aan beide kanten een muurstuk.';
   if (!canAfford(s.res, GATE.cost)) return 'Niet genoeg grondstoffen.';
   return null;
 }
 
-// van een muurstuk (of een gat van één tegel tussen twee muurstukken) een poort maken
+// van twee muurstukken (of een gat van twee tegels tussen twee muurstukken) een poort maken
 export function doPlaceGate(s, i, j) {
   const err = checkPlaceGate(s, i, j);
   if (err) throw new GameError(err);
+  const span = gateSpan(s, i, j);
   pay(s.res, GATE.cost);
-  const idx = tileIndex(i, j);
-  s.walls = (s.walls || []).filter((x) => x !== idx);
+  const idxs = span.tiles.map(([a, b]) => tileIndex(a, b));
+  s.walls = (s.walls || []).filter((x) => !idxs.includes(x));
   if (!s.gates) s.gates = [];
-  s.gates.push(idx);
+  s.gates.push(...idxs);
 }
 
 // Moet een groep van 'from' naar 'to' door de stadsmuur? Dan via de dichtstbijzijnde poort: [voor de poort, achter de poort].
 export function gateRoute(s, from, to) {
-  const gates = s.gates || [];
-  if (!gates.length) return null;
+  if (!(s.gates || []).length) return null;
   const walls = wallSet(s);
   const inside = insideSet(s, walls);
   if (!inside) return null;
@@ -465,13 +526,9 @@ export function gateRoute(s, from, to) {
   const a = inside.has(key(from)); const b = inside.has(key(to));
   if (a === b) return null;
   let best = null;
-  for (const idx of gates) {
-    const { i, j } = tileOf(idx);
-    const ax = gateAxis(walls, i, j);
-    if (!ax) continue;
-    const cx = i + 0.5; const cy = j + 0.5;
-    const p1 = ax === 'x' ? { x: cx, y: cy - 0.9 } : { x: cx - 0.9, y: cy };
-    const p2 = ax === 'x' ? { x: cx, y: cy + 0.9 } : { x: cx + 0.9, y: cy };
+  for (const g of gateList(s)) {
+    const p1 = g.ax === 'x' ? { x: g.cx, y: g.cy - 0.9 } : { x: g.cx - 0.9, y: g.cy };
+    const p2 = g.ax === 'x' ? { x: g.cx, y: g.cy + 0.9 } : { x: g.cx + 0.9, y: g.cy };
     const in1 = inside.has(key(p1));
     const pin = in1 ? p1 : p2; const pout = in1 ? p2 : p1;
     const [first, second] = a ? [pin, pout] : [pout, pin];
@@ -507,7 +564,7 @@ export function checkPlaceWalls(s, tiles) {
   if (!(s.gates || []).length) {
     const after = wallSet(s);
     for (const [i, j] of tiles) after.add(tileIndex(i, j));
-    if (insideSet(s, after)) return 'Zo is je stad helemaal dicht zonder poort. Laat één tegel open in een recht stuk muur en maak er een poort.';
+    if (insideSet(s, after)) return 'Zo is je stad helemaal dicht zonder poort. Maak eerst een poort (2 tegels breed) in een recht stuk muur.';
   }
   return null;
 }
@@ -524,6 +581,8 @@ export function doPlaceWalls(s, tiles) {
 export function doRemoveWalls(s, tiles) {
   const rm = new Set((tiles || []).filter((t) => Array.isArray(t) && inTerr(t[0], t[1])).map(([i, j]) => tileIndex(i, j)));
   if (!rm.size) throw new GameError('Kies welke muur weg moet.');
+  // een poort gaat altijd in zijn geheel weg
+  for (const g of gateList(s)) if (g.tiles.some(([a, b]) => rm.has(tileIndex(a, b)))) for (const [a, b] of g.tiles) rm.add(tileIndex(a, b));
   s.walls = (s.walls || []).filter((x) => !rm.has(x));
   if (s.gates) s.gates = s.gates.filter((x) => !rm.has(x));
 }
