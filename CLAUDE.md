@@ -60,14 +60,20 @@ Daarom:
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
   (binnen `FIELD.aggro` van het barbarenkamp) en het einde van een gevecht. De browser tekent het verloop met `runFight(f, nu)`.
-- Veldslagen op de wereldkaart: komt een aanval aan terwijl aanvaller of verdediger online is, dan maakt `resolveMarch()` een rij in
-  de tabel `battles` (status `choose`, het leger krijgt status `battle`). Elk kiest `manual` of `auto` (`/battle/mode`). Zonder keuze
-  of als niemand zelf bestuurt: automatisch via `resolveBattle` (`battle.js`). Anders een live slagveld uit `public/shared/fieldbattle.js`
-  (vaste tikken van 100 ms, deterministisch, met torens en muurblokken). De browser (`public/js/battleview.js`) peilt `/battle?id=`
-  elke 1,2 s en rekent tussendoor zelf verder; de server rekent per verzoek hooguit `FB.maxTicksPerCall` tikken. Bevelen gaan via
-  `/battle/order`. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af. Het einde
-  (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override`, zodat buit, rapporten en punten hetzelfde blijven.
-  Een slag wordt eerst 'geclaimd' (versiecontrole) zodat ze nooit twee keer wordt uitgerekend.
+- Veldslagen op de wereldkaart = **belegeringen in de echte stad** van de verdediger: komt een aanval aan terwijl aanvaller of
+  verdediger online is, dan maakt `resolveMarch()` een rij in de tabel `battles` (status `choose`, het leger krijgt status `battle`).
+  Elk kiest `manual` of `auto` (`/battle/mode`). Kiest niemand zelf: automatisch via `resolveBattle` (`battle.js`). Anders een live
+  slag uit `public/shared/fieldbattle.js`: het slagveld is een raster rond de stad (gebouwen, bos = trager, water, muren, poorten,
+  torens; `grid`, `ins` = binnen de muren), met A*-routes (`findPath`), een opstelling (`phase: 'deploy'`, zone per kant via
+  `inZone`, knop Start = `{ready}`), daarna de slag (vaste tikken van 100 ms, deterministisch, geen Math.random/hypot).
+  De aanvaller komt uit de richting van zijn stad (`dir`); de verdediger kan door zijn poorten en zijn voetvolk/schutters op de muur
+  (`p1 === 3`). Wie niet zelf bestuurt, wordt door `aiDefend`/`aiAttack` geleid (schutters op de muur aan de kant van de aanval,
+  voetvolk achter de bedreigde poort; rammen op de poort). Winnen: alle verdedigers weg, of het plein (`plaza`) `FB.capMs` houden.
+  Bevelen gaan via `/battle/order` met de tik `at` in een wachtrij (`queueOrder`, `st.q`); de server rekent `FB.delay` achter op de
+  klok zodat ze op dezelfde tik uitgevoerd worden als in de browser. De browser (`battleview.js` + `siegeview.js`, een `TownView`
+  met `battleMode`) peilt `/battle?id=` elke 1,2 s, rekent zelf verder en werkt verschillen zacht weg. De server rekent per verzoek
+  hooguit `FB.maxTicksPerCall` tikken. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af.
+  Het einde (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override` (zelfde buit, rapporten en punten).
 - Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en
   in de tabel `config` bewaard; inschrijvingen in `push_subs` (enkel echte meldingsdiensten, `validPushEndpoint`).
   `notifyDue()` stuurt ±2 min voor een aanval aankomt een melding met geluid (aanvaller + verdediger) en ±1 min vooraf een stille

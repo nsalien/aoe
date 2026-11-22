@@ -90,8 +90,13 @@ registratie; oude spelers kregen een vast willekeurig volk.
      niet en gaan meldingen enkel uit als iemand het spel open heeft. Daarnaast in het
      spel een **aftelbalk** vanaf 120 s waar je al kiest. Vooraf 'zelf besturen' + verdediger offline → de slag begint meteen;
      vooraf 'automatisch' + verdediger offline → meteen uitgerekend.
-  4. Live slag: slagveld 24×18 (`fieldbattle.js`), max. 4 minuten; kijkt niemand meer (30 s), dan rekent de server de
-     rest automatisch uit.
+  4. Live slag = **belegering in de echte stad** van de verdediger (of een open plek met tenten bij een roverskamp):
+     eerst een **opstelling** (max. 75 s, tot beide op Start drukken), dan de slag (max. 10 minuten). De aanvaller staat
+     aan de kant van zijn eigen stad; de verdediger zet schutters op de muur en voetvolk achter de poort aan die kant.
+     Aanvallers kunnen niet door poorten of over muren: rammen (of voetvolk) slaan een bres. Winnen: alle verdedigers
+     verslaan of het plein voor het stadscentrum 30 s houden. Gevechten bewust traag (`FB.pace`): een slag duurt minuten.
+     Kaartjes per eenheid onderaan (1 tik = die eenheid, 2 tikken = alle van die soort), ingedrukt houden = heel leger.
+     Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
 
 **Punten**: opbouwpunten (gebouwen, dorpelingen, troepen; monument +1500/niveau) + gevechtspunten.
 
@@ -107,8 +112,10 @@ registratie; oude spelers kregen een vast willekeurig volk.
 
 ## 5. Testen
 
-- `npm test` (Node test runner, `tests/game.test.js`, ±55 tests): simulatie, gevechten, gebied, muren/poorten,
-  afbreken, veldslagen, determinisme.
+- `npm test` (Node test runner, `tests/game.test.js`, ±60 tests): simulatie, gevechten, gebied, muren/poorten,
+  afbreken, belegeringen (determinisme na JSON heen en terug, opstelling, AI, bres), meldingen (met `node:sqlite`).
+- Belegering zonder browser: maak een stad met `newTownState` + muren/poorten en speel `createBattle` + `stepTo` af
+  (beide kanten AI) om duur en verloop te controleren.
 - Lokaal spel: `npm run db:init:local` en `npx wrangler pages dev --port 8788`.
 - Browsertests met Playwright (scripts in je scratchpad, niet in de repo):
   - `const { chromium } = createRequire(import.meta.url)('playwright')` (ESM-import vindt het niet).
@@ -152,10 +159,14 @@ registratie; oude spelers kregen een vast willekeurig volk.
 16. Stad/kamp aantikken toont wanneer je legers er aankomen (klokuur + aftelling).
 17. **Meldingen op je gsm** (Web Push + cron-worker `cron/`), aftelbalk met voorkeuze; Android-app 1.1 met meldingen
     (zelfde sleutel, installeert over 1.0). Het Cloudflare-token heeft daarvoor ook 'Workers Scripts: Edit' nodig.
+18. **Belegeringen in de echte stad** (feedback: "het gevecht gebeurde op een open plek, was laggy en op 10 s gedaan, ik kon
+    niets besturen; de verdediger verdedigt in zijn stad en reageert op de kant van de aanval, zoals Rome Total War").
+    Nieuwe `fieldbattle.js` (raster, routes, opstelling, AI per kant, plein), `siegeview.js` (TownView in `battleMode`),
+    bevelen met tik + wachtrij, server `FB.delay` achter. Muurstukken worden nu als afbeelding gecachet (ook sneller in de stad).
 
 ## 8. Bekende beperkingen en ideeën
 
-- In een live veldslag is de muur één rechte lijn zonder poort (niet de echte vorm van je muren).
+- Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
 - Aanvallen wachten niet tot de aanvaller online komt (zie §3); er is nu wel een melding + aftelling. Mogelijke
   uitbreiding: een wachttijd voor de stad tot de aanvaller online komt.
 - Headless Chromium meldt meldingen altijd als 'geblokkeerd': de echte inschrijving is niet in de container te testen
