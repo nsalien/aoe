@@ -205,6 +205,13 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
   display: flex; flex-direction: column; align-items: flex-start; pointer-events: none;
 }
 .buildwrap > * { pointer-events: auto; }
+.buildwrap > .bb-row { pointer-events: none; display: flex; align-items: flex-end; gap: 8px; align-self: stretch; }
+.bb-row > * { pointer-events: auto; }
+/* knoppen bij gekozen troepen: klein, rechts onderaan, boven het bouwmenu */
+.sel-actions { margin-left: auto; display: flex; gap: 6px; margin-bottom: 5px; }
+.sel-actions .btn { box-shadow: var(--shadow); }
+.sel-actions .btn .ic { width: 15px; height: 15px; }
+.buildwrap.min .sel-actions { margin-bottom: 0; }
 .bb-toggle {
   display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; padding: 4px 12px 5px;
   background: rgba(42, 32, 21, 0.9); color: var(--gold2); border: 1px solid #6e5228; border-bottom: 0;
