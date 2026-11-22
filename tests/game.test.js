@@ -667,3 +667,16 @@ test('één soldaat uit een gevecht halen: de rest vecht verder', () => {
   assert.ok(f.a.every((u) => u.g === g.id), 'enkel de achterblijvers staan nog in het gevecht');
   assert.equal(f.a.length, 5);
 });
+
+test('een leger met een gezamenlijk tempo komt samen aan', () => {
+  const s = terrTown();
+  s.units = { spear: 4, rider: 2 };
+  const a = doFieldSend(s, { units: { spear: 4 } }, null, { x: 6, y: 12 }, null, s.t, 1.1);
+  const b = doFieldSend(s, { units: { rider: 2 } }, null, { x: 6.5, y: 12 }, null, s.t, 1.1);
+  const da = Math.hypot(a.x1 - a.x0, a.y1 - a.y0); const db = Math.hypot(b.x1 - b.x0, b.y1 - b.y0);
+  assert.ok(Math.abs((a.t1 - a.t0) / da - (b.t1 - b.t0) / db) < 2, 'ruiters lopen even snel als de speerdragers');
+  // zonder tempo is de ruiter veel sneller
+  s.units = { rider: 1 };
+  const c = doFieldSend(s, { units: { rider: 1 } }, null, { x: 6.5, y: 12 }, null, s.t);
+  assert.ok(c.t1 - c.t0 < b.t1 - b.t0);
+});

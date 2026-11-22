@@ -614,8 +614,9 @@ function applyWildEvent(s, ev, speed) {
   else if (ev.kind === 'raid') barbarianRaid(s, ev.t, speed);
 }
 
-function setPath(g, from, to, t) {
-  const sp = groupSpeed(g);
+// pace = optioneel trager tempo (tegels/s), zodat een heel leger samen aankomt
+function setPath(g, from, to, t, pace = null) {
+  const sp = pace ? Math.min(groupSpeed(g), Math.max(0.3, pace)) : groupSpeed(g);
   g.x0 = from.x; g.y0 = from.y; g.x1 = to.x; g.y1 = to.y;
   g.t0 = t;
   g.t1 = t + Math.max(300, Math.round((Math.hypot(to.x - from.x, to.y - from.y) / sp) * 1000));
@@ -863,7 +864,7 @@ function clampToTerr(x, y) {
 
 // Stuur een eenheid (of groep) vanuit de stad het veld in.
 // spec = { villager: 'wood' } (een dorpeling van die taak) of { units: { spear: 3 } }
-export function doFieldSend(s, spec, from, to, target, now) {
+export function doFieldSend(s, spec, from, to, target, now, pace = null) {
   if (!s.terr) throw new GameError('Je gebied is nog niet klaar.');
   if (s.field.length >= FIELD.maxGroups) throw new GameError(`Je hebt al ${FIELD.maxGroups} groepen op pad.`);
   const units = {};
@@ -894,13 +895,13 @@ export function doFieldSend(s, spec, from, to, target, now) {
   if (from && Number.isFinite(from.x) && Number.isFinite(from.y) && ringOf(Math.floor(from.x), Math.floor(from.y)) <= k + 1) start = { x: from.x, y: from.y };
   const g = { id: s.nextId++, units, job, x0: start.x, y0: start.y, x1: start.x, y1: start.y, t0: now, t1: now, pending: false, order: null, work: null };
   s.field.push(g);
-  doFieldOrder(s, g.id, to, target, now);
+  doFieldOrder(s, g.id, to, target, now, pace);
   return g;
 }
 
 // Een deel van een groep apart een opdracht geven (bv. 1 soldaat aanklikken in een groep van 8).
 // units = { soort: aantal } die meegaan; is dat de hele groep, dan krijgt gewoon de hele groep de opdracht.
-export function doFieldSplit(s, id, units, to, target, now) {
+export function doFieldSplit(s, id, units, to, target, now, pace = null) {
   const g = (s.field || []).find((x) => x.id === id);
   if (!g) throw new GameError('Die groep bestaat niet meer.');
   const take = {};
@@ -911,12 +912,12 @@ export function doFieldSplit(s, id, units, to, target, now) {
     if (n < g.units[k]) all = false;
   }
   if (!Object.keys(take).length) throw new GameError('Kies wie er op pad gaat.');
-  if (all) return doFieldOrder(s, id, to, target, now);
+  if (all) return doFieldOrder(s, id, to, target, now, pace);
   if (s.field.length >= FIELD.maxGroups) throw new GameError(`Je hebt al ${FIELD.maxGroups} groepen op pad.`);
   let part;
   if (g.fight) {
     part = splitFromFight(s, g, take, now);
-    if (!part) return doFieldSplit(s, id, units, to, target, now);
+    if (!part) return doFieldSplit(s, id, units, to, target, now, pace);
   } else {
     part = { units: take, hp: {} };
     for (const k of Object.keys(take)) {
@@ -930,12 +931,12 @@ export function doFieldSplit(s, id, units, to, target, now) {
   const ng = { id: s.nextId++, units: part.units, job: g.job, x0: pos.x, y0: pos.y, x1: pos.x, y1: pos.y, t0: now, t1: now, pending: false, order: null, work: null };
   if (Object.keys(part.hp || {}).length) ng.hp = part.hp;
   s.field.push(ng);
-  doFieldOrder(s, ng.id, to, target, now);
+  doFieldOrder(s, ng.id, to, target, now, pace);
   return ng;
 }
 
 // Geef een groep in het veld een nieuwe opdracht: lopen, aanvallen, verzamelen, kappen of naar huis.
-export function doFieldOrder(s, id, to, target, now) {
+export function doFieldOrder(s, id, to, target, now, pace = null) {
   const g = (s.field || []).find((x) => x.id === id);
   if (!g) throw new GameError('Die groep bestaat niet meer.');
   if (g.fight && !leaveFight(s, g, now)) throw new GameError('Die groep is gesneuveld.');
@@ -990,7 +991,7 @@ export function doFieldOrder(s, id, to, target, now) {
     dest = clampToTerr(Number(to.x), Number(to.y));
     g.order = { type: 'move' };
   }
-  setPath(g, pos, dest, now);
+  setPath(g, pos, dest, now, Number(pace) > 0 ? Number(pace) : null);
   return g;
 }
 

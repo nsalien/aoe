@@ -326,23 +326,44 @@ route('POST', '/walls', { auth: true, active: true }, async (ctx) => {
 });
 
 // eenheden in je eigen gebied besturen (verkennen, aanvallen, verzamelen, bos kappen, naar huis)
-const FIELD_AT_WINDOW = 4000;
+const FIELD_AT_WINDOW = 10000;
+const FIELD_MAX_OPS = 16;
 
+function fieldOp(s, op, at) {
+  const to = op.to && { x: Number(op.to.x), y: Number(op.to.y) };
+  const target = op.target && typeof op.target === 'object' ? op.target : null;
+  const pace = Number(op.pace) > 0 ? Number(op.pace) : null;
+  if (op.action === 'send') {
+    const from = op.from && { x: Number(op.from.x), y: Number(op.from.y) };
+    return doFieldSend(s, op.spec || {}, from, to, target, at, pace);
+  }
+  if (op.action === 'split') return doFieldSplit(s, int(op.id), op.units && typeof op.units === 'object' ? op.units : {}, to, target, at, pace);
+  return doFieldOrder(s, int(op.id), to, target, at, pace);
+}
+
+// Eén of meer bevelen (een heel leger = één verzoek). De browser voert ze meteen zelf uit en geeft het tijdstip
+// mee; de server rekent de stad tot exact dat tijdstip verder en voert ze daar uit, zodat beide hetzelfde pad
+// berekenen en niets verspringt. Enkel een tijdstip van de laatste seconden telt, en nooit vóór de laatst bewaarde stand.
 route('POST', '/field', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
-  const to = body.to && { x: Number(body.to.x), y: Number(body.to.y) };
-  const target = body.target && typeof body.target === 'object' ? body.target : null;
-  // De browser voert de opdracht meteen zelf uit en geeft het tijdstip mee, zodat de server exact hetzelfde
-  // pad berekent. Enkel een tijdstip van de laatste paar seconden telt (geen voordeel mogelijk).
-  const at = Math.min(ctx.now, Math.max(ctx.now - FIELD_AT_WINDOW, Math.floor(Number(body.at)) || ctx.now));
-  return townAction(ctx, (s) => {
-    if (body.action === 'send') {
-      const from = body.from && { x: Number(body.from.x), y: Number(body.from.y) };
-      return doFieldSend(s, body.spec || {}, from, to, target, at);
+  const ops = (Array.isArray(body.ops) ? body.ops : [body]).filter((o) => o && typeof o === 'object').slice(0, FIELD_MAX_OPS);
+  if (!ops.length) throw new GameError('Geen opdracht.');
+  const clampAt = (v) => Math.min(ctx.now, Math.max(ctx.now - FIELD_AT_WINDOW, Math.floor(Number(v)) || ctx.now));
+  const id = await myTown(ctx);
+  const { town, result } = await mutateTown(ctx.db, ctx.world, id, clampAt(ops[0].at), (s) => {
+    const errors = [];
+    for (const op of ops) {
+      const at = Math.max(clampAt(op.at), s.t);
+      advance(s, gameTime(ctx.world, at), ctx.world.speed);
+      try { fieldOp(s, op, at); } catch (e) {
+        if (!(e instanceof GameError)) throw e;
+        errors.push(e.message);
+      }
     }
-    if (body.action === 'split') return doFieldSplit(s, int(body.id), body.units && typeof body.units === 'object' ? body.units : {}, to, target, at);
-    return doFieldOrder(s, int(body.id), to, target, at);
+    if (errors.length === ops.length) throw new GameError(errors[0]);
+    return errors;
   });
+  return json({ ok: true, state: town.state, errors: result });
 });
 
 route('POST', '/trade', { auth: true, active: true }, async (ctx) => {
