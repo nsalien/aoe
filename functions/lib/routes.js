@@ -6,7 +6,7 @@ import {
 } from './auth.js';
 import {
   getWorld, phaseOf, worldTimes, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop,
-  battleView, setBattleMode, battleOrder, myBattles,
+  battleView, setBattleMode, battleOrder, myBattles, startPractice,
   freshCampState,
 } from './game.js';
 import {
@@ -532,6 +532,13 @@ route('POST', '/battle/mode', { auth: true, process: false }, async (ctx) => {
   const { db, world, player, now } = ctx;
   const body = await readJson(ctx.request);
   return json({ now, battle: await setBattleMode(db, world, int(body.id), player.id, String(body.mode || ''), now) });
+});
+
+// oefenslag: meteen een slag van 30 tegen 30 tegen de computer (zonder gevolgen)
+route('POST', '/battle/practice', { auth: true, process: false }, async (ctx) => {
+  const { db, world, player, now } = ctx;
+  const body = await readJson(ctx.request);
+  return json({ now, battle: await startPractice(db, world, player, String(body.role || ''), now) });
 });
 
 route('POST', '/battle/order', { auth: true, process: false }, async (ctx) => {

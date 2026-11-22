@@ -1,14 +1,15 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
   advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
-  towerDefense, townBaseDef, effectiveWall,
+  towerDefense, townBaseDef, effectiveWall, newTownState,
 } from '../../public/shared/sim.js';
+import { tileIndex } from '../../public/shared/territory.js';
 import {
   resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits, subtractUnits,
 } from '../../public/shared/battle.js';
 import { createBattle, stepTo, queueOrder, battleOutcome, FB } from '../../public/shared/fieldbattle.js';
 import {
-  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue,
+  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS,
 } from '../../public/shared/rules.js';
 
 export class ConflictError extends Error {}
@@ -545,6 +546,70 @@ async function startBattle(db, world, b, now) {
   await saveBattle(db, b, now);
 }
 
+// ---------- oefenslag: meteen een slag van 30 tegen 30 tegen de computer, zonder gevolgen ----------
+export const PRACTICE = {
+  att: { sword: 12, spear: 4, archer: 8, knight: 4, ram: 2 },
+  def: { spear: 10, sword: 6, archer: 10, rider: 4 },
+};
+
+// een ommuurd oefendorp (stenen muur, vier poorten, twee wachttorens)
+function practiceTown(now, civ) {
+  const s = newTownState(now, civ);
+  s.buildings[0].level = 3;
+  s.buildings.find((x) => x.type === 'wall').level = 3;
+  let id = 10;
+  for (const [type, x, y, level] of [['house', 1, 2, 2], ['house', 2, 2, 2], ['house', 9, 2, 2], ['barracks', 2, 8, 2], ['range', 9, 8, 1],
+    ['farm', 8, 10, 1], ['farm', 9, 10, 1], ['market', 3, 4, 1], ['tower', 0, 0, 2], ['tower', 11, 11, 2], ['smithy', 8, 4, 1]]) s.buildings.push({ id: id++, type, x, y, level });
+  s.walls = []; s.gates = [];
+  const gate = (i, j) => (i === 5 && (j === -1 || j === 12)) || (j === 6 && (i === -1 || i === 12));
+  for (let i = -1; i <= 12; i++) for (const j of [-1, 12]) (gate(i, j) ? s.gates : s.walls).push(tileIndex(i, j));
+  for (let j = 0; j <= 11; j++) for (const i of [-1, 12]) (gate(i, j) ? s.gates : s.walls).push(tileIndex(i, j));
+  return s;
+}
+
+export async function startPractice(db, world, player, role, now) {
+  if (role !== 'att' && role !== 'def') throw new GameError('Kies aanvallen of verdedigen.');
+  const busy = await db.prepare("SELECT id FROM battles WHERE (att_player = ? OR def_player = ?) AND status != 'done' LIMIT 1").bind(player.id, player.id).first();
+  if (busy) throw new GameError('Je zit al in een slag. Rond die eerst af.');
+  const me = await db.prepare('SELECT t.id, t.name, tm.color FROM towns t JOIN players p ON p.id = t.player_id LEFT JOIN teams tm ON tm.id = p.team_id WHERE t.player_id = ?').bind(player.id).first();
+  if (!me) throw new GameError('Je hebt nog geen stad.');
+  const myColor = me.color || '#2e6fb5';
+  // vanuit een (vaste maar telkens andere) richting
+  const ang = ((now / 1000) % 360) * (Math.PI / 180);
+  const dir = { x: Math.round(Math.cos(ang) * 1000) / 1000, y: Math.round(Math.sin(ang) * 1000) / 1000 };
+  let town; let seed; let title;
+  if (role === 'att') {
+    const civ = CIV_IDS[(player.id + Math.floor(now / 60000)) % CIV_IDS.length];
+    town = practiceTown(now, civ); seed = 70000 + player.id; title = 'Oefendorp';
+  } else {
+    const t = await loadTown(db, me.id);
+    ensureTerritory(t.state, t.id);
+    advance(t.state, gameTime(world, now), world.speed);
+    town = t.state; seed = t.id; title = `${me.name} (oefenslag)`;
+  }
+  const state = createBattle({
+    kind: 'town', att: PRACTICE.att, defGroups: [{ key: 'home', units: { ...PRACTICE.def } }], town, townId: seed, dir,
+    aiAtt: role !== 'att', aiDef: role !== 'def', now,
+  });
+  const foe = { name: 'Computer', color: '#7a1b12' }; const mine = { name: player.name, color: myColor };
+  state.meta = {
+    practice: true, attInit: PRACTICE.att, defInit: { home: PRACTICE.def }, style: { civ: town.civ, age: bLevel(town, 'tc') }, level: 0,
+    view: {
+      seed, civ: town.civ || null,
+      buildings: town.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+      walls: town.walls || [], gates: town.gates || [], cl: (town.terr && town.terr.cl) || [], lots: (town.terr && town.terr.lots) || [],
+    },
+    att: role === 'att' ? mine : foe, def: role === 'def' ? mine : foe,
+  };
+  const ins = await db.prepare(
+    `INSERT INTO battles (march_id, att_player, def_player, target_kind, target_id, title, status, choose_until, att_mode, def_mode, state, created_at, updated_at)
+     VALUES (0, ?, ?, 'practice', 0, ?, 'live', ?, ?, ?, ?, ?, ?)`,
+  ).bind(role === 'att' ? player.id : 0, role === 'def' ? player.id : null, title, now, role === 'att' ? 'manual' : 'auto', role === 'def' ? 'manual' : 'auto',
+    JSON.stringify(state), now, now).run();
+  const b = await loadBattle(db, ins.meta.last_row_id);
+  return publicBattle(b, role);
+}
+
 // eerst de slag 'claimen' (met versiecontrole), zodat ze nooit twee keer uitgerekend wordt
 async function claimBattle(db, b, now) {
   b.status = 'done';
@@ -589,6 +654,18 @@ function fieldResult(o, meta, groups, finish) {
 async function finishBattle(db, world, b, now, abandoned = false) {
   const state = b.state;
   await claimBattle(db, b, now);
+  if (b.target_kind === 'practice') {
+    // oefenslag: enkel de uitslag tonen, niets verandert in het spel
+    const o = battleOutcome(state);
+    const defInit = {}; const defLeft = {};
+    for (const g of Object.values(state.meta.defInit || {})) for (const [k, n] of Object.entries(g)) defInit[k] = (defInit[k] || 0) + n;
+    for (const g of Object.values(o.defLeft)) for (const [k, n] of Object.entries(g)) defLeft[k] = (defLeft[k] || 0) + n;
+    b.status = 'done';
+    b.result = { practice: true, auto: abandoned, attWins: o.attWins, attLost: subtractUnits(state.meta.attInit, o.attLeft), defLost: subtractUnits(defInit, defLeft), loot: {}, retreat: o.retreat };
+    b.state = state;
+    await saveBattle(db, b, now);
+    return;
+  }
   const m = await loadMarch(db, b.march_id);
   const o = battleOutcome(state);
   let r = null;

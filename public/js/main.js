@@ -323,13 +323,22 @@ const askedBattles = new Set();
 function battleView() {
   if (!battle) {
     battle = new BattleView({
-      now: () => app.now(), get, post, toast, unitThumb: UI.unitThumb,
+      now: () => app.now(), get, post, toast, unitThumb: UI.unitThumb, practice: (role) => startPractice(role),
       openReports: () => openModal('reports'),
       onClose: () => { renderAlert(); setTimeout(refresh, 400); },
     });
     window.__battle = battle; // handig bij het debuggen in de console
   }
   return battle;
+}
+
+// oefenslag starten (30 tegen 30 tegen de computer)
+async function startPractice(role) {
+  try {
+    const r = await post('/battle/practice', { role });
+    knownBattles.set(r.battle.id, 'live');
+    openBattle(r.battle.id, r.battle);
+  } catch (e) { toast(e.message, 'err', 'swords'); }
 }
 
 function openBattle(id, b = null) {
@@ -342,6 +351,7 @@ function handleBattles(data, first) {
     const prev = knownBattles.get(b.id);
     knownBattles.set(b.id, b.status);
     const mine = b.role === 'att' ? b.attMode : b.defMode;
+    if (b.kind === 'practice') continue; // oefenslag: geen meldingen, die open je zelf
     if (!prev && b.status !== 'done' && b.role === 'def') toast(`${b.title} wordt aangevallen${b.attName ? ` door ${b.attName}` : ''}!`, 'err', 'swords');
     if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !(battle && battle.open)) { askedBattles.add(b.id); showAsk(b); }
     // de tegenpartij koos om zelf te besturen: bekijk of neem alsnog het bevel over
@@ -1267,6 +1277,7 @@ const actions = {
     if (t) { world.selected = { kind: 'town', obj: t }; renderPanel(); }
   },
   battleGo(el) { openBattle(Number(el.dataset.id)); },
+  practice(el) { startPractice(el.dataset.role); },
   pushOn() { enablePush(); },
   pushOff() { disablePush(); },
   async pushTest() {
