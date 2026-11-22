@@ -41,6 +41,9 @@ window.__app = app; // handig bij het debuggen in de console
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 const onIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const standaloneApp = () => !!navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+try { if (document.referrer.startsWith('android-app://')) sessionStorage.setItem('twa', '1'); } catch { /* geen opslag */ }
+app.inApp = () => { try { return sessionStorage.getItem('twa') === '1'; } catch { return false; } };
+app.onAndroid = /Android/i.test(navigator.userAgent);
 Object.defineProperty(app, 'pushState', {
   get() {
     if (onIOS && !standaloneApp() && !pushSupported()) return 'ios-home';
@@ -65,29 +68,60 @@ async function initPush() {
   } catch (e) { console.warn('meldingen', e); }
 }
 
+// het kaartje 'Meldingen op je gsm' overal opnieuw tekenen (in het zijpaneel en in een open venster)
+function refreshPushCards() {
+  for (const el of document.querySelectorAll('.push-card')) {
+    const html = UI.pushCardHtml(app);
+    if (!html) { el.remove(); continue; }
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    el.replaceWith(tmp.firstElementChild);
+  }
+}
+
+// een stap die te lang duurt, stopt met een duidelijke reden (anders gebeurt er voor de speler 'niets')
+const within = (p, ms, why) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(why)), ms))]);
+
 async function enablePush() {
-  if (onIOS && !standaloneApp()) { toast('Zet het spel eerst op je beginscherm (Safari › Delen › Zet op beginscherm) en open het van daar.', 'err', 'bell'); return; }
-  if (!pushSupported()) { toast('Deze browser kan geen meldingen tonen.', 'err', 'bell'); return; }
-  // eerst de toestemming vragen (moet meteen na de tik gebeuren)
-  const perm = await Notification.requestPermission();
-  if (perm !== 'granted') { toast('Meldingen zijn niet toegestaan. Zet ze aan in de instellingen van je browser of de app.', 'err', 'bell'); renderPanel(true); return; }
+  if (app.pushBusy) return;
+  const fail = (msg) => { app.pushErr = msg; toast(msg, 'err', 'bell'); refreshPushCards(); };
+  if (onIOS && !standaloneApp()) { fail('Zet het spel eerst op je beginscherm (Safari › Delen › Zet op beginscherm) en open het van daar.'); return; }
+  if (!pushSupported()) { fail('Deze browser kan geen meldingen tonen.'); return; }
+  app.pushBusy = true; app.pushErr = null; app.pushNote = null;
+  // eerst de toestemming vragen (moet meteen na de tik gebeuren, dus vóór elke andere wachttijd)
+  const ask = Notification.permission === 'granted' ? Promise.resolve('granted') : Notification.requestPermission();
+  refreshPushCards();
   try {
-    const reg = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
+    const perm = await within(ask, 25000, app.inApp() || app.onAndroid
+      ? 'Je gsm vroeg geen toestemming. Gebruik je de app? Installeer dan de nieuwste versie (1.1, link op het aanmeldscherm) over de oude heen en probeer opnieuw.'
+      : 'Er kwam geen antwoord op de vraag om meldingen toe te staan. Probeer opnieuw.');
+    if (perm !== 'granted') throw new Error(perm === 'denied' ? 'Meldingen zijn geblokkeerd voor dit spel.' : 'Je gaf geen toestemming voor meldingen.');
+    const reg = await within(navigator.serviceWorker.register('/sw.js'), 15000, 'De achtergronddienst van het spel startte niet. Herlaad het spel en probeer opnieuw.');
+    await within(navigator.serviceWorker.ready, 15000, 'De achtergronddienst van het spel startte niet. Herlaad het spel en probeer opnieuw.');
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       const { key } = await get('/push/key');
-      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64(key) });
+      sub = await within(reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64(key) }), 20000,
+        'De meldingendienst van je gsm antwoordde niet. Controleer je internet en probeer opnieuw.');
     }
     await post('/push/subscribe', sub.toJSON());
     app.pushOn = true;
     const r = await post('/push/test', {});
+    app.pushNote = r.sent ? 'Gelukt! Je kreeg net een proefmelding.' : 'Aangezet, maar de proefmelding kon niet verstuurd worden. Probeer "Proefmelding".';
     toast(r.sent ? 'Meldingen staan aan. Je kreeg net een proefmelding.' : 'Meldingen staan aan.', 'ok', 'bell');
-  } catch (e) { toast(`Meldingen aanzetten lukte niet: ${e.message}`, 'err', 'bell'); }
-  renderPanel(true);
-  // in het venster 'aanvallen' verdwijnt de vraag zodra de meldingen aan staan
-  const card = document.querySelector('#modalBody .push-card');
-  if (card && app.pushOn) card.remove();
+  } catch (e) {
+    // foutmeldingen van de browser zijn in het Engels: vertaal de bekende
+    const m = String((e && e.message) || '');
+    app.pushErr = /permission|NotAllowed/i.test(m) || (e && e.name === 'NotAllowedError')
+      ? (app.inApp() || app.onAndroid ? 'Je gsm weigert meldingen voor dit spel. Zet ze aan via Instellingen › Apps › Rijken van de Vallei › Meldingen (of in Chrome bij de site-instellingen).' : 'Je browser weigert meldingen voor dit spel. Zet ze aan bij de site-instellingen (slotje naast het adres).')
+      : /push service|AbortError|network/i.test(m) || (e && e.name === 'AbortError')
+        ? 'De meldingendienst van je gsm is niet bereikbaar. Controleer je internet en probeer opnieuw.'
+        : /[a-z] (failed|error)|^[A-Z][a-z]+Error/.test(m) ? `Het lukte niet (${m}).` : (m || 'Het lukte niet.');
+    toast(`Meldingen aanzetten lukte niet: ${app.pushErr}`, 'err', 'bell');
+  } finally {
+    app.pushBusy = false;
+    renderPanel(true);
+    refreshPushCards();
+  }
 }
 
 async function disablePush() {
@@ -96,9 +130,10 @@ async function disablePush() {
     const sub = reg && await reg.pushManager.getSubscription();
     if (sub) { await post('/push/unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
   } catch (e) { console.warn('meldingen', e); }
-  app.pushOn = false;
+  app.pushOn = false; app.pushNote = null; app.pushErr = null;
   toast('Meldingen staan uit op dit toestel.', '', 'bell');
   renderPanel(true);
+  refreshPushCards();
 }
 
 let town = null;
@@ -1235,7 +1270,14 @@ const actions = {
   pushOn() { enablePush(); },
   pushOff() { disablePush(); },
   async pushTest() {
-    try { const r = await post('/push/test', {}); toast(r.sent ? 'Proefmelding verstuurd.' : 'Geen toestel gevonden: zet de meldingen opnieuw aan.', r.sent ? 'ok' : 'err', 'bell'); } catch (e) { toast(e.message, 'err'); }
+    try {
+      const r = await post('/push/test', {});
+      app.pushNote = r.sent ? 'Proefmelding verstuurd: kijk bovenaan je scherm of in je meldingen.' : null;
+      app.pushErr = r.sent ? null : 'Er staat geen toestel ingeschreven. Zet de meldingen opnieuw aan.';
+      if (!r.sent) app.pushOn = false;
+      toast(r.sent ? 'Proefmelding verstuurd.' : 'Geen toestel gevonden: zet de meldingen opnieuw aan.', r.sent ? 'ok' : 'err', 'bell');
+      refreshPushCards();
+    } catch (e) { toast(e.message, 'err'); }
   },
   async prechoose(el) {
     const id = Number(el.dataset.id); const mode = el.dataset.mode;
