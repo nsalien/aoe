@@ -68,6 +68,12 @@ Daarom:
   `/battle/order`. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af. Het einde
   (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override`, zodat buit, rapporten en punten hetzelfde blijven.
   Een slag wordt eerst 'geclaimd' (versiecontrole) zodat ze nooit twee keer wordt uitgerekend.
+- Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en
+  in de tabel `config` bewaard; inschrijvingen in `push_subs` (enkel echte meldingsdiensten, `validPushEndpoint`).
+  `notifyDue()` stuurt ±2 min voor een aanval aankomt één melding (aanvaller + verdediger, `marches.notified`). Het draait
+  elke minuut in de cron-worker `cron/` (eigen `wrangler.toml`, gezet door `deploy.sh`; vraagt 'Workers Scripts: Edit' op het
+  token) en als vangnet na gewone verzoeken (`waitUntil`). `public/sw.js` toont de melding. Tijdens de laatste 2 minuten
+  toont het spel een aftelbalk waar je vooraf kiest (`/march/mode` → `marches.pref_mode`); `maybeOfferBattle` gebruikt die keuze.
 - Volkeren: `CIVS` en de elite-eenheden staan in `rules.js` (eigenschappen zoals `bonus`, `tough`, `defMult`, `walls`, `fear`
   worden in `battle.js` verrekend). Het volk zit in `towns.state.civ`; oude steden krijgen er een in `ensureTerritory()`.
   Bouwstijl per volk: `STYLES` en de kastelen (`TC_CIV`) in `art.js`; elite-figuren in `figures.js` (`uniqueUnit`).

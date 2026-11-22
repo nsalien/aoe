@@ -84,6 +84,9 @@ registratie; oude spelers kregen een vast willekeurig volk.
      geleden, dan krijgen zij 45 s om te kiezen: **zelf besturen** of **automatisch**. Zonder keuze → automatisch.
   3. Is niemand van beiden online (of werd de aankomst pas later verwerkt), dan wordt de slag **meteen automatisch**
      uitgerekend (`resolveBattle`). Er wordt dus **niet gewacht** tot de aanvaller online komt.
+  3b. Daarom: **melding op je gsm** ±2 minuten voor aankomst (aanvaller en verdediger; cron-worker elke minuut) en in het
+     spel een **aftelbalk** vanaf 120 s waar je al kiest. Vooraf 'zelf besturen' + verdediger offline → de slag begint meteen;
+     vooraf 'automatisch' + verdediger offline → meteen uitgerekend.
   4. Live slag: slagveld 24×18 (`fieldbattle.js`), max. 4 minuten; kijkt niemand meer (30 s), dan rekent de server de
      rest automatisch uit.
 
@@ -144,12 +147,16 @@ registratie; oude spelers kregen een vast willekeurig volk.
 14. Bij gekozen troepen enkel knoppen "Naar huis" en "Klaar" rechts onderaan (geen uitlegtekst).
 15. Gekozen gebouw/muurstuk duidelijk (gouden rand + pijl); afbreken; **poorten** met deuren die opengaan.
 16. Stad/kamp aantikken toont wanneer je legers er aankomen (klokuur + aftelling).
+17. **Meldingen op je gsm** (Web Push + cron-worker `cron/`), aftelbalk met voorkeuze; Android-app 1.1 met meldingen
+    (zelfde sleutel, installeert over 1.0). Het Cloudflare-token heeft daarvoor ook 'Workers Scripts: Edit' nodig.
 
 ## 8. Bekende beperkingen en ideeën
 
 - In een live veldslag is de muur één rechte lijn zonder poort (niet de echte vorm van je muren).
-- Aanvallen wachten niet tot de aanvaller online komt (zie §3); mogelijke uitbreiding: een keuze vooraf bij het
-  versturen ("zelf besturen indien mogelijk") of een wachttijd.
+- Aanvallen wachten niet tot de aanvaller online komt (zie §3); er is nu wel een melding + aftelling. Mogelijke
+  uitbreiding: een wachttijd voor de stad tot de aanvaller online komt.
+- Headless Chromium meldt meldingen altijd als 'geblokkeerd': de echte inschrijving is niet in de container te testen
+  (de versleuteling is wel nagekeken met `http_ece` en zit in de tests).
 - Dubbele muurringen: de route via poorten kijkt enkel naar de binnenste gesloten ring.
 - Een echte iPhone-app (App Store/TestFlight) vraagt een betaald Apple-ontwikkelaarsaccount en een Mac.
 - De APK-sleutel (`android/keystore/rijken.jks`) staat niet in git; zonder die sleutel kan een nieuwe APK enkel na
