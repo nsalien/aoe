@@ -165,6 +165,10 @@ export const landCost = (n) => {
 };
 // Muren plaats je tegel per tegel; hun sterkte en uitzicht volgen het niveau van de stadsmuur.
 export const WALL_TILE = { cost: [null, { wood: 6 }, { wood: 8 }, { stone: 6, wood: 2 }, { stone: 8, wood: 2 }, { stone: 10, wood: 2 }], maxPerOrder: 60 };
+// Poort: in een recht stuk muur. Is je stad helemaal dicht, dan gaan je troepen enkel via een poort binnen en buiten.
+export const GATE = { cost: { wood: 80, stone: 40 }, max: 4 };
+// Afbreken: dit deel van wat het gebouw kostte, krijg je terug (een lopende bouw krijg je voor de helft terug)
+export const DEMOLISH = { built: 0.25, job: 0.5 };
 // Torens in een veldslag: levenspunten en schade per niveau
 export const TOWER = { hp: [0, 220, 320, 450], dmg: [0, 9, 13, 18], range: 6, rate: 2000 };
 

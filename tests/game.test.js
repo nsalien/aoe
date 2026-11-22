@@ -227,7 +227,7 @@ test('oude steden zonder vondsten worden netjes bijgewerkt', () => {
 import {
   ensureTerritory, doFieldSend, doFieldOrder, canChop, groupPos, isBuildable as tileBuildable, depLeft, campSize, raidSize,
 } from '../public/shared/sim.js';
-import { territory, exHas, exDecode, T_MIN } from '../public/shared/territory.js';
+import { territory, exHas, exDecode, T_MIN, tileIndex } from '../public/shared/territory.js';
 import { WILD, FIELD } from '../public/shared/rules.js';
 
 function terrTown(seed = 5) {
@@ -514,7 +514,7 @@ test('een groep kan zich terugtrekken uit een gevecht', () => {
 });
 
 // ---------- grond, muren en groepen ----------
-import { checkBuyLot, doBuyLot, isBuildable as canBuild, doPlaceWalls, wallEnclosed, effectiveWall, canPlaceAt as canPut } from '../public/shared/sim.js';
+import { checkBuyLot, doBuyLot, isBuildable as canBuild, doPlaceWalls, wallEnclosed, effectiveWall, canPlaceAt as canPut, doPlaceGate, doRemoveWalls, doDemolish } from '../public/shared/sim.js';
 import { LAND } from '../public/shared/rules.js';
 
 test('grond bijkopen per lot van 4 x 4, aansluitend en elke keer duurder', () => {
@@ -543,11 +543,63 @@ test('muren tegel per tegel; een gesloten muur verdedigt volledig', () => {
   doPlaceWalls(s, ring.slice(0, 40));
   assert.equal(wallEnclosed(s), false, 'nog een gat');
   assert.ok(effectiveWall(s) < 2);
-  doPlaceWalls(s, ring.slice(40));
-  assert.equal(wallEnclosed(s), true);
+  // helemaal dicht zonder poort mag niet: eerst een poort in het laatste gat
+  assert.throws(() => doPlaceWalls(s, ring.slice(40)), /poort/);
+  const rest = ring.slice(40).filter(([i, j]) => !(i === 0 && j === 10));
+  doPlaceWalls(s, rest);
+  assert.equal(wallEnclosed(s), false, 'nog één gat');
+  doPlaceGate(s, 0, 10);
+  assert.equal(wallEnclosed(s), true, 'een dichte poort sluit de stad');
   assert.equal(effectiveWall(s), 2);
   assert.equal(canPut(s, 'house', 0, 0), false, 'niet bouwen op een muur');
+  assert.equal(canPut(s, 'house', 0, 10), false, 'niet bouwen op een poort');
   assert.throws(() => doPlaceWalls(s, [[0, 0]]), /al een muur/);
+  assert.throws(() => doPlaceGate(s, 0, 0), /recht stuk/, 'niet in een hoek');
+});
+
+test('in een ommuurde stad gaan troepen enkel via de poort naar buiten en binnen', () => {
+  const s = terrTown();
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  s.buildings.find((b) => b.type === 'wall').level = 1;
+  const ring = [];
+  for (let i = 0; i < 12; i++) { ring.push([i, 0], [i, 11]); if (i > 0 && i < 11) ring.push([0, i], [11, i]); }
+  doPlaceWalls(s, ring.filter(([i, j]) => !(i === 5 && j === 11)));
+  doPlaceGate(s, 5, 11);
+  s.units = { spear: 3 };
+  const g = doFieldSend(s, { units: { spear: 3 } }, null, { x: 15.5, y: 15.5 }, null, s.t);
+  // eerst naar de binnenkant van de poort, daarna erdoor en verder
+  assert.ok(Math.abs(g.x1 - 5.5) < 1e-9 && Math.abs(g.y1 - 10.6) < 1e-9, `naar de poort (${g.x1}, ${g.y1})`);
+  arrive(s, g);
+  assert.ok(Math.abs(g.x1 - 5.5) < 1e-9 && Math.abs(g.y1 - 12.4) < 1e-9, 'door de poort');
+  arrive(s, g);
+  assert.equal(g.x1, 15.5); assert.equal(g.y1, 15.5);
+  arrive(s, g);
+  assert.ok(!g.pending && !g.via, 'aangekomen');
+  // en terug naar huis: weer via de poort
+  doFieldOrder(s, g.id, null, { type: 'home' }, s.t);
+  assert.ok(Math.abs(g.x1 - 5.5) < 1e-9 && Math.abs(g.y1 - 12.4) < 1e-9, 'eerst naar de buitenkant van de poort');
+  // binnen blijven = rechtstreeks
+  s.units = { spear: 1 };
+  const h = doFieldSend(s, { units: { spear: 1 } }, null, { x: 8.5, y: 8.5 }, null, s.t);
+  assert.ok(!h.via && h.x1 === 8.5, 'binnen de muren: rechtstreeks');
+  // een poort afbreken = een gat; dan is de stad niet meer dicht
+  doRemoveWalls(s, [[5, 11]]);
+  assert.equal(wallEnclosed(s), false);
+});
+
+test('gebouwen afbreken: deel van de kosten terug, dorpelingen worden vrij', () => {
+  const s = terrTown();
+  const farm = s.buildings.find((b) => b.type === 'farm' && b.level > 0) || (() => { const b = { id: s.nextId++, type: 'farm', x: 7, y: 7, level: 1 }; s.buildings.push(b); return b; })();
+  farm.level = 2;
+  s.villagers.food = slots(s).food;
+  const idle = s.villagers.idle;
+  const before = { ...s.res };
+  const refund = doDemolish(s, farm.id);
+  assert.ok(!s.buildings.includes(farm));
+  assert.ok(refund.wood > 0 && s.res.wood >= before.wood, 'hout terug');
+  assert.ok(s.villagers.food <= slots(s).food, 'niet meer werkers dan plaatsen');
+  assert.ok(s.villagers.idle > idle, 'die werkers zijn nu vrij');
+  assert.throws(() => doDemolish(s, s.buildings.find((b) => b.type === 'tc').id), /stadscentrum/);
 });
 
 test('meerdere dorpelingen tegelijk op pad sturen', () => {
@@ -679,4 +731,15 @@ test('een leger met een gezamenlijk tempo komt samen aan', () => {
   s.units = { rider: 1 };
   const c = doFieldSend(s, { units: { rider: 1 } }, null, { x: 6.5, y: 12 }, null, s.t);
   assert.ok(c.t1 - c.t0 < b.t1 - b.t0);
+});
+
+test('een oude, volledig ommuurde stad zonder poort krijgt er automatisch een', () => {
+  const s = terrTown();
+  s.buildings.find((b) => b.type === 'wall').level = 1;
+  s.walls = [];
+  for (let i = 0; i < 12; i++) { s.walls.push(tileIndex(i, 0), tileIndex(i, 11)); if (i > 0 && i < 11) s.walls.push(tileIndex(0, i), tileIndex(11, i)); }
+  delete s.gates;
+  ensureTerritory(s, s.terr.seed);
+  assert.equal((s.gates || []).length, 1, 'een poort');
+  assert.equal(wallEnclosed(s), true, 'en nog steeds dicht');
 });
