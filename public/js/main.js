@@ -139,6 +139,7 @@ function startGame(data) {
       if (changed && app.view === 'town') renderPanel();
     };
     town.onFieldOrder = fieldOrder;
+    town.onFieldOrders = fieldOrders;
     town.onBuyLot = async (li, lj) => { await act('/land', { li, lj }, 'Grond gekocht! Je kan er nu bouwen.'); };
     town.onWalls = async (tiles, remove) => {
       const r = await act('/walls', { tiles, remove }, remove ? 'Muur afgebroken' : `${tiles.length} muurstukken geplaatst`);
@@ -530,52 +531,74 @@ let fieldBusy = false;
 
 function applyFieldOp(s, op) {
   advance(s, Math.min(op.at, app.data.world.warEnd), app.data.world.speed);
-  if (op.action === 'send') return doFieldSend(s, op.spec || {}, op.from, op.to, op.target, op.at);
-  if (op.action === 'split') return doFieldSplit(s, op.id, op.units, op.to, op.target, op.at);
-  return doFieldOrder(s, op.id, op.to, op.target, op.at);
+  if (op.action === 'send') return doFieldSend(s, op.spec || {}, op.from, op.to, op.target, op.at, op.pace);
+  if (op.action === 'split') return doFieldSplit(s, op.id, op.units, op.to, op.target, op.at, op.pace);
+  return doFieldOrder(s, op.id, op.to, op.target, op.at, op.pace);
 }
 
+// toestand van de server + de bevelen die nog onderweg zijn
 function setBaseState(state) {
   let s = state;
-  for (const op of fieldQueue) {
-    if ((s.field || []).some((g) => g.t0 === op.at)) continue; // zit al in de toestand van de server
-    try { const c = structuredClone(s); applyFieldOp(c, op); s = c; } catch { /* de server zal het ook weigeren */ }
+  for (const b of fieldQueue) {
+    for (const op of b.ops) {
+      if (b.sent && (s.field || []).some((g) => g.t0 === op.at)) continue; // zit al in de toestand van de server
+      try { const c = structuredClone(s); applyFieldOp(c, op); s = c; } catch { /* de server zal het ook weigeren */ }
+    }
   }
   app.data.town.state = s;
 }
 
-async function fieldOrder(p) {
+// Eén of meer bevelen tegelijk (een heel leger = één verzoek). Ze krijgen allemaal hetzelfde tijdstip en
+// worden meteen in de browser uitgevoerd; de server rekent ze op exact dat tijdstip na.
+function fieldOrders(list) {
   if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return null; }
-  const op = { action: p.action, id: p.id, spec: p.spec, units: p.units, from: p.from, to: p.to, target: p.target, at: Math.round(app.now()) };
-  let g;
-  try {
-    const s = structuredClone(app.data.town.state);
-    g = applyFieldOp(s, op);
-    app.data.town.state = s;
-  } catch (e) {
-    toast(e.message, 'err');
-    if (p.action === 'send') town.clearSel();
+  let s = structuredClone(app.data.town.state);
+  const at = Math.max(Math.round(app.now()), s.t || 0);
+  const ops = [];
+  let last = null; let err = null;
+  for (const p of list) {
+    const op = { action: p.action, id: p.id, spec: p.spec, units: p.units, from: p.from, to: p.to, target: p.target, pace: p.pace, at };
+    try {
+      const c = structuredClone(s);
+      last = applyFieldOp(c, op);
+      s = c;
+      ops.push(op);
+    } catch (e) { err = err || e; }
+  }
+  if (!ops.length) {
+    toast(err ? err.message : 'Dat lukt niet.', 'err');
+    if (list.length === 1 && list[0].action === 'send') town.clearSel();
     return null;
   }
-  fieldQueue.push(op);
+  if (err) toast(err.message, 'err');
+  app.data.town.state = s;
+  // nog niet verstuurde bevelen samen in één verzoek
+  const tail = fieldQueue[fieldQueue.length - 1];
+  if (tail && !tail.sent && tail.ops.length + ops.length <= 16) tail.ops.push(...ops);
+  else fieldQueue.push({ ops, sent: false });
   computeLive(true);
-  if ((p.action === 'send' || p.action === 'split') && g && !p.keepSel) town.setSel({ type: 'group', id: g.id });
+  const one = list.length === 1 ? list[0] : null;
+  if (one && (one.action === 'send' || one.action === 'split') && last && !one.keepSel) town.setSel({ type: 'group', id: last.id });
   renderSelHint();
   renderPanel();
   pumpField();
-  return g;
+  return last;
 }
+
+const fieldOrder = async (p) => fieldOrders([p]);
 
 async function pumpField() {
   if (fieldBusy) return;
   fieldBusy = true;
   while (fieldQueue.length) {
-    const op = fieldQueue[0];
+    const b = fieldQueue[0];
+    b.sent = true;
     try {
-      const r = await post('/field', { action: op.action, id: op.id, spec: op.spec, units: op.units, from: op.from, to: op.to, target: op.target, at: op.at });
+      const r = await post('/field', { ops: b.ops });
       fieldQueue.shift();
       app.serverState = r.state;
       setBaseState(r.state);
+      if (r.errors && r.errors.length) toast(r.errors[0], 'err');
     } catch (e) {
       fieldQueue.shift();
       if (app.serverState) setBaseState(app.serverState);
@@ -984,7 +1007,7 @@ const actions = {
   modeDone() { setMode(null); },
   groupsHome() {
     const sel = town.sel;
-    if (sel && (sel.type === 'groups' || sel.type === 'army')) for (const id of sel.ids) fieldOrder({ action: 'order', id, target: { type: 'home' }, keepSel: true });
+    if (sel && (sel.type === 'groups' || sel.type === 'army')) fieldOrders(sel.ids.map((id) => ({ action: 'order', id, target: { type: 'home' }, keepSel: true })));
     else if (sel && sel.type === 'kind') town.issue(sel, null, { type: 'home' });
     town.clearSel();
   },
