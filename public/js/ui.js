@@ -722,6 +722,12 @@ export function pushCardHtml(app) {
     <div class="actions"><button class="btn primary small" data-action="pushOn">${icon('bell')} ${app.pushErr ? 'Opnieuw proberen' : 'Meldingen aanzetten'}</button></div></div>`;
 }
 
+// oefenslag: meteen 30 tegen 30 tegen de computer, zonder gevolgen
+export function practiceCardHtml() {
+  return `<div class="card practice-card"><h3>${icon('swords')} Oefenslag</h3><p class="small muted" style="margin:0">Oefen een belegering van 30 tegen 30 tegen de computer: meteen, zonder mars en zonder gevolgen voor je stad of leger.</p>
+    <div class="actions"><button class="btn primary small" data-action="practice" data-role="att">${icon('swords')} Een stad aanvallen</button><button class="btn small" data-action="practice" data-role="def">${icon('shield')} Je stad verdedigen</button></div></div>`;
+}
+
 // aftelbalk: je leger komt binnen 2 minuten aan; kies nu al hoe de slag moet verlopen
 export function arrivalHtml(app, m, more) {
   const pref = m.pref;
@@ -739,6 +745,7 @@ function worldOverviewHtml(app) {
     <p class="desc">Klik op een stad of roverskamp. Bondgenoten herken je aan de kleur van hun gebied: <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></p>
     <div class="card"><h3>${icon('flag')} Onderweg</h3>${marchesHtml(app)}</div>
     ${pushCardHtml(app)}
+    ${practiceCardHtml()}
     <div class="card small"><b>Legende</b><br>${icon('castle')} steden met teamkleur · ${icon('tent')} roverskampen (altijd aan te vallen) · gestippelde lijnen: legers onderweg (rood = vijandelijke aanval)</div>
     <div class="actions"><button class="btn" data-action="home">⌂ Naar mijn stad op de kaart</button></div>`;
 }
