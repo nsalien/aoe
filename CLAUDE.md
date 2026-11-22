@@ -70,7 +70,8 @@ Daarom:
   Een slag wordt eerst 'geclaimd' (versiecontrole) zodat ze nooit twee keer wordt uitgerekend.
 - Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en
   in de tabel `config` bewaard; inschrijvingen in `push_subs` (enkel echte meldingsdiensten, `validPushEndpoint`).
-  `notifyDue()` stuurt ±2 min voor een aanval aankomt één melding (aanvaller + verdediger, `marches.notified`). Het draait
+  `notifyDue()` stuurt ±2 min voor een aanval aankomt een melding met geluid (aanvaller + verdediger) en ±1 min vooraf een stille
+  bijwerking van dezelfde melding (`marches.notified` 0 → 1 → 2). `{left}`/`{clock}` in de tekst vult `sw.js` in met de klok van de gsm. Het draait
   elke minuut in de cron-worker `cron/` (eigen `wrangler.toml`, gezet door `deploy.sh`; vraagt 'Workers Scripts: Edit' op het
   token) en als vangnet na gewone verzoeken (`waitUntil`). `public/sw.js` toont de melding. Tijdens de laatste 2 minuten
   toont het spel een aftelbalk waar je vooraf kiest (`/march/mode` → `marches.pref_mode`); `maybeOfferBattle` gebruikt die keuze.

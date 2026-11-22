@@ -106,34 +106,39 @@ export async function notifyPlayer(db, keys, playerId, payload, ttl = 120) {
   return ok;
 }
 
-const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-export const NOTIFY_LEAD = 150000; // zo lang voor de aankomst gaat de melding uit (de cron loopt elke minuut)
+export const NOTIFY_LEAD = 150000; // zo lang voor de aankomst gaat de eerste melding uit (de cron loopt elke minuut)
+export const NOTIFY_UPDATE = 80000; // daarna nog één stille bijwerking van dezelfde melding
 
-// aanvallen die binnenkort aankomen: één keer een melding (aanvaller + verdediger)
+// Aanvallen die binnenkort aankomen: een melding voor de aanvaller en de verdediger (±2 min vooraf, met geluid),
+// en ±1 min vooraf een stille bijwerking. {left} en {clock} vult de gsm zelf in (eigen klok en tijdzone).
+// marches.notified: 0 = nog niets, 1 = eerste melding, 2 = ook de bijwerking.
 export async function notifyDue(db, now, max = 6) {
   const rows = (await db.prepare(
-    `SELECT m.id, m.player_id, m.target_kind, m.arrive_at, t.name AS town, t.player_id AS def_player, p.name AS att_name
+    `SELECT m.id, m.player_id, m.target_kind, m.arrive_at, m.notified, t.name AS town, t.player_id AS def_player, p.name AS att_name
      FROM marches m LEFT JOIN towns t ON t.id = m.target_id AND m.target_kind = 'town' JOIN players p ON p.id = m.player_id
-     WHERE m.status = 'out' AND m.arrive_at > ? AND m.arrive_at <= ? AND m.kind = 'attack' AND m.notified = 0
+     WHERE m.status = 'out' AND m.arrive_at > ? AND m.arrive_at <= ? AND m.kind = 'attack'
+       AND (m.notified = 0 OR (m.notified = 1 AND m.arrive_at <= ?))
      ORDER BY m.arrive_at LIMIT ?`,
-  ).bind(now, now + NOTIFY_LEAD, max).all()).results;
+  ).bind(now, now + NOTIFY_LEAD, now + NOTIFY_UPDATE, max).all()).results;
   if (!rows.length) return 0;
   const keys = await vapidKeys(db);
   let sent = 0;
   for (const m of rows) {
-    const claim = await db.prepare('UPDATE marches SET notified = 1 WHERE id = ? AND notified = 0').bind(m.id).run();
-    if (!claim.meta.changes) continue;
     const left = m.arrive_at - now;
+    const next = m.notified === 0 && left > NOTIFY_UPDATE ? 1 : 2;
+    const claim = await db.prepare('UPDATE marches SET notified = ? WHERE id = ? AND notified = ?').bind(next, m.id, m.notified).run();
+    if (!claim.meta.changes) continue;
+    const quiet = m.notified > 0; // bijwerking: zonder geluid
     const where = m.target_kind === 'town' ? m.town : 'het roverskamp';
-    const data = { tag: `march-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at };
+    const data = { tag: `march-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at, quiet };
     sent += await notifyPlayer(db, keys, m.player_id, {
-      ...data, title: `Je leger komt over ${mmss(left)} aan`,
-      body: `Aanval op ${where}. Open het spel om zelf te kiezen: zelf besturen of automatisch.`,
+      ...data, title: 'Je leger komt over {left} aan',
+      body: `Aanval op ${where}, aankomst om {clock}. Open het spel en kies: zelf besturen of automatisch.`,
     }, left / 1000);
     if (m.def_player) {
       sent += await notifyPlayer(db, keys, m.def_player, {
-        ...data, title: `Aanval op ${m.town} over ${mmss(left)}!`,
-        body: `${m.att_name} valt aan. Open het spel om je stad zelf te verdedigen.`,
+        ...data, title: `Aanval op ${m.town} over {left}!`,
+        body: `${m.att_name} valt aan om {clock}. Open het spel om je stad zelf te verdedigen.`,
       }, left / 1000);
     }
   }

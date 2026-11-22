@@ -779,3 +779,53 @@ test('meldingen: enkel echte meldingsdiensten, geldige VAPID-handtekening, versl
   assert.equal(plain[plain.length - 1], 2, 'laatste blok');
   assert.deepEqual(JSON.parse(new TextDecoder().decode(plain.slice(0, -1))), { title: 'Je leger komt over 2:00 aan' });
 });
+
+import { notifyDue } from '../functions/lib/push.js';
+import { readFileSync, readdirSync } from 'node:fs';
+
+// D1-achtige database in het geheugen (node:sqlite) met alle migraties
+async function memoryD1() {
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(':memory:');
+  const dir = new URL('../migrations/', import.meta.url);
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  const stmt = (sql, args = []) => ({
+    bind: (...a) => stmt(sql, a),
+    first: async () => raw.prepare(sql).get(...args) ?? null,
+    all: async () => ({ results: raw.prepare(sql).all(...args) }),
+    run: async () => ({ meta: { changes: Number(raw.prepare(sql).run(...args).changes) } }),
+  });
+  return { raw, prepare: (sql) => stmt(sql) };
+}
+
+test('meldingen: ±2 min vooraf met geluid, ±1 min vooraf een stille bijwerking, nooit dubbel', async () => {
+  const db = await memoryD1();
+  const ins = (sql, ...a) => db.raw.prepare(sql).run(...a);
+  ins("INSERT INTO players (id, name, pass_hash, salt, team_id, created_at) VALUES (1, 'Aan', 'x', 'x', 1, 0), (2, 'Ver', 'x', 'x', 2, 0)");
+  ins("INSERT INTO towns (id, player_id, name, x, y, state) VALUES (10, 1, 'Aanstad', 0, 0, '{}'), (20, 2, 'Verstad', 5, 5, '{}')");
+  ins("INSERT INTO push_subs (player_id, endpoint, p256dh, auth, created_at) VALUES (?, 'https://fcm.googleapis.com/fcm/send/a', ?, ?, 0), (?, 'https://fcm.googleapis.com/fcm/send/b', ?, ?, 0)",
+    1, ...(await fakeDevice()), 2, ...(await fakeDevice()));
+  const T = 1_000_000;
+  ins("INSERT INTO marches (id, player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, to_x, to_y, units, depart_at, arrive_at, status) VALUES (7, 1, 1, 'attack', 10, 0, 0, 'town', 20, 5, 5, '{}', 0, ?, 'out')", T);
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { sent.push({ url, urgency: init.headers.Urgency }); return new Response(null, { status: 201 }); };
+  try {
+    assert.equal(await notifyDue(db, T - 200000), 0, 'te vroeg');
+    assert.equal(await notifyDue(db, T - 140000), 2, 'aanvaller en verdediger');
+    assert.equal(await notifyDue(db, T - 120000), 0, 'niet dubbel');
+    assert.equal(await notifyDue(db, T - 70000), 2, 'bijwerking');
+    assert.equal(await notifyDue(db, T - 30000), 0, 'daarna niets meer');
+    assert.deepEqual(sent.map((s) => s.url.slice(-1)), ['a', 'b', 'a', 'b']);
+    // komt de eerste kans pas laat (<80 s), dan meteen de laatste melding
+    ins("INSERT INTO marches (id, player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, to_x, to_y, units, depart_at, arrive_at, status) VALUES (8, 1, 1, 'attack', 10, 0, 0, 'camp', 1, 2, 2, '{}', 0, ?, 'out')", T + 500000);
+    assert.equal(await notifyDue(db, T + 450000), 1, 'kamp: enkel de aanvaller');
+    assert.equal(db.raw.prepare('SELECT notified FROM marches WHERE id = 8').get().notified, 2);
+    assert.equal(await notifyDue(db, T + 460000), 0);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+async function fakeDevice() {
+  const ua = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  return [b64u(await crypto.subtle.exportKey('raw', ua.publicKey)), b64u(crypto.getRandomValues(new Uint8Array(16)))];
+}
