@@ -879,9 +879,16 @@ async function memoryD1() {
     bind: (...a) => stmt(sql, a),
     first: async () => raw.prepare(sql).get(...args) ?? null,
     all: async () => ({ results: raw.prepare(sql).all(...args) }),
-    run: async () => ({ meta: { changes: Number(raw.prepare(sql).run(...args).changes) } }),
+    run: async () => {
+      const r = raw.prepare(sql).run(...args);
+      return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
+    },
   });
-  return { raw, prepare: (sql) => stmt(sql) };
+  return {
+    raw,
+    prepare: (sql) => stmt(sql),
+    batch: async (list) => { const out = []; for (const st of list) out.push(await st.run()); return out; },
+  };
 }
 
 test('meldingen: ±2 min vooraf met geluid, ±1 min vooraf een stille bijwerking, nooit dubbel', async () => {
@@ -915,3 +922,85 @@ async function fakeDevice() {
   const ua = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
   return [b64u(await crypto.subtle.exportKey('raw', ua.publicKey)), b64u(crypto.getRandomValues(new Uint8Array(16)))];
 }
+
+// ---------- vrede per speler ----------
+import { handle } from '../functions/lib/routes.js';
+import { peaceEnd, peaceBlock, phaseOf, worldTimes } from '../functions/lib/game.js';
+
+test('vrede: 24 uur per speler vanaf zijn start, daarna kan je eender wanneer aanvallen', () => {
+  const H = 3600000;
+  const w = { start_at: 1000 * H, prep_ms: 24 * H, war_ms: 28 * 24 * H };
+  assert.equal(worldTimes(w).warEnd, 1000 * H + 28 * 24 * H);
+  assert.equal(phaseOf(w, 999 * H), 'lobby');
+  assert.equal(phaseOf(w, 1000 * H), 'war', 'geen gezamenlijke vredestijd meer');
+  assert.equal(phaseOf(w, 1000 * H + 28 * 24 * H), 'ended');
+  // aangemeld vóór de start: vrede vanaf de start; later aangemeld: vanaf de inschrijving
+  assert.equal(peaceEnd(w, 990 * H), 1024 * H);
+  assert.equal(peaceEnd(w, 1100 * H), 1124 * H);
+  const old = 990 * H;
+  const nieuw = 1100 * H;
+  assert.equal(peaceBlock(w, old, old, 1030 * H, 1031 * H), null, 'na 24 uur mag het');
+  assert.match(peaceBlock(w, old, old, 1010 * H, 1011 * H), /Je hebt nog vrede/);
+  assert.match(peaceBlock(w, old, nieuw, 1110 * H, 1111 * H), /net begonnen/);
+  assert.equal(peaceBlock(w, old, nieuw, 1110 * H, 1124 * H), null, 'mag vertrekken als het na de vrede aankomt');
+  assert.match(peaceBlock(w, nieuw, old, 1110 * H, 1123.9 * H), /Je hebt nog vrede/, 'ook wie zelf nog vrede heeft');
+});
+
+test('vrede: de migratie houdt het einde van een lopend seizoen gelijk', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(':memory:');
+  const dir = new URL('../migrations/', import.meta.url);
+  const files = readdirSync(dir).filter((n) => n.endsWith('.sql')).sort();
+  const mig = files.indexOf('0004_peace_per_player.sql');
+  assert.ok(mig > 0);
+  for (const f of files.slice(0, mig)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  raw.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, created_at) VALUES (1, 1, 56, 5000, ?, ?, 0)')
+    .run(21 * 86400000, 7 * 86400000);
+  for (const f of files.slice(mig)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  const w = raw.prepare('SELECT * FROM world').get();
+  assert.equal(w.prep_ms, 86400000);
+  assert.equal(worldTimes(w).warEnd, 5000 + 28 * 86400000);
+});
+
+test('vrede: /march weigert een aanval op of door een speler met vrede', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  assert.equal((await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 1, seed: 7 })).status, 200);
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'egypt' });
+  const b = await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'egypt' });
+  assert.equal(a.status, 200, JSON.stringify(a.data));
+  assert.equal(b.status, 200, JSON.stringify(b.data));
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
+  sql("UPDATE towns SET state = json_set(state, '$.units.spear', 20)");
+  const bert = db.raw.prepare("SELECT t.id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = 'Bert'").get().id;
+  const attack = () => call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: bert, units: { spear: 5 } }, a.cookie);
+
+  // allebei net begonnen: vrede
+  let r = await attack();
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /Je hebt nog vrede/);
+  const st = await call('GET', '/state', null, a.cookie);
+  assert.ok(st.data.me.peaceEnd > now, 'de browser kent het einde van je vrede');
+  const map = await call('GET', '/map', null, a.cookie);
+  assert.ok(map.data.towns.every((t) => t.peaceEnd > now));
+
+  // Anna speelt al 2 dagen, Bert is nieuw
+  sql("UPDATE players SET created_at = ? WHERE name = 'Anna'", now - 2 * 86400000);
+  r = await attack();
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /net begonnen/);
+
+  // allebei langer dan 24 uur bezig: aanvallen mag, eender wanneer
+  sql("UPDATE players SET created_at = ? WHERE name = 'Bert'", now - 25 * 3600000);
+  r = await attack();
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(db.raw.prepare("SELECT COUNT(*) AS c FROM marches WHERE kind = 'attack'").get().c, 1);
+});

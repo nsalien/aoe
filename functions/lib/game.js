@@ -14,16 +14,35 @@ import {
 
 export class ConflictError extends Error {}
 
+// Het seizoen loopt van start_at tot start_at + war_ms. Vrede is er niet meer voor iedereen samen, maar per speler:
+// prep_ms na zijn start (standaard 24 uur) kan niemand hem aanvallen en kan hij zelf geen spelers aanvallen.
 export function worldTimes(w) {
-  const prepEnd = w.start_at + w.prep_ms;
-  const warEnd = prepEnd + w.war_ms;
-  return { startAt: w.start_at, prepEnd, warEnd };
+  return { startAt: w.start_at, warEnd: w.start_at + w.war_ms, peaceMs: w.prep_ms };
+}
+
+// einde van de vrede van een speler (aangemeld vóór de start: vanaf de start van het seizoen)
+export const peaceEnd = (w, playerCreatedAt) => Math.max(playerCreatedAt || 0, w.start_at) + w.prep_ms;
+
+const fmtLeft = (ms) => {
+  const m = Math.max(1, Math.ceil(ms / 60000));
+  return m >= 60 ? `${Math.floor(m / 60)} u ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+};
+
+// Een aanval of verkenning op een speler mag pas aankomen als de vrede van beide spelers voorbij is.
+// Geeft de foutmelding terug, of null als het mag.
+export function peaceBlock(w, attackerCreatedAt, targetCreatedAt, now, arriveAt) {
+  const mine = peaceEnd(w, attackerCreatedAt);
+  const theirs = peaceEnd(w, targetCreatedAt);
+  if (arriveAt >= Math.max(mine, theirs)) return null;
+  if (arriveAt < mine) {
+    return `Je hebt nog vrede (nog ${fmtLeft(mine - now)}): tot dan kan je geen spelers aanvallen. Rovers mag je altijd aanvallen!`;
+  }
+  return `Die speler is net begonnen en heeft nog vrede (nog ${fmtLeft(theirs - now)}). Je leger zou te vroeg aankomen.`;
 }
 
 export function phaseOf(w, now) {
-  const { startAt, prepEnd, warEnd } = worldTimes(w);
+  const { startAt, warEnd } = worldTimes(w);
   if (now < startAt) return 'lobby';
-  if (now < prepEnd) return 'prep';
   if (now < warEnd) return 'war';
   return 'ended';
 }
