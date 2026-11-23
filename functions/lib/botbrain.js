@@ -9,11 +9,13 @@
 //   4. militaire gebouwen, smidse, markt, wachttorens, een muur met vier poorten, later een monument
 //   5. een leger trainen dat past bij zijn grootte en moeilijkheid
 // Gebouwen komen op een vast patroon: straten door het midden (naar de poorten) en ring 1 vrij voor de muur.
-import { RES, BUILDINGS, UNITS, AGE_UP, CIVS, WALL_TILE, GATE, TOWN_GRID, levelAge, costValue } from '../../public/shared/rules.js';
+import {
+  RES, BUILDINGS, UNITS, AGE_UP, CIVS, WALL_TILE, GATE, TOWN_GRID, MAX_AGE, TECHS, levelAge, costValue,
+} from '../../public/shared/rules.js';
 import {
   GameError, age, slots, popCap, capacity, homePop, totalVillagers, homeVillagers, bLevel, findType, canAfford,
   checkUpgrade, doBuild, doUpgrade, checkTrain, doTrain, doAssign, canPlaceAt, maxBuilds, doPlaceWalls,
-  doPlaceGate, gateList, marketRate, doTrade, unitsPop, tooBig, townScore,
+  doPlaceGate, gateList, marketRate, doTrade, unitsPop, tooBig, townScore, checkResearch, doResearch, noblesOwned, noblesMax,
 } from '../../public/shared/sim.js';
 import { ringOf, ringForAge, tileIndex } from '../../public/shared/territory.js';
 
@@ -53,8 +55,10 @@ export function botStyle(seed) {
 }
 export const botLevel = (n) => BOT_LEVELS[n] || BOT_LEVELS[2];
 
-const VILL_GOAL = [0, 22, 45, 68, 90]; // zoveel dorpelingen wil hij per tijdperk
-const AGE_AT = { 1: 18, 2: 36, 3: 58 }; // met zoveel dorpelingen gaat hij naar het volgende tijdperk
+const VILL_GOAL = [0, 22, 45, 68, 90, 110]; // zoveel dorpelingen wil hij per tijdperk
+const AGE_AT = { 1: 18, 2: 36, 3: 58, 4: 82 }; // met zoveel dorpelingen gaat hij naar het volgende tijdperk
+// volgorde van onderzoek in de Academie (eerst wat zijn leger en zijn stad het meest helpt)
+const TECH_ORDER = ['firearrows', 'shieldwall', 'pitch', 'horseshoes', 'yew', 'xbow', 'drill', 'lances', 'volley', 'ironbound', 'warcry', 'flank'];
 const ECO = { food: 'farm', wood: 'lumber', stone: 'quarry', gold: 'goldmine' };
 const C = TOWN_GRID / 2; // midden van de stad (tussen tegel 5 en 6)
 
@@ -137,7 +141,7 @@ export function armyPlan(s) {
   const a = age(s);
   if (a === 1) return { spear: 1 };
   if (a === 2) return { spear: 0.25, sword: 0.3, archer: 0.3, rider: 0.15 };
-  const p = { spear: 0.12, sword: 0.16, archer: 0.2, knight: 0.16, ram: 0.08 };
+  const p = { spear: 0.12, sword: 0.16, archer: 0.2, knight: 0.16, ram: a >= 4 ? 0.1 : 0.08 };
   for (const k of (CIVS[s.civ] || { units: [] }).units) p[k] = 0.14;
   return p;
 }
@@ -145,7 +149,7 @@ export function armyPlan(s) {
 // troepen (thuis + onderweg + in opleiding) per soort, in bevolking
 function armyPop(s, away) {
   const out = {};
-  const add = (k, n) => { if (k !== 'villager' && UNITS[k]) out[k] = (out[k] || 0) + n * UNITS[k].pop; };
+  const add = (k, n) => { if (k !== 'villager' && k !== 'noble' && UNITS[k]) out[k] = (out[k] || 0) + n * UNITS[k].pop; };
   for (const [k, n] of Object.entries(s.units || {})) add(k, n);
   for (const [k, n] of Object.entries(away || {})) add(k, n);
   for (const q of Object.values(s.queues)) for (const it of q) add(it.unit, it.n - it.done);
@@ -214,7 +218,8 @@ function rebalance(s, goal, out) {
 }
 
 // ---------- één beslissing van de bot (op het huidige tijdstip van s) ----------
-// opt: { lvl (1-3), peace (eigen vrede nog niet voorbij), threat (er komt een aanval), away (troepen elders), awayPop }
+// opt: { lvl (1-3), peace (eigen vrede nog niet voorbij), threat (er komt een aanval), away (troepen elders), awayPop,
+//        style, cap (doelscore), rest (boven het doel: enkel leger), nobles (edelmannen trainen) }
 // Geeft de lijst met wat hij deed terug.
 export function botEconomy(s, speed = 1, opt = {}) {
   const out = [];
@@ -225,13 +230,18 @@ export function botEconomy(s, speed = 1, opt = {}) {
   const ageing = busy(s, tc.id);
   const style = opt.style || { army: 1, age: 0 };
   // cap = doelscore (balans met de echte spelers): niet naar een nieuw tijdperk als hij daarmee ver boven zijn doel komt
-  const ageOk = a < 4 && (!opt.cap || townScore(s) + costValue(AGE_UP[a + 1].cost) / 50 <= opt.cap * 1.2);
+  const ageOk = a < MAX_AGE && (!opt.cap || townScore(s) + costValue(AGE_UP[a + 1].cost) / 50 <= opt.cap * 1.2);
   const goal = !ageing && ageOk && vill >= AGE_AT[a] + style.age ? AGE_UP[a + 1].cost : null;
   const goalOk = goal && canAfford(s.res, goal);
   const saving = goal && !goalOk && !opt.threat;
 
   // 1. dorpelingen verdelen
   const w = assign(s, goal);
+  // boven zijn doelscore rust hij: niet verder bouwen, enkel zijn leger op peil houden
+  if (opt.rest) {
+    trainArmy(s, s.t, speed, out, Math.round(vill * L.army * style.army * (opt.peace ? 0.4 : 1) * (opt.threat ? 1.3 : 1)), opt);
+    return out;
+  }
 
   // 2. naar het volgende tijdperk
   if (goal && goalOk && !checkUpgrade(s, tc.id)) attempt(out, `tijdperk ${a + 1}`, () => doUpgrade(s, tc.id, s.t, speed));
@@ -245,17 +255,17 @@ export function botEconomy(s, speed = 1, opt = {}) {
   }
 
   // 4. huizen (genoeg bevolkingsruimte voor dorpelingen en leger)
-  if (popCap(s) - homePop(s) - (opt.awayPop || 0) < 5 + a * 2 && popCap(s) < 250) grow(s, s.t, speed, out, 'house', 3, a === 1);
+  if (popCap(s) - homePop(s) - (opt.awayPop || 0) < 5 + a * 2 && popCap(s) < 330) grow(s, s.t, speed, out, 'house', 5, a === 1);
 
   // 5. opslag: bijna vol, of het volgende tijdperk past er niet in
   const cap = capacity(s);
-  const next = a < 4 ? AGE_UP[a + 1].cost : null;
-  if ((next && tooBig(s, next)) || RES.some((r) => s.res[r] > cap * 0.85)) grow(s, s.t, speed, out, 'storage', 3);
+  const next = a < MAX_AGE ? AGE_UP[a + 1].cost : null;
+  if ((next && tooBig(s, next)) || RES.some((r) => s.res[r] > cap * 0.85)) grow(s, s.t, speed, out, 'storage', 5);
 
   // 6. werkplekken waar dorpelingen te weinig plaats hebben
   const sl = slots(s); const sumW = RES.reduce((x, r) => x + w[r], 0);
   const want = Math.max(vill, Math.min(VILL_GOAL[a], vill + 6));
-  for (const r of RES) if ((want * w[r]) / sumW > sl[r] - 1) grow(s, s.t, speed, out, ECO[r], Math.min(3, a));
+  for (const r of RES) if ((want * w[r]) / sumW > sl[r] - 1) grow(s, s.t, speed, out, ECO[r], a);
 
   // 7. militaire gebouwen, smidse, markt, muur en de eerste torens (ook tijdens het sparen: een stad zonder
   // verdediging is een makkelijke prooi)
@@ -267,6 +277,29 @@ export function botEconomy(s, speed = 1, opt = {}) {
     if (findType(s, 'tower').length < (a >= 3 && !saving ? 4 : 2)) grow(s, s.t, speed, out, 'tower', 1, true);
   }
   if (a >= 3 && !findType(s, 'workshop').length) grow(s, s.t, speed, out, 'workshop', 1);
+  // de nieuwe gebouwen van elk tijdperk
+  if (a >= 2 && !saving && !findType(s, 'mill').length) grow(s, s.t, speed, out, 'mill', 1);
+  if (a >= 3 && !findType(s, 'academy').length) grow(s, s.t, speed, out, 'academy', 1);
+  if (a >= 4 && !saving) for (const ty of ['lodge', 'guild']) if (!findType(s, ty).length) grow(s, s.t, speed, out, ty, 1);
+  if (a >= 5 && !saving) {
+    if (!findType(s, 'cathedral').length) grow(s, s.t, speed, out, 'cathedral', 1);
+    if (opt.nobles && !findType(s, 'court').length) grow(s, s.t, speed, out, 'court', 1);
+  }
+  // edelmannen (enkel sterke bots): zoveel als zijn Adelshof toelaat
+  if (opt.nobles && noblesMax(s) && noblesOwned(s, (opt.away || {}).noble || 0) < noblesMax(s) && !(s.queues.court || []).length) {
+    const reserve = AGE_UP[MAX_AGE].cost;
+    const c = UNITS.noble.cost;
+    if (RES.every((r) => s.res[r] - (c[r] || 0) >= (reserve[r] || 0) * 0.15)) attempt(out, 'train 1 noble', () => doTrain(s, 'noble', 1, s.t, speed, opt.awayPop || 0, (opt.away || {}).noble || 0));
+  }
+  // onderzoek in de Academie
+  if (bLevel(s, 'academy') && !s.research && !saving) {
+    for (const id of TECH_ORDER) {
+      if (checkResearch(s, id)) continue;
+      // niet zijn hele voorraad: er moet genoeg overblijven
+      if (RES.every((r) => s.res[r] - (TECHS[id].cost[r] || 0) >= 300)) attempt(out, `onderzoek ${id}`, () => doResearch(s, id, s.t, speed));
+      break;
+    }
+  }
 
   // 8. leger (tijdens het sparen een kleiner leger)
   const target = Math.round(vill * L.army * style.army * (opt.peace ? 0.4 : 1) * (opt.threat ? 1.3 : saving && a < 3 ? 0.6 : 1));
@@ -277,16 +310,17 @@ export function botEconomy(s, speed = 1, opt = {}) {
 
   // 9. verbeteren wat er al staat
   if (builders(s) > 0) {
-    for (const ty of ['barracks', 'range', 'stable', 'smithy', 'tower', 'farm', 'lumber', 'goldmine', 'quarry', 'house', 'market', 'workshop']) {
+    for (const ty of ['barracks', 'range', 'stable', 'smithy', 'tower', 'farm', 'lumber', 'goldmine', 'quarry', 'house', 'market', 'workshop',
+      'mill', 'academy', 'guild', 'lodge', 'cathedral', 'court']) {
       if (builders(s) <= 0) break;
-      const lim = ty === 'smithy' ? Math.min(5, a + 1) : Math.min(3, a);
-      if (findType(s, ty).some((b) => b.level < lim)) grow(s, s.t, speed, out, ty, lim);
+      const lim = Math.min(BUILDINGS[ty].maxLevel, ty === 'smithy' ? a + 1 : a);
+      if (findType(s, ty).some((b) => b.level < lim && age(s) >= levelAge(ty, b.level + 1))) grow(s, s.t, speed, out, ty, lim);
     }
     const wl = bLevel(s, 'wall');
     if (wl && wl < Math.min(5, a + 1) && !busy(s, 2) && builders(s) > 0) attempt(out, `stadsmuur → ${wl + 1}`, () => doUpgrade(s, 2, s.t, speed));
   }
   // 10. een monument als alles af is
-  if (a === 4 && vill >= 70) grow(s, s.t, speed, out, 'monument', 5);
+  if (a >= 4 && vill >= 70) grow(s, s.t, speed, out, 'monument', 5);
   return out;
 }
 
@@ -294,14 +328,14 @@ export function botEconomy(s, speed = 1, opt = {}) {
 export function savingFor(s) {
   const a = age(s);
   const tc = s.buildings.find((b) => b.type === 'tc');
-  if (a >= 4 || busy(s, tc.id) || totalVillagers(s) < AGE_AT[a] - 3) return null;
+  if (a >= MAX_AGE || busy(s, tc.id) || totalVillagers(s) < AGE_AT[a] - 3) return null;
   return AGE_UP[a + 1].cost;
 }
 
 // sterkte van een leger (voor beslissingen): som van aanval en verdediging
 export function armyValue(units) {
   let v = 0;
-  for (const [k, n] of Object.entries(units || {})) if (UNITS[k] && k !== 'villager' && k !== 'scout') v += (UNITS[k].atk || 0) * n;
+  for (const [k, n] of Object.entries(units || {})) if (UNITS[k] && k !== 'villager' && k !== 'scout' && k !== 'noble') v += (UNITS[k].atk || 0) * n;
   return v;
 }
 

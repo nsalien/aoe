@@ -8,8 +8,9 @@
 //   - roverskampen plunderen
 import { RES, UNITS, ARMY_UNITS, MARKET, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, campUnits } from '../../public/shared/rules.js';
 import {
-  newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age, townScore,
+  newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age, townScore, loyalty,
 } from '../../public/shared/sim.js';
+import { nobleBlock } from './vassal.js';
 import { resolveBattle, slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import { phaseOf, gameTime, peaceEnd, peaceBlock, loadTown, saveTown, travelMs, worldTimes, ConflictError } from './game.js';
@@ -167,10 +168,11 @@ export async function botTick(db, world, now) {
   // gemiste tijd inhalen: in stappen, met telkens een beslissing (zoals een speler die af en toe kijkt). Ligt hij boven
   // zijn doelscore, dan rust hij (bouwt niet verder) tot de echte spelers bijbenen.
   const style = botStyle(town.id);
+  const nobles = mem.tier === 'sterk' && (world.bot_level || 2) >= 2;
   const grow = () => townScore(s) < target;
   for (let k = 0; k < STEPS && s.t < T - SLACK; k++) {
     advance(s, Math.min(T, s.t + stepFor(T - s.t)), speed);
-    if (grow()) did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: s.t < pe, awayPop: mem.awayPop || 0, away: mem.away, style, cap: target }));
+    did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: s.t < pe, awayPop: mem.awayPop || 0, away: mem.away, style, cap: target, nobles, rest: !grow() }));
   }
   const caught = s.t >= T - SLACK;
   let plan = null;
@@ -178,8 +180,14 @@ export async function botTick(db, world, now) {
     advance(s, T, speed);
     // wie komt eraan (aanvallen op de clan) en welke troepen zijn er niet
     const incoming = (await db.prepare(
-      "SELECT id, from_town, target_id, to_x, to_y, arrive_at FROM marches WHERE target_team = ? AND kind = 'attack' AND target_kind = 'town' AND status = 'out' AND arrive_at > ?",
+      "SELECT id, from_town, target_id, target_team, to_x, to_y, arrive_at FROM marches WHERE target_team = ? AND kind = 'attack' AND target_kind = 'town' AND status = 'out' AND arrive_at > ?",
     ).bind(row.team_id, now).all()).results;
+    // een vazal helpt ook zijn heer
+    if (s.vas && s.vas.until > now) {
+      incoming.push(...(await db.prepare(
+        "SELECT id, from_town, target_id, target_team, to_x, to_y, arrive_at FROM marches WHERE target_id = ? AND kind = 'attack' AND target_kind = 'town' AND status = 'out' AND arrive_at > ?",
+      ).bind(s.vas.ltown, now).all()).results);
+    }
     const marchRows = (await db.prepare('SELECT units FROM marches WHERE player_id = ?').bind(row.id).all()).results;
     const support = (await db.prepare('SELECT id, host_town, units FROM support WHERE player_id = ?').bind(row.id).all()).results;
     const { away, pop } = unitsOf([...marchRows, ...support]);
@@ -189,7 +197,7 @@ export async function botTick(db, world, now) {
     mem.foe = mem.foe || {};
     for (const m of incoming) if (m.target_id === town.id) mem.foe[m.from_town] = now + 24 * 3600000;
     for (const id of Object.keys(mem.foe)) if (now > mem.foe[id]) delete mem.foe[id];
-    if (grow() || threat) did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: now < pe, threat, away, awayPop: pop, style, cap: target }));
+    did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: now < pe, threat, away, awayPop: pop, style, cap: target, nobles, rest: !grow() && !threat }));
     plan = await military(db, world, row, town, now, { incoming, support, L, pe, speed, tier: BOT_TIERS[mem.tier] });
     did.push(...plan.log);
   }
@@ -265,10 +273,10 @@ async function military(db, world, bot, town, now, ctx) {
       if (m.target_id === town.id || mem.sup[m.id]) continue;
       const send = part(armyHome(s, false), 0.5);
       if (armyValue(send) < 60) break;
-      const dur = travelMs(world, home, { x: m.to_x, y: m.to_y }, slowestSpeed(send));
+      const dur = travelMs(world, home, { x: m.to_x, y: m.to_y }, slowestSpeed(send, s.tech));
       if (now + dur > m.arrive_at - 10000) continue; // zou te laat komen
       take(s, send);
-      out.marches.push({ kind: 'support', tkind: 'town', target: { id: m.target_id, x: m.to_x, y: m.to_y, team: bot.team_id }, units: send, dur });
+      out.marches.push({ kind: 'support', tkind: 'town', target: { id: m.target_id, x: m.to_x, y: m.to_y, team: m.target_team ?? bot.team_id }, units: send, dur });
       mem.sup[m.id] = now;
       mem.hold[m.target_id] = Math.max(mem.hold[m.target_id] || 0, m.arrive_at + H);
       out.log.push(`versterking naar stad ${m.target_id}`);
@@ -311,6 +319,7 @@ async function military(db, world, bot, town, now, ctx) {
   // 4. aanvallen: enkel na de eigen vrede, als hij zelf niet aangevallen wordt en het tijd is
   if (now < ctx.pe || onMe.length) return out;
   const army = armyHome(s);
+  delete army.noble;
   const send = part(army, 1 - L.reserve);
   for (const k of Object.keys(army)) if (UNITS[k].siege) send[k] = army[k]; // belegeringstuig gaat altijd mee
   const value = armyValue(send);
@@ -319,7 +328,7 @@ async function military(db, world, bot, town, now, ctx) {
   const smithy = bLevel(s, 'smithy');
   const sim = (ts) => resolveBattle({
     attUnits: send, attSmithy: smithy, groups: [{ key: 'home', units: scale(ts.units, L.edge * tier.edge) }], defSmithy: bLevel(ts, 'smithy'),
-    wall: effectiveWall(ts), towerDef: towerDefense(ts), baseDef: townBaseDef(ts),
+    wall: effectiveWall(ts), towerDef: towerDefense(ts), baseDef: townBaseDef(ts), attTech: s.tech || null, defTech: ts.tech || null,
   });
   if (now >= (mem.nextAtt || 0)) {
     // samen met de clan: liefst hetzelfde doelwit als een clanlid net koos
@@ -330,32 +339,44 @@ async function military(db, world, bot, town, now, ctx) {
     const rows = (await db.prepare(
       'SELECT t.id, t.x, t.y, t.state, p.created_at, p.team_id, p.bot FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id != ?',
     ).bind(bot.team_id).all()).results;
+    // heren van clanleden: een gewonnen aanval bevrijdt die clanleden
+    const lords = new Set((await db.prepare('SELECT v.lord_town FROM vassals v JOIN players p ON p.id = v.player_id WHERE p.team_id = ?')
+      .bind(bot.team_id).all()).results.map((r) => r.lord_town));
+    const myLord = s.vas && s.vas.until > now ? s.vas.ltown : 0;
+    const nob = s.units.noble || 0;
+    const vassalCount = nob ? (await db.prepare('SELECT COUNT(*) AS c FROM vassals WHERE lord_player = ?').bind(bot.id).first()).c : 0;
     let best = null;
     for (const t of rows) {
+      if (t.id === myLord) continue; // zijn eigen heer valt een vazal niet aan
       if (now < (mem.hit[t.id] || 0)) continue;
       const together = clan && clan.t === t.id && now < clan.until;
       if (!together && now < (prey.get(t.id) || 0)) continue;
-      const dur = travelMs(world, home, t, slowestSpeed(send));
+      const dur = travelMs(world, home, t, slowestSpeed(send, s.tech));
       if (now + dur > warEnd || peaceBlock(world, bot.created_at, t.created_at, now, now + dur)) continue;
       const ts = JSON.parse(t.state);
       ensureTerritory(ts, t.id);
+      if (ts.vas && ts.vas.until > now && ts.vas.lord === bot.id) continue; // zijn eigen vazal
       // geen jacht op veel zwakkere steden (minder dan 45% van zijn eigen score), tenzij die hem eerst aanviel
       if (townScore(ts) < myScore * 0.45 && !((mem.foe || {})[t.id] > now)) continue;
       const r = sim(ts);
       if (!r.attWins) continue;
       let loot = 0; const prot = protectAmount(ts);
       for (const k of RES) loot += Math.max(0, (ts.res[k] || 0) - prot);
-      const score = ((Math.min(loot, 6000) + 400) / (1 + dur / H)) * (t.bot ? 0.35 : 1) * (together ? 3 : 1);
-      if (!best || score > best.score) best = { t, dur, score };
+      // met edelmannen: liefst een stad waar ze iets kunnen doen (en waarvan de trouw al laag staat)
+      const conquer = nob > 0 && r.attLoss < 0.35 && !nobleBlock(ts, now, myScore, vassalCount);
+      const score = ((Math.min(loot, 6000) + 400) / (1 + dur / H)) * (t.bot ? 0.35 : 1) * (together ? 3 : 1)
+        * (lords.has(t.id) ? 3 : 1) * (conquer ? 2 + (100 - loyalty(ts)) / 25 : 1);
+      if (!best || score > best.score) best = { t, dur, score, conquer };
     }
     if (best) {
+      if (best.conquer) send.noble = nob;
       take(s, send);
       out.marches.push({ kind: 'attack', tkind: 'town', target: { id: best.t.id, x: best.t.x, y: best.t.y, team: best.t.team_id }, units: send, dur: best.dur });
-      mem.hit[best.t.id] = now + 10 * H; // niet steeds dezelfde stad
+      mem.hit[best.t.id] = now + (best.conquer ? 2 : 10) * H; // niet steeds dezelfde stad (behalve om ze te onderwerpen)
       mem.nextAtt = now + L.attackHours * tier.attack * H * (0.75 + ((now / 1000) % 50) / 100);
       out.clan = { t: best.t.id, until: now + H };
       out.prey = { id: best.t.id, until: now + L.prey * H };
-      out.log.push(`aanval op stad ${best.t.id}`);
+      out.log.push(`aanval op stad ${best.t.id}${best.conquer ? ' met edelman' : ''}`);
       return out;
     }
     mem.nextAtt = now + 0.75 * H; // niemand te verslaan: straks opnieuw kijken
@@ -371,7 +392,7 @@ async function military(db, world, bot, town, now, ctx) {
       if (!countUnits(units)) continue;
       const r = resolveBattle({ attUnits: send, attSmithy: smithy, groups: [{ key: 'camp', units: scale(units, L.edge * tier.edge) }], baseDef: 20 * c.level });
       if (!r.attWins) continue;
-      const dur = travelMs(world, home, c, slowestSpeed(send));
+      const dur = travelMs(world, home, c, slowestSpeed(send, s.tech));
       const score = c.level / (1 + dur / H);
       if (!best || score > best.score) best = { c, dur, score };
     }
