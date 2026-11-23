@@ -196,6 +196,11 @@ registratie; oude spelers kregen een vast willekeurig volk.
     eigen details per volk (`houseCiv`). Warme sfeer + vignet overdag (`FX.grade`, niet op gsm).
     Let op: spullen-afbeeldingen hebben per soort een krappe omkadering en een resolutie volgens de zoom (anders traag).
 
+24. **3D zoals Age of Empires** (gebruiker: "ik wil graphics zoals in Age of Empires"): gebouwen, muren, poorttorens en
+    troepen zijn nu vooraf gerenderde 3D-modellen uit een eigen straalvolger (`render3d.js`, `models3d.js`, `figmodels.js`,
+    `sprite3d.js`, `render-worker.js`). Eigen ontwerpen, geen kopie van AoE. Ruwweg 15–150 ms per gebouw en ±20 ms per
+    figuurbeeld in een worker; daarna bewaard in de browser. Lichtrichting = die van de schaduwen in de stad.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
