@@ -23,6 +23,8 @@ function shade(hex, amt) {
   return `rgb(${f(r)},${f(g)},${f(b)})`;
 }
 
+import * as S3 from './sprite3d.js';
+
 // ---------- cache ----------
 
 const cache = new Map();
@@ -411,6 +413,8 @@ export function person(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 0.4 * s, y, 4.4 * s, 1.9 * s, 0, 0, TAU); ctx.fill();
   const mode = o.working ? 'work' : o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const f3 = S3.getFig('p', o, mode, f);
+  if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   const key = `p|${mode}${f}|${R}|${o.body || ''}|${o.leg || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.tool || ''}|${o.carry || ''}|${o.team || ''}|${o.barb ? 1 : 0}`;
   blit(ctx, sprite(key, R, P_BOX, (c) => drawPerson(c, o, mode, f), [-4.6, 4.4]), P_BOX, x, y, s);
@@ -551,6 +555,8 @@ export function horseman(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 0.8 * s, y, 9 * s, 2.6 * s, 0, 0, TAU); ctx.fill();
   const mode = o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const f3 = S3.getFig('h', o, mode, f);
+  if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   const key = `h|${mode}${f}|${R}|${o.body || ''}|${o.horse || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.team || ''}|${o.look || ''}`;
   blit(ctx, sprite(key, R, H_BOX, (c) => drawHorse(c, o, mode, f), [-9, 11]), H_BOX, x, y, s);
@@ -767,6 +773,9 @@ export function elite(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 0.4 * s, y, 4.6 * s, 2 * s, 0, 0, TAU); ctx.fill();
   const mode = o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const lk = LOOK[o.look] || {};
+  const f3 = S3.getFig('p', { body: lk.body, leg: lk.leg, look: o.look, team: o.team, skin: o.skin || (o.look === 'samurai' ? 1 : o.look === 'immortal' || o.look === 'lionguard' ? 2 : 0), thumb: o.thumb }, mode, f);
+  if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   blit(ctx, sprite(`e|${o.look}|${mode}${f}|${R}|${o.team || ''}|${o.skin || 0}`, R, P_BOX, (c) => drawElite(c, o, mode, f), [-4.8, 4.4]), P_BOX, x, y, s);
 }
