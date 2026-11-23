@@ -105,48 +105,86 @@ function texFace(ctx, map, u0, u1, z0, z1, kind, ao) {
   const pts = [map(u0, z0), map(u1, z0), map(u1, z1), map(u0, z1)];
   ctx.moveTo(...pts[0]); for (const p of pts.slice(1)) ctx.lineTo(...p); ctx.closePath();
   ctx.clip();
+  const quad = (ua, ub, za, zb) => { ctx.beginPath(); ctx.moveTo(...map(ua, za)); ctx.lineTo(...map(ub, za)); ctx.lineTo(...map(ub, zb)); ctx.lineTo(...map(ua, zb)); ctx.closePath(); };
+  const seg = (ua, za, ub, zb) => { ctx.beginPath(); ctx.moveTo(...map(ua, za)); ctx.lineTo(...map(ub, zb)); ctx.stroke(); };
   ctx.lineWidth = 0.55;
   if (kind === 'stone') {
-    const rh = 5.2; const bw = 0.13;
+    // gekapte blokken van ongelijke breedte met een lichte bovenrand en een schaduw onderaan
+    const rh = 4.8;
     let r = 0;
     for (let z = z0; z < z1; z += rh, r++) {
-      const off = (r % 2) * bw * 0.5;
-      for (let u = u0 - off; u < u1; u += bw) {
+      let u = u0 - rnd() * 0.1;
+      while (u < u1) {
+        const bw = 0.09 + rnd() * 0.09;
         const v = rnd();
-        if (v < 0.8) {
-          ctx.fillStyle = v < 0.4 ? `rgba(255,250,235,${0.04 + v * 0.18})` : `rgba(20,15,10,${0.03 + (v - 0.4) * 0.22})`;
-          ctx.beginPath(); const a = map(u, z); const b = map(u + bw, z); const c = map(u + bw, z + rh); const d = map(u, z + rh);
-          ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.lineTo(...d); ctx.fill();
-        }
-        ctx.strokeStyle = 'rgba(55,45,35,0.28)';
-        ctx.beginPath(); ctx.moveTo(...map(u, z)); ctx.lineTo(...map(u, z + rh)); ctx.stroke();
+        ctx.fillStyle = v < 0.45 ? `rgba(255,250,235,${0.04 + v * 0.28})` : `rgba(25,18,10,${0.03 + (v - 0.45) * 0.3})`;
+        quad(u, u + bw, z, z + rh); ctx.fill();
+        if (z < z0 + 7 && rnd() < 0.35) { ctx.fillStyle = 'rgba(85,110,45,0.22)'; quad(u, u + bw, z, z + rh * 0.6); ctx.fill(); }
+        ctx.strokeStyle = 'rgba(255,248,230,0.32)'; seg(u + 0.008, z + rh - 0.7, u + bw - 0.008, z + rh - 0.7);
+        ctx.strokeStyle = 'rgba(40,30,20,0.42)'; seg(u, z, u, z + rh);
+        if (v > 0.94) { ctx.strokeStyle = 'rgba(30,22,14,0.5)'; seg(u + bw * 0.3, z + rh * 0.8, u + bw * 0.55, z + rh * 0.3); }
+        u += bw;
       }
-      ctx.strokeStyle = 'rgba(55,45,35,0.32)';
-      ctx.beginPath(); ctx.moveTo(...map(u0, z)); ctx.lineTo(...map(u1, z)); ctx.stroke();
+      ctx.strokeStyle = 'rgba(40,30,20,0.45)'; ctx.lineWidth = 0.7; seg(u0, z, u1, z); ctx.lineWidth = 0.55;
     }
   } else if (kind === 'wood') {
-    for (let z = z0 + 3.4; z < z1; z += 3.4) {
-      ctx.strokeStyle = 'rgba(60,35,15,0.3)';
-      ctx.beginPath(); ctx.moveTo(...map(u0, z)); ctx.lineTo(...map(u1, z)); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,230,190,0.12)';
-      ctx.beginPath(); ctx.moveTo(...map(u0, z + 0.8)); ctx.lineTo(...map(u1, z + 0.8)); ctx.stroke();
+    // planken met een donkere naad, nerf en hier en daar een knoest
+    for (let z = z0; z < z1; z += 3.4) {
+      const v = rnd();
+      ctx.fillStyle = v < 0.5 ? `rgba(255,225,180,${v * 0.2})` : `rgba(40,20,5,${(v - 0.5) * 0.22})`;
+      quad(u0, u1, z, z + 3.4); ctx.fill();
+      ctx.strokeStyle = 'rgba(50,28,10,0.45)'; seg(u0, z, u1, z);
+      ctx.strokeStyle = 'rgba(255,230,190,0.16)'; seg(u0, z + 2.7, u1, z + 2.7);
+      ctx.strokeStyle = 'rgba(70,40,15,0.16)'; ctx.lineWidth = 0.35;
+      seg(u0, z + 1.1 + rnd(), u1, z + 1.3 + rnd()); ctx.lineWidth = 0.55;
+      if (rnd() < 0.3) { const [kx, ky] = map(u0 + rnd() * w, z + 1.7); ctx.fillStyle = 'rgba(60,32,12,0.5)'; ctx.beginPath(); ctx.ellipse(kx, ky, 0.9, 0.5, 0, 0, Math.PI * 2); ctx.fill(); }
     }
     for (let u = u0 + 0.21; u < u1; u += 0.27 + rnd() * 0.1) {
-      ctx.strokeStyle = 'rgba(60,35,15,0.18)';
-      ctx.beginPath(); ctx.moveTo(...map(u, z0)); ctx.lineTo(...map(u, z1)); ctx.stroke();
+      ctx.strokeStyle = 'rgba(50,28,10,0.3)'; seg(u, z0, u, z1);
+      ctx.fillStyle = 'rgba(40,40,45,0.6)';
+      for (let z = z0 + 1.7; z < z1; z += 3.4) { const [nx, ny] = map(u + 0.012, z); ctx.fillRect(nx - 0.35, ny - 0.35, 0.7, 0.7); }
     }
   } else if (kind === 'plaster') {
+    // vlekkerige kalk, regensporen en een plekje waar de bakstenen doorkomen
+    for (let i = 0; i < w * 22; i++) {
+      const [x, y] = map(u0 + rnd() * w, z0 + rnd() * h);
+      ctx.fillStyle = rnd() < 0.5 ? 'rgba(130,100,60,0.07)' : 'rgba(255,255,250,0.12)';
+      ctx.beginPath(); ctx.ellipse(x, y, 1.5 + rnd() * 3, 1 + rnd() * 2, 0, 0, Math.PI * 2); ctx.fill();
+    }
     for (let i = 0; i < w * 40; i++) {
       const [x, y] = map(u0 + rnd() * w, z0 + rnd() * h);
-      ctx.fillStyle = rnd() < 0.5 ? 'rgba(120,95,60,0.12)' : 'rgba(255,255,255,0.18)';
-      ctx.fillRect(x, y, 1.1, 1.1);
+      ctx.fillStyle = rnd() < 0.5 ? 'rgba(120,95,60,0.14)' : 'rgba(255,255,255,0.2)';
+      ctx.fillRect(x, y, 0.9, 0.9);
     }
+    if (rnd() < 0.8) {
+      const su = u0 + rnd() * w; const [sx, sy] = map(su, z1);
+      const g = ctx.createLinearGradient(sx, sy, sx, sy + h * 0.6);
+      g.addColorStop(0, 'rgba(110,90,60,0.16)'); g.addColorStop(1, 'rgba(110,90,60,0)');
+      ctx.fillStyle = g; quad(su, su + 0.05 + rnd() * 0.06, z1 - h * 0.65, z1); ctx.fill();
+    }
+    if (h > 10 && w > 0.3 && rnd() < 0.6) {
+      const pu = u0 + 0.05 + rnd() * (w - 0.2); const pz = z0 + 2 + rnd() * (h - 8);
+      for (let rr = 0; rr < 3; rr++) {
+        for (let k = 0; k < 3 - (rr % 2); k++) {
+          const ua = pu + k * 0.045 + (rr % 2) * 0.022; const za = pz + rr * 1.8;
+          ctx.fillStyle = rnd() < 0.5 ? '#b0704c' : '#9c5f3f'; quad(ua, ua + 0.04, za, za + 1.5); ctx.fill();
+        }
+      }
+    }
+  }
+  // licht: bovenaan iets lichter, onderaan donkerder
+  {
+    const [tx, ty] = map((u0 + u1) / 2, z1); const [, by] = map((u0 + u1) / 2, z0);
+    const g = ctx.createLinearGradient(tx, ty, tx, by);
+    g.addColorStop(0, 'rgba(255,246,225,0.1)'); g.addColorStop(1, 'rgba(25,15,5,0.1)');
+    ctx.fillStyle = g;
+    ctx.fillRect(Math.min(...pts.map((p) => p[0])) - 2, Math.min(...pts.map((p) => p[1])) - 2, 400, 400);
   }
   if (ao) {
     const [ax, ay] = map((u0 + u1) / 2, z0);
     const [, by] = map((u0 + u1) / 2, z0 + Math.min(11, h * 0.45));
     const g = ctx.createLinearGradient(ax, ay, ax, by);
-    g.addColorStop(0, 'rgba(25,15,5,0.34)'); g.addColorStop(1, 'rgba(25,15,5,0)');
+    g.addColorStop(0, 'rgba(25,15,5,0.38)'); g.addColorStop(1, 'rgba(25,15,5,0)');
     ctx.fillStyle = g;
     ctx.fillRect(Math.min(...pts.map((p) => p[0])) - 2, Math.min(...pts.map((p) => p[1])) - 2, 400, 400);
   }
@@ -159,9 +197,9 @@ export function box(ctx, x0, y0, x1, y1, z0, z1, color, edge = EDGE, tex = 'auto
   const ao = z0 === 0 && z1 > 8 && tex !== 'none';
   rs = (Math.abs(Math.floor((x0 * 997 + y0 * 131 + z1 * 7 + 5) * 1000)) % 2147483646) + 1;
   poly(ctx, [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)], c.left, edge);
-  if (kind || ao) texFace(ctx, (u, z) => P(u, y1, z), x0, x1, z0, z1, kind, ao);
+  if (tex !== 'none' || ao) texFace(ctx, (u, z) => P(u, y1, z), x0, x1, z0, z1, kind, ao);
   poly(ctx, [P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1)], c.right, edge);
-  if (kind || ao) texFace(ctx, (u, z) => P(x1, u, z), y0, y1, z0, z1, kind, ao);
+  if (tex !== 'none' || ao) texFace(ctx, (u, z) => P(x1, u, z), y0, y1, z0, z1, kind, ao);
   poly(ctx, [P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)], c.top, edge);
   if (z1 - z0 > 6 && x1 - x0 > 0.12) {
     // randlicht aan de bovenrand (zon van linksboven)
@@ -190,49 +228,68 @@ function slopeTex(ctx, eA, eB, rA, rB, color) {
   ctx.beginPath(); ctx.moveTo(...eA); ctx.lineTo(...eB); ctx.lineTo(...rB); ctx.lineTo(...rA); ctx.closePath();
   ctx.clip();
   const len = Math.hypot(eB[0] - eA[0], eB[1] - eA[1]);
-  const rows = thatch ? 5 : 6;
+  const rows = thatch ? 5 : 7;
+  const at = (s, t) => lerp2(lerp2(eA, eB, s), lerp2(rA, rB, s), t);
   if (thatch) {
-    for (let i = 0; i < len * 2.2; i++) {
-      const s = Math.random(); const t = Math.random();
-      const p = lerp2(lerp2(eA, eB, s), lerp2(rA, rB, s), t);
-      const q = lerp2(lerp2(eA, eB, s), lerp2(rA, rB, s), Math.max(0, t - 0.12));
-      ctx.strokeStyle = Math.random() < 0.5 ? 'rgba(120,80,20,0.35)' : 'rgba(255,240,180,0.35)';
-      ctx.lineWidth = 0.6;
+    // rietbundels: veel korte halmen, per laag een donkere onderrand
+    for (let i = 0; i < len * 5; i++) {
+      const sx = rnd(); const t = rnd();
+      const p = at(sx, t); const q = at(sx + (rnd() - 0.5) * 0.02, Math.max(0, t - 0.1));
+      ctx.strokeStyle = rnd() < 0.5 ? 'rgba(115,75,18,0.38)' : 'rgba(255,240,180,0.36)';
+      ctx.lineWidth = 0.5;
       ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke();
     }
   }
   for (let i = 1; i < rows; i++) {
     const t = i / rows;
     const a = lerp2(eA, rA, t); const b = lerp2(eB, rB, t);
-    ctx.strokeStyle = thatch ? 'rgba(110,70,15,0.35)' : 'rgba(30,10,5,0.32)';
-    ctx.lineWidth = 0.7;
+    if (thatch) {
+      const t2 = t - 0.06;
+      ctx.fillStyle = 'rgba(90,55,10,0.18)';
+      ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...lerp2(eB, rB, t2)); ctx.lineTo(...lerp2(eA, rA, t2)); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = thatch ? 'rgba(110,70,15,0.4)' : 'rgba(30,10,5,0.4)';
+    ctx.lineWidth = 0.75;
     ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
     if (!thatch) {
       const t2 = (i - 1) / rows;
       const a2 = lerp2(eA, rA, t2); const b2 = lerp2(eB, rB, t2);
-      const n = Math.max(3, Math.round(len / 4.5));
+      const n = Math.max(3, Math.round(len / 4));
       for (let k = 0; k < n; k++) {
         const u0 = (k + (i % 2) * 0.5) / n; const u1 = u0 + 1 / n;
-        const v = Math.random();
-        ctx.fillStyle = v < 0.5 ? `rgba(255,240,220,${v * 0.22})` : `rgba(20,5,0,${(v - 0.5) * 0.26})`;
+        const v = rnd();
+        ctx.fillStyle = v < 0.5 ? `rgba(255,240,220,${v * 0.26})` : `rgba(20,5,0,${(v - 0.5) * 0.3})`;
         ctx.beginPath(); ctx.moveTo(...lerp2(a2, b2, u0)); ctx.lineTo(...lerp2(a2, b2, u1)); ctx.lineTo(...lerp2(a, b, u1)); ctx.lineTo(...lerp2(a, b, u0)); ctx.closePath(); ctx.fill();
+        // bolle pan: licht streepje links, schaduw rechts
+        ctx.strokeStyle = 'rgba(255,240,220,0.22)'; ctx.lineWidth = 0.6;
+        ctx.beginPath(); ctx.moveTo(...lerp2(a2, b2, u0 + 0.3 / n)); ctx.lineTo(...lerp2(a, b, u0 + 0.3 / n)); ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(30,10,5,0.18)'; ctx.lineWidth = 0.5;
+      ctx.strokeStyle = 'rgba(30,10,5,0.26)'; ctx.lineWidth = 0.5;
       for (let k = 0; k < n; k++) {
         const u = (k + (i % 2) * 0.5) / n;
         ctx.beginPath(); ctx.moveTo(...lerp2(a2, b2, u)); ctx.lineTo(...lerp2(a, b, u)); ctx.stroke();
       }
     }
   }
+  if (!thatch) {
+    // mos en verkleuring vlak boven de dakgoot
+    for (let i = 0; i < len / 9; i++) {
+      const [x, y] = at(rnd(), rnd() * 0.45);
+      ctx.fillStyle = rnd() < 0.6 ? 'rgba(95,120,55,0.2)' : 'rgba(40,30,20,0.16)';
+      ctx.beginPath(); ctx.ellipse(x, y, 1.5 + rnd() * 2.5, 0.8 + rnd(), -0.4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
   // licht naar de nok toe
   const g = ctx.createLinearGradient(...lerp2(eA, eB, 0.5), ...lerp2(rA, rB, 0.5));
-  g.addColorStop(0, 'rgba(0,0,0,0.12)'); g.addColorStop(1, 'rgba(255,245,220,0.12)');
+  g.addColorStop(0, 'rgba(0,0,0,0.16)'); g.addColorStop(1, 'rgba(255,245,220,0.14)');
   ctx.fillStyle = g;
   ctx.fillRect(Math.min(eA[0], eB[0], rA[0], rB[0]) - 2, Math.min(eA[1], eB[1], rA[1], rB[1]) - 2, len + 60, 200);
   ctx.restore();
   // dikte van de dakrand
-  ctx.strokeStyle = shade(color, -0.42); ctx.lineWidth = 1.3;
+  ctx.strokeStyle = shade(color, -0.45); ctx.lineWidth = 1.4;
   ctx.beginPath(); ctx.moveTo(...eA); ctx.lineTo(...eB); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,240,215,0.25)'; ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(eA[0], eA[1] - 0.9); ctx.lineTo(eB[0], eB[1] - 0.9); ctx.stroke();
 }
 
 // plat dak met een kroonlijst (Egypte), kantelen (Babylon) of een koepel (Perzië)
@@ -1446,18 +1503,20 @@ export function buildingSprite(type, level, team = '#c0392b', civ = null) {
   const size = SIZES[type] || 1;
   const w = size * TW + 48;
   const h = size * TH + 170;
-  const cv = document.createElement('canvas');
-  cv.width = w * SCALE; cv.height = h * SCALE;
-  const ctx = cv.getContext('2d');
-  ctx.scale(SCALE, SCALE);
+  const mk = () => { const c = document.createElement('canvas'); c.width = w * SCALE; c.height = h * SCALE; return c; };
+  const cv = mk(); // grond (aangestampte aarde) + het gebouw met omlijning
+  const bcv = mk(); // enkel het gebouw
   const ax = w / 2;
   const ay = h - (size * TH) / 2 - 14;
-  ctx.translate(ax, ay);
+  const g0 = cv.getContext('2d');
+  g0.scale(SCALE, SCALE); g0.translate(ax, ay);
+  const ctx = bcv.getContext('2d');
+  ctx.scale(SCALE, SCALE); ctx.translate(ax, ay);
   LIGHTS = [];
   rs = 12345;
   if (st) { Object.assign(C, st.palette); STYLE = st; }
   try {
-    apron(ctx, size, type);
+    apron(g0, size, type);
     const L = Math.max(1, level);
     if (st && type === 'tc' && L >= 3) TC_CIV[civ](ctx, L, team);
     else (DRAW[type] || house)(ctx, L, team);
@@ -1471,11 +1530,30 @@ export function buildingSprite(type, level, team = '#c0392b', civ = null) {
   } finally {
     Object.assign(C, BASE_C); STYLE = null;
   }
-  addGrain(cv);
+  addGrain(bcv);
+  outline(g0, bcv, type === 'farm' ? 0.3 : 0.62);
   spr = { cv, w, h, ax, ay, lights: LIGHTS };
   LIGHTS = null;
   cache.set(key, spr);
   return spr;
+}
+
+// donkere omlijning rond het gebouw (zoals bij de figuren): scherper en beter leesbaar op het gras
+function outline(dst, src, alpha) {
+  const w = src.width; const h = src.height;
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const t = tmp.getContext('2d');
+  const px = SCALE * 0.55;
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-0.7, -0.7], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7]]) t.drawImage(src, dx * px, dy * px);
+  t.globalCompositeOperation = 'source-in';
+  t.fillStyle = `rgba(34,22,12,${alpha})`;
+  t.fillRect(0, 0, w, h);
+  dst.save();
+  dst.setTransform(1, 0, 0, 1, 0, 0);
+  dst.drawImage(tmp, 0, 0);
+  dst.drawImage(src, 0, 0);
+  dst.restore();
 }
 
 // fijne materiaalkorrel over alles wat getekend is (muren, daken, hout): minder glad, meer 'echt'
