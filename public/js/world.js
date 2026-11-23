@@ -2,45 +2,11 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { generateTerrain, T } from '../shared/worldgen.js';
-import * as NAT from './nature.js';
+import { generateTerrain } from '../shared/worldgen.js';
+import { bakeWorld, WTW, WTH } from './worldmap.js';
 
-// bomen van de stadsweergave, klein getekend op de wereldkaart
-let worldTrees = null;
-function wtree(g, x, y, conifer, h, s = 0.5) {
-  if (!worldTrees) worldTrees = Array.from({ length: 12 }, (_, k) => NAT.treeSprite(k));
-  const list = conifer ? NAT.CONIFERS : NAT.LEAFY;
-  const spr = worldTrees[list[Math.floor(h * list.length) % list.length]];
-  g.drawImage(spr.cv, x - spr.ax * s, y - spr.ay * s, spr.w * s, spr.h * s);
-}
-
-export const WTW = 40;
-export const WTH = 20;
+export { WTW, WTH };
 const { toWorld } = isoFns(WTW, WTH);
-const TOP = 70; // ruimte bovenaan het gebakken terrein voor bergen
-
-function heightOf(t, e) {
-  switch (t) {
-    case T.DEEP: return -7;
-    case T.SHALLOW: return -4;
-    case T.SAND: return 0;
-    case T.GRASS: case T.FOREST: return Math.round(2 + Math.max(0, e - 0.41) * 18);
-    case T.HILL: return Math.round(9 + (e - 0.73) * 70);
-    default: return Math.round(15 + (e - 0.82) * 90);
-  }
-}
-
-function topColor(t, n, e) {
-  switch (t) {
-    case T.DEEP: return A.mix('#2c6aa3', '#3779b4', n);
-    case T.SHALLOW: return A.mix('#4e97c9', '#62a8d6', n);
-    case T.SAND: return A.mix('#dcc888', '#e8d69d', n);
-    case T.GRASS: return A.mix('#76ac46', '#93c25a', n);
-    case T.FOREST: return A.mix('#5a8f3d', '#68a046', n);
-    case T.HILL: return A.mix('#8ea657', '#a5b768', n);
-    default: return e > 0.9 ? '#b9b5ad' : A.mix('#8d887e', '#a19c92', n);
-  }
-}
 
 export class WorldView {
   constructor(canvas) {
@@ -72,34 +38,10 @@ export class WorldView {
     if (this.seed === seed && this.size === size) return;
     this.seed = seed; this.size = size;
     this.terrain = generateTerrain(seed, size);
-    const { tiles, elev } = this.terrain;
-    this.heights = new Int16Array(size * size);
-    for (let i = 0; i < size * size; i++) this.heights[i] = heightOf(tiles[i], elev[i]);
     const l = toWorld(0, size); const r = toWorld(size, 0); const b = toWorld(size, size);
     this.cam.bounds = { x0: l.x + 100, x1: r.x - 100, y0: 60, y1: b.y - 60 };
     this.water = [];
-    const nWaves = FX.LOW_POWER ? 260 : 520;
-    for (let k = 0; k < 8000 && this.water.length < nWaves; k++) {
-      const x = Math.floor(hashInt(k, 1, seed) * size); const y = Math.floor(hashInt(k, 2, seed) * size);
-      if (tiles[y * size + x] <= T.SHALLOW) this.water.push({ x: x + hashInt(k, 3, seed), y: y + hashInt(k, 4, seed), p: hashInt(k, 5, seed) * 6.28 });
-    }
-    // kustlijnen voor het schuim (randen tussen water en land)
     this.shore = [];
-    const land = (x, y) => x >= 0 && y >= 0 && x < size && y < size && tiles[y * size + x] >= T.SAND;
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        if (tiles[y * size + x] > T.SHALLOW) continue;
-        const hw = this.heights[y * size + x];
-        const edges = [];
-        // enkel randen waar het land achter het water ligt; de andere worden door het land bedekt
-        if (land(x, y - 1)) edges.push([x, y, x + 1, y]);
-        if (land(x - 1, y)) edges.push([x, y, x, y + 1]);
-        for (const [a, b, c, d] of edges) {
-          const p = toWorld(a, b); const q = toWorld(c, d);
-          this.shore.push({ x0: p.x, y0: p.y - hw, x1: q.x, y1: q.y - hw, ph: hashInt(x, y, seed + 9) * 6.28 });
-        }
-      }
-    }
     const wb = { x0: l.x, x1: r.x, y0: 0, y1: b.y };
     this.particles = new FX.Particles(FX.LOW_POWER ? 150 : 300);
     this.birds = new FX.Birds(wb);
@@ -108,14 +50,9 @@ export class WorldView {
     this.bakedKey = null;
   }
 
-  h(x, y) {
-    const s = this.size;
-    if (x < 0 || y < 0 || x >= s || y >= s) return -12;
-    return this.heights[y * s + x];
-  }
-
+  // hoogte van het landschap op een punt (tegelcoördinaten)
   hAt(gx, gy) {
-    return Math.max(0, this.h(Math.floor(gx), Math.floor(gy)));
+    return this.bakeInfo ? this.bakeInfo.hAt(gx, gy) : 0;
   }
 
   setData(data, myTownId, myTeamId) {
@@ -137,108 +74,21 @@ export class WorldView {
   setMarches(marches) { this.marches = marches || []; }
 
   bake() {
-    const size = this.size;
-    const { tiles, elev } = this.terrain;
-    const W = size * WTW; const H = size * WTH + TOP + 30;
-    const scale = window.innerWidth < 800 ? 1 : 1.5;
-    const cv = document.createElement('canvas');
-    cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
-    const g = cv.getContext('2d');
-    g.scale(scale, scale);
-    g.translate(W / 2, TOP);
-    this.bakeInfo = { cv, W, H, ox: -W / 2, oy: -TOP };
-    const clear = [...this.towns, ...this.camps].map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }));
-    const nearObj = (x, y, r) => clear.some((p) => Math.hypot(p.x - x, p.y - y) < r);
-    const P = (gx, gy, z) => { const w = toWorld(gx, gy); return [w.x, w.y - z]; };
-    for (let d = 0; d <= 2 * (size - 1); d++) {
-      for (let gx = Math.max(0, d - size + 1); gx <= Math.min(d, size - 1); gx++) {
-        const gy = d - gx;
-        const i = gy * size + gx;
-        const t = tiles[i];
-        const e = elev[i];
-        const h = this.heights[i];
-        const n = hashInt(Math.floor(gx / 2), Math.floor(gy / 2), this.seed) * 0.5 + hashInt(gx, gy, this.seed + 1) * 0.5;
-        let col = topColor(t, n, e);
-        const back = (this.h(gx - 1, gy) + this.h(gx, gy - 1)) / 2;
-        if (t > T.SHALLOW) {
-          const slope = Math.max(-0.12, Math.min(0.12, (h - back) * 0.012));
-          col = A.shade(col.startsWith('#') ? col : rgbToHex(col), slope);
-        }
-        // zijvlakken
-        const hl = Math.max(this.h(gx, gy + 1), -12);
-        const hr = Math.max(this.h(gx + 1, gy), -12);
-        const sideBase = rgbToHex(topColor(t === T.FOREST || t === T.GRASS ? T.SAND : t, 0.3, e));
-        const dirt = t >= T.HILL ? '#7f786c' : t >= T.GRASS ? '#a07a4a' : sideBase;
-        if (h > hl) A.poly(g, [P(gx, gy + 1, h), P(gx + 1, gy + 1, h), P(gx + 1, gy + 1, hl), P(gx, gy + 1, hl)], A.shade(dirt, -0.12));
-        if (h > hr) A.poly(g, [P(gx + 1, gy, h), P(gx + 1, gy + 1, h), P(gx + 1, gy + 1, hr), P(gx + 1, gy, hr)], A.shade(dirt, -0.32));
-        A.poly(g, [P(gx, gy, h), P(gx + 1, gy, h), P(gx + 1, gy + 1, h), P(gx, gy + 1, h)], col);
-        // graskant boven klifjes
-        if (t >= T.GRASS && t <= T.FOREST && (h > hl + 1 || h > hr + 1)) {
-          g.strokeStyle = 'rgba(40,70,20,0.35)'; g.lineWidth = 1;
-          g.beginPath(); g.moveTo(...P(gx, gy + 1, h)); g.lineTo(...P(gx + 1, gy + 1, h)); g.lineTo(...P(gx + 1, gy, h)); g.stroke();
-        }
-        // schuim langs de kust
-        if (t === T.SHALLOW && (tiles[i - 1] >= T.SAND || tiles[i - size] >= T.SAND)) {
-          g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1.2;
-          g.beginPath(); g.moveTo(...P(gx, gy + 1, h)); g.lineTo(...P(gx, gy, h)); g.lineTo(...P(gx + 1, gy, h)); g.stroke();
-        }
-        const [cx, cy] = P(gx + 0.5, gy + 0.5, h);
-        // decoratie
-        if (t === T.FOREST && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
-          const k = 2 + Math.floor(hashInt(gx, gy, this.seed + 3) * 2);
-          const pts = [[-0.22, -0.2], [0.2, -0.15], [-0.05, 0.18], [0.25, 0.25]];
-          for (let j = 0; j < k; j++) {
-            const [ox, oy] = pts[j];
-            const [tx, ty] = P(gx + 0.5 + ox, gy + 0.5 + oy, h);
-            const conif = hashInt(gx + j, gy, this.seed + 4) < 0.5;
-            wtree(g, tx, ty, conif, hashInt(gx, gy + j, 5), 0.48);
-          }
-        } else if (t === T.GRASS && hashInt(gx, gy, this.seed + 7) < 0.07 && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
-          wtree(g, cx + 4, cy + 2, false, hashInt(gx, gy, 13), 0.48);
-        } else if (t === T.HILL && hashInt(gx, gy, this.seed + 8) < 0.25 && !nearObj(gx + 0.5, gy + 0.5, 1.6)) {
-          if (hashInt(gx, gy, 9) < 0.5) wtree(g, cx, cy + 2, true, hashInt(gx, gy, 14), 0.45); else A.rock(g, cx, cy + 2, 0.7);
-        } else if (t === T.MOUNTAIN) {
-          const ph = 14 + (e - 0.82) * 120 + hashInt(gx, gy, 10) * 8;
-          const w = 13 + hashInt(gx, gy, 11) * 5;
-          g.fillStyle = '#7d776c';
-          g.beginPath(); g.moveTo(cx - w, cy + 3); g.lineTo(cx - 2, cy - ph); g.lineTo(cx + w, cy + 3); g.closePath(); g.fill();
-          g.fillStyle = '#a29d92';
-          g.beginPath(); g.moveTo(cx - w, cy + 3); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - 1, cy + 4); g.closePath(); g.fill();
-          g.strokeStyle = 'rgba(60,55,48,0.45)'; g.lineWidth = 0.8;
-          g.beginPath(); g.moveTo(cx - 2, cy - ph); g.lineTo(cx + w * 0.25, cy - ph * 0.5); g.lineTo(cx + w * 0.15, cy - ph * 0.15);
-          g.moveTo(cx - 2, cy - ph * 0.7); g.lineTo(cx - w * 0.35, cy - ph * 0.25); g.stroke();
-          g.fillStyle = 'rgba(255,255,255,0.18)';
-          g.beginPath(); g.moveTo(cx - w * 0.6, cy); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - w * 0.2, cy - ph * 0.3); g.closePath(); g.fill();
-          if (e > 0.86) {
-            g.fillStyle = '#f4f6f8';
-            g.beginPath(); g.moveTo(cx - 2 - w * 0.32, cy - ph * 0.62); g.lineTo(cx - 2, cy - ph); g.lineTo(cx - 2 + w * 0.32, cy - ph * 0.62);
-            g.lineTo(cx, cy - ph * 0.68); g.lineTo(cx - 3, cy - ph * 0.58); g.closePath(); g.fill();
-          }
-        } else if (t === T.SAND && hashInt(gx, gy, 12) < 0.04) {
-          A.rock(g, cx, cy, 0.5);
-        }
-      }
-    }
-    // korrel over het hele landschap (masker = wat al getekend is)
-    const tex = NAT.groundTexture('grass', window.innerWidth < 800 ? 128 : 256);
-    const tmp = document.createElement('canvas');
-    tmp.width = cv.width; tmp.height = cv.height;
-    const t2 = tmp.getContext('2d');
-    t2.fillStyle = t2.createPattern(tex, 'repeat');
-    t2.fillRect(0, 0, tmp.width, tmp.height);
-    t2.globalCompositeOperation = 'destination-in';
-    t2.drawImage(cv, 0, 0);
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.globalCompositeOperation = 'overlay';
-    g.globalAlpha = 0.5;
-    g.drawImage(tmp, 0, 0);
-    g.restore();
+    const small = window.innerWidth < 800;
+    const res = bakeWorld({
+      seed: this.seed, size: this.size, tiles: this.terrain.tiles, towns: this.towns, camps: this.camps,
+      scale: small ? 1 : 1.5, R: small ? 6 : FX.LOW_POWER ? 7 : 9,
+    });
+    this.bakeInfo = res;
+    this.shore = res.shore;
+    const nWaves = FX.LOW_POWER ? 260 : 520;
+    this.water = res.water.slice(0, nWaves);
+    window.__worldBakeMs = res.ms;
   }
 
   townPos(t) {
     const w = toWorld(t.x + 0.5, t.y + 0.5);
-    return { x: w.x, y: w.y - this.hAt(t.x, t.y) };
+    return { x: w.x, y: w.y - this.hAt(t.x + 0.5, t.y + 0.5) };
   }
 
   pick(sx, sy) {
@@ -285,13 +135,19 @@ export class WorldView {
     const bk = this.bakeInfo;
     ctx.drawImage(bk.cv, bk.ox, bk.oy, bk.W, bk.H);
 
-    // kustschuim dat aanspoelt
-    ctx.lineCap = 'round';
+    // golfjes die op het strand aanspoelen
+    ctx.lineCap = 'round'; ctx.lineWidth = 1.1;
     for (const e of this.shore) {
-      const a = 0.5 + 0.5 * Math.sin(t * 0.0016 + e.ph);
-      ctx.strokeStyle = `rgba(255,255,255,${0.15 + a * 0.4})`;
-      ctx.lineWidth = 1 + a * 1.4;
-      ctx.beginPath(); ctx.moveTo(e.x0, e.y0); ctx.lineTo(e.x1, e.y1); ctx.stroke();
+      const p = (t * 0.00022 + e.ph) % 1;
+      const a = Math.sin(p * Math.PI) * 0.42;
+      if (a < 0.04) continue;
+      const off = (1 - p) * 6;
+      const x = e.x + e.nx * off; const y = e.y + e.ny * off;
+      ctx.strokeStyle = `rgba(255,255,255,${a})`;
+      ctx.beginPath();
+      ctx.moveTo(x + e.ny * 3.5, y - e.nx * 3.5);
+      ctx.quadraticCurveTo(x - e.nx * 1.2, y - e.ny * 1.2, x - e.ny * 3.5, y + e.nx * 3.5);
+      ctx.stroke();
     }
     ctx.lineCap = 'butt';
     // golfjes
@@ -397,7 +253,7 @@ export class WorldView {
   drawRoute(ctx, m, t) {
     const from = toWorld(m.from.x + 0.5, m.from.y + 0.5);
     const to = toWorld(m.to.x + 0.5, m.to.y + 0.5);
-    const fh = this.hAt(m.from.x, m.from.y); const th = this.hAt(m.to.x, m.to.y);
+    const fh = this.hAt(m.from.x + 0.5, m.from.y + 0.5); const th = this.hAt(m.to.x + 0.5, m.to.y + 0.5);
     const hostile = !m.ally;
     ctx.save();
     ctx.strokeStyle = hostile ? '#ff3b30' : (m.own ? '#ffe28a' : this.teamColor(m.teamId));
@@ -552,10 +408,4 @@ export class WorldView {
     ctx.beginPath(); ctx.roundRect(s.x - w / 2, s.y - 14, w, 15, 5); ctx.fill();
     ctx.fillStyle = '#f6e7d0'; ctx.textAlign = 'center'; ctx.fillText(txt, s.x, s.y - 3);
   }
-}
-
-function rgbToHex(c) {
-  if (c.startsWith('#')) return c;
-  const m = c.match(/\d+/g).map(Number);
-  return '#' + m.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('');
 }

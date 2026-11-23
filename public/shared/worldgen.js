@@ -40,40 +40,54 @@ export function fbm(x, y, seed, oct) {
   return v / norm;
 }
 
+// hoogte (e) en vochtigheid (m) op een willekeurig punt; (x, y) = midden van tegel (x, y).
+// generateTerrain gebruikt precies dezelfde berekening, de kaart tekent er een vloeiend landschap mee.
+export function fieldAt(seed, size, regions, x, y) {
+  const dx = (x / (size - 1) - 0.5) * 2;
+  const dy = (y / (size - 1) - 0.5) * 2;
+  const d = Math.sqrt(dx * dx + dy * dy) / Math.SQRT2; // 0 midden .. 1 hoek
+  const edge = Math.max(Math.abs(dx), Math.abs(dy));
+  let e = 0.58 + (fbm(x / 8, y / 8, seed, 4) - 0.5) * 1.1;
+  e -= Math.pow(Math.max(0, edge - 0.68) / 0.32, 2) * 0.45;
+  // een kronkelende bergrug geeft het midden van de kaart karakter
+  const ridge = 1 - Math.abs(fbm(x / 9 + 50, y / 9 + 50, seed + 3, 3) - 0.5) * 2;
+  e += Math.max(0, ridge - 0.76) * 1.7 * (1 - d * 0.6);
+  let m = fbm(x / 6 + 200, y / 6 + 200, seed + 17, 3);
+  // startgebieden van teams zijn altijd vruchtbaar en vlak
+  let near = Infinity;
+  for (const r of regions) near = Math.min(near, Math.hypot(r.x - x, r.y - y));
+  if (near < 7) {
+    const k = 1 - near / 7;
+    e = e + (0.56 - e) * Math.min(1, k * 1.6);
+    m -= k * 0.25;
+  }
+  return [e, m];
+}
+
+export function terrainType(e, m) {
+  if (e < 0.3) return T.DEEP;
+  if (e < 0.37) return T.SHALLOW;
+  if (e < 0.41) return T.SAND;
+  if (e > 0.82) return T.MOUNTAIN;
+  if (e > 0.73) return T.HILL;
+  if (m > 0.55) return T.FOREST;
+  return T.GRASS;
+}
+
+export function teamRegions(seed, size) {
+  const regions = [];
+  for (let i = 0; i < MAX_TEAMS; i++) regions.push(teamRegion(seed, size, i));
+  return regions;
+}
+
 export function generateTerrain(seed, size) {
   const tiles = new Uint8Array(size * size);
   const elev = new Float32Array(size * size);
-  const regions = [];
-  for (let i = 0; i < MAX_TEAMS; i++) regions.push(teamRegion(seed, size, i));
+  const regions = teamRegions(seed, size);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const dx = (x / (size - 1) - 0.5) * 2;
-      const dy = (y / (size - 1) - 0.5) * 2;
-      const d = Math.sqrt(dx * dx + dy * dy) / Math.SQRT2; // 0 midden .. 1 hoek
-      const edge = Math.max(Math.abs(dx), Math.abs(dy));
-      let e = 0.58 + (fbm(x / 8, y / 8, seed, 4) - 0.5) * 1.1;
-      e -= Math.pow(Math.max(0, edge - 0.68) / 0.32, 2) * 0.45;
-      // een kronkelende bergrug geeft het midden van de kaart karakter
-      const ridge = 1 - Math.abs(fbm(x / 9 + 50, y / 9 + 50, seed + 3, 3) - 0.5) * 2;
-      e += Math.max(0, ridge - 0.76) * 1.7 * (1 - d * 0.6);
-      let m = fbm(x / 6 + 200, y / 6 + 200, seed + 17, 3);
-      // startgebieden van teams zijn altijd vruchtbaar en vlak
-      let near = Infinity;
-      for (const r of regions) near = Math.min(near, Math.hypot(r.x - x, r.y - y));
-      if (near < 7) {
-        const k = 1 - near / 7;
-        e = e + (0.56 - e) * Math.min(1, k * 1.6);
-        m -= k * 0.25;
-      }
-      let t;
-      if (e < 0.3) t = T.DEEP;
-      else if (e < 0.37) t = T.SHALLOW;
-      else if (e < 0.41) t = T.SAND;
-      else if (e > 0.82) t = T.MOUNTAIN;
-      else if (e > 0.73) t = T.HILL;
-      else if (m > 0.55) t = T.FOREST;
-      else t = T.GRASS;
-      tiles[y * size + x] = t;
+      const [e, m] = fieldAt(seed, size, regions, x, y);
+      tiles[y * size + x] = terrainType(e, m);
       elev[y * size + x] = e;
     }
   }
