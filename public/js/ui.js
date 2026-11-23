@@ -630,7 +630,7 @@ export function worldPanelHtml(app, sel) {
   const ally = t.teamId === d.me.teamId;
   const dist = Math.hypot(t.x - me.x, t.y - me.y);
   let html = `<div class="ph"><img class="thumb" src="${buildingThumb('tc', t.age, team ? team.color : '#888', t.civ)}" alt="">
-    <div><h2>${esc(t.name)}</h2><div class="lvl">${esc(t.player)} ${t.online ? '· <span style="color:#3f8f3c">● online</span>' : ''}</div>
+    <div><h2>${esc(t.name)}</h2><div class="lvl">${esc(t.player)} ${t.bot ? '· <span class="bot-tag" title="Een computerspeler: bouwt zijn rijk uit en valt aan zoals een echte speler">computer</span>' : t.online ? '· <span style="color:#3f8f3c">● online</span>' : ''}</div>
     ${t.civ ? `<div class="small">${civEmblem(t.civ, 14)} ${civName(t.civ)}</div>` : ''}
     ${team ? `<span class="pill" style="background:${team.color}">${esc(team.name)}</span>` : ''}</div></div>
     <div class="card"><dl class="kv"><dt>Tijdperk</dt><dd>${AGES[t.age].short}</dd><dt>Punten</dt><dd>${fmt(t.score)}</dd>
@@ -912,7 +912,7 @@ export function leaderboardHtml(app, lb) {
     ${lb.teams.map((t, i) => `<div class="teambar"><b>${i + 1}.</b><div class="tb"><i style="width:${(t.score / max) * 100}%;background:${t.color}"></i><span>${esc(t.name)} — ${t.members.map(esc).join(' & ')}</span></div><b>${fmt(t.score)}</b></div>`).join('')}
     <h3>Spelers</h3>
     <table class="lb"><tr><th>#</th><th>Speler</th><th>Burcht</th><th class="n">Opbouw</th><th class="n">Gevecht</th><th class="n">Totaal</th></tr>
-    ${lb.players.map((p, i) => `<tr class="${p.name === d.me.name ? 'me' : ''}"><td>${i + 1}</td><td><span class="pill" style="background:${(lb.teams.find((t) => t.id === p.teamId) || {}).color || '#888'}">${esc(p.name)}</span></td><td>${esc(p.town)}</td><td class="n">${fmt(p.build)}</td><td class="n">${fmt(p.kills)}</td><td class="n">${fmt(p.score)}</td></tr>`).join('')}
+    ${lb.players.map((p, i) => `<tr class="${p.name === d.me.name ? 'me' : ''}"><td>${i + 1}</td><td><span class="pill" style="background:${(lb.teams.find((t) => t.id === p.teamId) || {}).color || '#888'}">${esc(p.name)}</span>${p.bot ? ' <span class="bot-tag">computer</span>' : ''}</td><td>${esc(p.town)}</td><td class="n">${fmt(p.build)}</td><td class="n">${fmt(p.kills)}</td><td class="n">${fmt(p.score)}</td></tr>`).join('')}
     </table>
     <p class="small muted">Opbouwpunten komen uit gebouwen, dorpelingen, troepen en vooral het Monument. Gevechtspunten verdien je door vijanden en rovers te verslaan.</p>`;
 }
