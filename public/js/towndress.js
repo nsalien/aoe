@@ -9,6 +9,7 @@ import * as A from './art.js';
 import { isoFns, hashInt } from './iso.js';
 import { BUILDINGS, TOWN_GRID } from '../shared/rules.js';
 import { ringOf, ringForAge } from '../shared/territory.js';
+import * as S3 from './sprite3d.js';
 
 const { toWorld } = isoFns(A.TW, A.TH);
 const N = TOWN_GRID;
@@ -323,6 +324,7 @@ export function buildDress(o) {
         g.fillStyle = gr; g.beginPath(); g.ellipse(yx, yy, yard, yard * 0.75, 0, 0, Math.PI * 2); g.fill();
       }
     }
+    if (S3.has(b.type)) continue; // 3D-gebouwen hebben hun eigen schaduw en voet
     const ao = size * 0.78;
     const gr = g.createRadialGradient(cx, cy, size * 0.25, cx, cy, ao);
     gr.addColorStop(0, 'rgba(25,20,8,0.42)'); gr.addColorStop(0.6, 'rgba(25,20,8,0.22)'); gr.addColorStop(1, 'rgba(25,20,8,0)');

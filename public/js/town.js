@@ -15,6 +15,7 @@ import * as NAT from './nature.js';
 import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
 import { buildDress, drawProp, dressKey } from './towndress.js';
+import * as S3 from './sprite3d.js';
 import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
@@ -1174,7 +1175,11 @@ export class TownView {
     };
     // achterste toren eerst (verder weg in de isometrie); torens en boog als afbeelding (enkel de deuren bewegen)
     const [back, front] = t1.x + t1.y <= t2.x + t2.y ? [t1, t2] : [t2, t1];
-    this.gatePart(ctx, seg, level, 'b', th + 10, (c) => tower(c, back));
+    const t3 = (p) => S3.getWall({ x0: p.x - tw, y0: p.y - tw, x1: p.x + tw, y1: p.y + tw, tower: true }, level, th);
+    const tb = t3(back); const tf = t3(front);
+    const use3d = tb && tf;
+    if (use3d) { const w = toWorld(back.x, back.y); A.drawSprite(ctx, tb, w.x, w.y, 1); }
+    else this.gatePart(ctx, seg, level, 'b', th + 10, (c) => tower(c, back));
     // deurvleugels: scharnier bij de torens, draaien naar binnen open
     const leaf = (hinge, toward) => {
       const L = gt - tw;
@@ -1201,11 +1206,16 @@ export class TownView {
     leaf(hinge1, { x: cx, y: cy });
     leaf(hinge2, { x: cx, y: cy });
     // boog boven de doorgang, dan de voorste toren
-    this.gatePart(ctx, seg, level, 'f', th + 10, (c) => {
+    const lintel = (c) => {
       if (along) A.box(c, t1.x + tw, cy - 0.08, t2.x - tw, cy + 0.08, hDoor, hDoor + 8, wallC);
       else A.box(c, cx - 0.08, t1.y + tw, cx + 0.08, t2.y - tw, hDoor, hDoor + 8, wallC);
-      tower(c, front);
-    });
+    };
+    if (use3d) {
+      this.gatePart(ctx, seg, level, 'l', th + 10, lintel);
+      const w = toWorld(front.x, front.y); A.drawSprite(ctx, tf, w.x, w.y, 1);
+    } else {
+      this.gatePart(ctx, seg, level, 'f', th + 10, (c) => { lintel(c); tower(c, front); });
+    }
     // vlag bovenop
     const top = A.P(cx, cy, hDoor + 8);
     A.flag(ctx, top[0], top[1], 16, this.team || '#c0392b', performance.now(), 0.7);
@@ -1244,6 +1254,13 @@ export class TownView {
   // muurstukken één keer tekenen en daarna als afbeelding hergebruiken (stenen textuur is duur)
   drawWallPiece(ctx, seg, level) {
     if (seg.gateTile) { this.drawGate(ctx, seg, Math.max(1, level)); return; }
+    const w3 = S3.getWall(seg, level, this.wallHeight(seg, level));
+    if (w3) {
+      const c = toWorld((seg.x0 + seg.x1) / 2, (seg.y0 + seg.y1) / 2);
+      A.drawSprite(ctx, w3, c.x, c.y, 1);
+      if (seg.gate) this.drawTorch(ctx, seg, level);
+      return;
+    }
     if (!this.wallSprites || this.wallSprites.level !== level) this.wallSprites = { level, map: new Map() };
     const key = `${seg.x0},${seg.y0},${seg.x1},${seg.y1},${seg.tower ? 1 : 0}${seg.gate ? 1 : 0}`;
     let spr = this.wallSprites.map.get(key);
@@ -1266,6 +1283,16 @@ export class TownView {
       this.wallSprites.map.set(key, spr);
     }
     ctx.drawImage(spr.cv, spr.x, spr.y, spr.w, spr.h);
+  }
+
+  // fakkel op een muurtoren (bij 3D-muren apart getekend)
+  drawTorch(ctx, seg, level) {
+    const h = this.wallHeight(seg, level) + (level >= 3 ? 4 : 3);
+    const [px, py] = A.P((seg.x0 + seg.x1) / 2, (seg.y0 + seg.y1) / 2, h);
+    ctx.strokeStyle = '#4a3220'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(px, py + 2); ctx.lineTo(px, py - 5); ctx.stroke();
+    ctx.fillStyle = '#ff9d2e'; ctx.beginPath(); ctx.ellipse(px, py - 7, 1.8, 2.8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.ellipse(px, py - 6.5, 0.9, 1.5, 0, 0, Math.PI * 2); ctx.fill();
   }
 
   drawWallPieceRaw(ctx, seg, level) {
@@ -2750,7 +2777,7 @@ export class TownView {
       ctx.closePath();
     };
     for (const b of s.buildings) {
-      if (!isPlaced(b)) continue;
+      if (!isPlaced(b) || (b.level > 0 && S3.has(b.type))) continue;
       const def = SHADOW[b.type];
       if (!def) continue;
       const size = BUILDINGS[b.type].size;
@@ -2779,8 +2806,9 @@ export class TownView {
     for (const b of s.buildings) {
       if (!isPlaced(b) || b.level === 0) continue;
       const c = this.footprintCenter(b);
-      const spr = A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id);
-      const k = bScale(b);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id);
+      const spr = s3 || A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id);
+      const k = s3 ? 1 : bScale(b);
       for (const [lx, ly, r] of spr.lights || []) {
         const fl = 0.85 + Math.sin(t * 0.003 + lx * 3.1 + b.id) * 0.08;
         FX.drawGlow(ctx, c.x + lx * k, c.y + ly * k, 9 * r, FX.WARM, night * fl * 0.85);
@@ -2897,8 +2925,10 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id), c.x, c.y, bScale(b));
-      this.drawOverlay(ctx, b, c, t);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id);
+      if (s3) A.drawSprite(ctx, s3, c.x, c.y, 1);
+      else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id), c.x, c.y, bScale(b));
+      if (s3) this.drawOverlay3d(ctx, b, c, t, s3); else this.drawOverlay(ctx, b, c, t);
       if (sel) {
         // voorste randen van de voet in goud, over het gebouw heen: zo zie je duidelijk wat gekozen is
         const pulse = 0.7 + Math.sin(t * 0.006) * 0.25;
@@ -2913,6 +2943,22 @@ export class TownView {
       if (b.type === 'smithy' && emit && Math.random() < 0.6) {
         const [gx, gy] = A.P(0.36, 0.3, 6);
         this.particles.sparks(c.x + gx, c.y + gy, 3);
+      }
+    }
+  }
+
+  // vlag, rook en gloed op de ankerpunten van het 3D-model
+  drawOverlay3d(ctx, b, c, t, s3) {
+    const a = s3.anchors || {};
+    if (a.flag) A.flag(ctx, c.x + a.flag[0], c.y + a.flag[1], b.type === 'tower' ? 14 : 17, this.team, t + b.id * 300);
+    if (a.smoke && (b.type !== 'house' || b.level >= 2 || b.id % 2 === 0)) A.smoke(ctx, c.x + a.smoke[0], c.y + a.smoke[1], t, b.id);
+    if (a.glow) {
+      if (b.type === 'smithy') {
+        const fl = 0.35 + Math.sin(t * 0.02) * 0.1 + Math.sin(t * 0.047) * 0.08;
+        FX.drawGlow(ctx, c.x + a.glow[0], c.y + a.glow[1], 12, FX.FIRE, fl + 0.2);
+      } else {
+        const k = 0.5 + 0.5 * Math.sin(t * 0.004);
+        FX.drawGlow(ctx, c.x + a.glow[0], c.y + a.glow[1], 16, 'rgba(255,220,120,1)', 0.35 + k * 0.35);
       }
     }
   }
