@@ -83,7 +83,6 @@ export class WorldView {
     this.shore = res.shore;
     const nWaves = FX.LOW_POWER ? 260 : 520;
     this.water = res.water.slice(0, nWaves);
-    window.__worldBakeMs = res.ms;
   }
 
   townPos(t) {
