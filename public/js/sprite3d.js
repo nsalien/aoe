@@ -11,7 +11,7 @@ let ready = 0;
 const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4);
 // eenmaal gerenderde gebouwen bewaren in de browser (Cache Storage), zodat dat maar één keer gebeurt.
 // Verhoog VERSION als de modellen of de renderer veranderen.
-const VERSION = 3;
+const VERSION = 4;
 const STORE = 'rvs-3d-v' + VERSION;
 const hasStore = typeof caches !== 'undefined' && typeof window !== 'undefined' && window.isSecureContext;
 const urlOf = (key) => `/__3d/${VERSION}/${SCALE}/${encodeURIComponent(key)}`;
@@ -96,9 +96,10 @@ export const enabled = () => !failed && typeof Worker !== 'undefined';
 export const has = (type) => HAS_3D.has(type) && enabled();
 export const readyCount = () => ready;
 
-export function get(type, level, civ, id = 0) {
+// v: variant voor gebouwen die er anders uitzien volgens de stad (Academie: welke soorten onderzoek klaar zijn)
+export function get(type, level, civ, id = 0, v = null) {
   if (!has(type) || level < 1) return null;
-  const variant = type === 'house' ? Math.abs(id) % 3 : 0;
+  const variant = type === 'house' ? Math.abs(id) % 3 : v || 0;
   const key = `${type}|${level}|${civ || ''}|${variant}`;
   const s = cache.get(key);
   if (s) return s;
@@ -133,7 +134,7 @@ export function getWall(seg, level, hPx) {
 }
 
 // figuur (mens of ruiter) in 3D; L = de opties van de getekende figuur, mode = idle/walk/work, f = beeld 0..7
-const FIG_KEYS = ['body', 'leg', 'armor', 'skin', 'helmet', 'hat', 'weapon', 'tool', 'carry', 'team', 'barb', 'look', 'horse'];
+const FIG_KEYS = ['body', 'leg', 'armor', 'skin', 'helmet', 'hat', 'weapon', 'tool', 'carry', 'team', 'barb', 'look', 'horse', 'plate', 'kit'];
 export function getFig(kind, o, mode, f) {
   if (!enabled() || o.thumb) return null;
   const L = {};
