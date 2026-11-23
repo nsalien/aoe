@@ -764,6 +764,97 @@ function house(ctx, L) {
     box(ctx, -0.25, -0.2, -0.14, -0.09, 28, 47, C.stoneDark);
     gableY(ctx, -0.38, -0.32, 0.38, 0.32, 28, 18, C.roofDark, C.plaster);
   }
+  if (STYLE) houseCiv(ctx, L);
+}
+
+// eigen details per volk op de huizen: dakterras met luifel, palmdak, zuilenportiek, veranda en tralies, tegelboog
+function houseCiv(ctx, L) {
+  const D = [null, { x0: -0.28, y0: -0.22, x1: 0.28, y1: 0.22, h: 15, dx: -0.06, dw: 0.12, dh: 10 },
+    { x0: -0.34, y0: -0.27, x1: 0.34, y1: 0.27, h: 19, dx: -0.06, dw: 0.13, dh: 11 },
+    { x0: -0.38, y0: -0.32, x1: 0.38, y1: 0.32, h: 28, dx: -0.05, dw: 0.13, dh: 11 }][Math.min(3, Math.max(1, L))];
+  const { x0, y0, x1, y1, h } = D;
+  const st = STYLE;
+  const line = (a, b, col, w) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); };
+  const canopy = (xa, ya, xb, yb, z0, z1, c1, c2) => {
+    for (const [px, py] of [[xa, ya], [xb, ya], [xa, yb], [xb, yb]]) line(P(px, py, z0), P(px, py, z1), '#5a3a1e', 1);
+    const n = 6;
+    for (let k = 0; k < n; k++) {
+      const a = xa + ((xb - xa) * k) / n; const b = xa + ((xb - xa) * (k + 1)) / n;
+      poly(ctx, [P(a, ya, z1 + 1.2), P(b, ya, z1 + 1.2), P(b, yb, z1), P(a, yb, z1)], k % 2 ? c1 : c2, 'rgba(40,25,10,0.35)');
+    }
+    for (let k = 0; k < n; k++) { // franje aan de voorkant
+      const a = xa + ((xb - xa) * k) / n; const b = xa + ((xb - xa) * (k + 1)) / n;
+      poly(ctx, [P(a, yb, z1), P(b, yb, z1), P((a + b) / 2, yb, z1 - 2.6)], shade(k % 2 ? c1 : c2, -0.15));
+    }
+  };
+  if (st.roof === 'crenel') { // Babylon: uitstekende balkkoppen, dakterras met gestreepte luifel, potplant
+    for (let x = x0 + 0.07; x < x1 - 0.03; x += 0.11) box(ctx, x - 0.014, y1, x + 0.014, y1 + 0.05, h - 6, h - 4, '#5a3a1e', EDGE, 'none');
+    for (let y = y0 + 0.07; y < y1 - 0.03; y += 0.11) box(ctx, x1, y - 0.014, x1 + 0.05, y + 0.014, h - 6, h - 4, '#4a2e18', EDGE, 'none');
+    if (L >= 2) canopy(x0 + 0.06, y0 + 0.06, x1 - 0.06, (y0 + y1) / 2, h + 3.2, h + 15, st.trim, '#efe6cf');
+    const [px, py] = P(x1 - 0.1, y1 - 0.08, h + 3.2);
+    ctx.fillStyle = '#b5603a'; ctx.fillRect(px - 1.8, py - 3.5, 3.6, 3.5);
+    ctx.fillStyle = '#4f8a34'; ctx.beginPath(); ctx.arc(px, py - 5, 2.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6faa44'; ctx.beginPath(); ctx.arc(px - 0.8, py - 5.8, 1.4, 0, Math.PI * 2); ctx.fill();
+    if (L >= 3) { // ladder naar het dak
+      const a = P(x1 + 0.06, y0 + 0.12, 0); const b = P(x1 + 0.02, y0 + 0.2, h + 6);
+      const a2 = P(x1 + 0.06, y0 + 0.2, 0); const b2 = P(x1 + 0.02, y0 + 0.28, h + 6);
+      line(a, b, '#6b4523', 0.9); line(a2, b2, '#6b4523', 0.9);
+      for (let t = 0.1; t < 1; t += 0.12) line([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], [a2[0] + (b2[0] - a2[0]) * t, a2[1] + (b2[1] - a2[1]) * t], '#8a5f33', 0.6);
+    }
+  } else if (st.roof === 'flat') { // Egypte: schaduwdak van palmbladeren op het dak, kruiken bij de deur
+    if (L >= 2) {
+      const xa = x0 + 0.05; const xb = x0 + (x1 - x0) * 0.55; const ya = y0 + 0.05; const yb = y0 + (y1 - y0) * 0.55;
+      for (const [px, py] of [[xa, ya], [xb, ya], [xa, yb], [xb, yb]]) line(P(px, py, h + 5), P(px, py, h + 15), '#7a5a32', 1);
+      poly(ctx, [P(xa - 0.03, ya - 0.03, h + 15.5), P(xb + 0.03, ya - 0.03, h + 15.5), P(xb + 0.03, yb + 0.03, h + 14.5), P(xa - 0.03, yb + 0.03, h + 14.5)], '#a8955a', 'rgba(60,45,20,0.5)');
+      ctx.strokeStyle = 'rgba(80,100,40,0.7)'; ctx.lineWidth = 0.6;
+      for (let t = 0; t <= 1; t += 0.14) { const a = P(xa + (xb - xa) * t, ya, h + 15.5); const b = P(xa + (xb - xa) * t, yb + 0.05, h + 13.5); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); }
+    }
+    for (const [dx, sc] of [[D.dx - 0.08, 1], [D.dx + D.dw + 0.05, 0.8]]) {
+      const [x, y] = P(dx, y1 + 0.06);
+      ctx.fillStyle = '#b5603a'; ctx.beginPath(); ctx.moveTo(x - 1 * sc, y); ctx.bezierCurveTo(x - 4 * sc, y - 3 * sc, x - 3 * sc, y - 7 * sc, x - 1 * sc, y - 8 * sc); ctx.lineTo(x + 1 * sc, y - 8 * sc); ctx.bezierCurveTo(x + 3 * sc, y - 7 * sc, x + 4 * sc, y - 3 * sc, x + 1 * sc, y); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,230,190,0.3)'; ctx.fillRect(x - 2 * sc, y - 6 * sc, 0.8 * sc, 4 * sc);
+    }
+  } else if (st.roof === 'greek') { // Grieken: zuilenportiek met een klein fronton voor de deur
+    if (L >= 2) {
+      const xa = D.dx - 0.1; const xb = D.dx + D.dw + 0.1; const yf = y1 + 0.16; const zt = D.dh + 3;
+      column(ctx, xa, yf, 0, zt, C.plaster, 1.6); column(ctx, xb, yf, 0, zt, C.plaster, 1.6);
+      box(ctx, xa - 0.04, y1, xb + 0.04, yf + 0.04, zt, zt + 2.5, C.plaster, EDGE, 'none');
+      poly(ctx, [P(xa - 0.05, yf + 0.05, zt + 2.5), P(xb + 0.05, yf + 0.05, zt + 2.5), P((xa + xb) / 2, yf + 0.05, zt + 8)], C.plaster, 'rgba(90,80,60,0.6)');
+      poly(ctx, [P(xa - 0.02, yf + 0.06, zt + 3.2), P(xb + 0.02, yf + 0.06, zt + 3.2), P((xa + xb) / 2, yf + 0.06, zt + 7)], st.trim);
+      poly(ctx, [P(xb + 0.05, y1, zt + 2.5), P(xb + 0.05, yf + 0.05, zt + 2.5), P((xa + xb) / 2 + 0.06, (y1 + yf) / 2, zt + 8)], shade(C.roof, -0.2), EDGE);
+    }
+  } else if (st.roof === 'pagoda') { // Yamato: houten tralies, veranda en een doek voor de deur
+    ctx.strokeStyle = 'rgba(46,32,24,0.65)'; ctx.lineWidth = 0.45;
+    const zt = L >= 3 ? h - 2 : h - 2; const zb = L >= 3 ? 14 : 2;
+    for (let x = x0 + 0.05; x < x1; x += 0.07) { if (x > D.dx - 0.02 && x < D.dx + D.dw + 0.02) continue; ctx.beginPath(); ctx.moveTo(...P(x, y1 + 0.004, zb)); ctx.lineTo(...P(x, y1 + 0.004, zt)); ctx.stroke(); }
+    for (let z = zb + 3; z < zt; z += 4) { ctx.beginPath(); ctx.moveTo(...P(x0, y1 + 0.004, z)); ctx.lineTo(...P(D.dx - 0.02, y1 + 0.004, z)); ctx.moveTo(...P(D.dx + D.dw + 0.02, y1 + 0.004, z)); ctx.lineTo(...P(x1, y1 + 0.004, z)); ctx.stroke(); }
+    for (let y = y0 + 0.05; y < y1; y += 0.07) { ctx.beginPath(); ctx.moveTo(...P(x1 + 0.004, y, zb)); ctx.lineTo(...P(x1 + 0.004, y, zt)); ctx.stroke(); }
+    if (L >= 2) {
+      box(ctx, x0 - 0.02, y1 + 0.005, x1 + 0.02, y1 + 0.11, 0, 2.6, '#8a6238');
+      box(ctx, x1 + 0.005, y0 - 0.02, x1 + 0.11, y1 + 0.11, 0, 2.6, '#7a5129');
+    }
+    for (let k = 0; k < 3; k++) {
+      const a = D.dx + (D.dw * k) / 3 + 0.004; const b = D.dx + (D.dw * (k + 1)) / 3 - 0.004;
+      poly(ctx, [P(a, y1 + 0.006, D.dh + 0.5), P(b, y1 + 0.006, D.dh + 0.5), P(b, y1 + 0.006, D.dh - 4), P(a, y1 + 0.006, D.dh - 4)], '#2f3f6b');
+    }
+    const [mx, my] = P(D.dx + D.dw / 2, y1 + 0.007, D.dh - 1.6);
+    ctx.fillStyle = '#f2ede1'; ctx.beginPath(); ctx.arc(mx, my, 1.1, 0, Math.PI * 2); ctx.fill();
+  } else if (st.roof === 'dome') { // Perzië: tegelboog rond de deur en een windtoren
+    const fx0 = D.dx - 0.05; const fx1 = D.dx + D.dw + 0.05; const zt = D.dh + 6;
+    quadL(ctx, y1 + 0.006, fx0, fx0 + 0.035, 0, zt, st.trim);
+    quadL(ctx, y1 + 0.006, fx1 - 0.035, fx1, 0, zt, st.trim);
+    quadL(ctx, y1 + 0.006, fx0, fx1, zt - 2, zt, st.trim);
+    quadL(ctx, y1 + 0.007, fx0, fx1, zt - 0.6, zt, st.accent);
+    const a = P(D.dx, y1 + 0.007, D.dh); const b = P(D.dx + D.dw / 2, y1 + 0.007, D.dh + 4.2); const c = P(D.dx + D.dw, y1 + 0.007, D.dh);
+    ctx.fillStyle = '#1b2a3a'; ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(a[0], b[1] + 1, ...b); ctx.quadraticCurveTo(c[0], b[1] + 1, ...c); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = st.accent; ctx.lineWidth = 0.5; ctx.stroke();
+    if (L >= 2) {
+      const bx0 = x1 - 0.14; const by0 = y0 + 0.02; const top = h + 13;
+      box(ctx, bx0, by0, bx0 + 0.1, by0 + 0.1, h, top, C.plaster);
+      for (const k of [0.25, 0.6]) quadL(ctx, by0 + 0.101, bx0 + 0.015 + k * 0.05, bx0 + 0.03 + k * 0.05, top - 7, top - 1.5, '#2b2620');
+      box(ctx, bx0 - 0.01, by0 - 0.01, bx0 + 0.11, by0 + 0.11, top, top + 1.5, st.trim, EDGE, 'none');
+    }
+  }
 }
 
 function farm(ctx, L) {
