@@ -1,17 +1,18 @@
 import { json, readJson, int, wrapDb, GameError } from './http.js';
 import { vapidKeys, validPushEndpoint, notifyDue, notifyPlayer } from './push.js';
 import { botTick, ensureBots, BOT_MAX } from './bots.js';
+import { relation, payRansom, vassalShare } from './vassal.js';
 import {
   hashPassword, newSalt, safeEqual, createSession, sessionCookie, clearCookie, getSessionPlayer,
   destroySession, validateName, validatePassword,
 } from './auth.js';
 import {
-  getWorld, phaseOf, worldTimes, peaceEnd, peaceBlock, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop,
+  getWorld, phaseOf, worldTimes, peaceEnd, peaceBlock, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop, awayInfo,
   battleView, setBattleMode, battleOrder, myBattles, startPractice,
   freshCampState,
 } from './game.js';
 import {
-  newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary,
+  newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
   townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder, doFieldSplit,
   doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish,
 } from '../../public/shared/sim.js';
@@ -210,6 +211,9 @@ route('GET', '/state', { auth: true }, async (ctx) => {
   const lastWorld = await db.prepare('SELECT MAX(id) AS last FROM messages WHERE channel = ?').bind('world').first();
   const lastTeam = await db.prepare('SELECT MAX(id) AS last FROM messages WHERE channel = ?').bind(`team:${player.team_id}`).first();
   const battles = await myBattles(db, player.id, now);
+  const vassals = (await db.prepare(
+    'SELECT v.town_id, v.until, v.next_tribute, t.name, t.x, t.y, p.name AS pname FROM vassals v JOIN towns t ON t.id = v.town_id JOIN players p ON p.id = v.player_id WHERE v.lord_player = ?',
+  ).bind(player.id).all()).results.map((r) => ({ townId: r.town_id, town: r.name, player: r.pname, x: r.x, y: r.y, until: r.until, nextTribute: r.next_tribute }));
   let away = 0;
   for (const m of marches) if (m.own && m.units) away += unitsPop(m.units);
   for (const s of mySupport) away += unitsPop(s.units);
@@ -218,7 +222,7 @@ route('GET', '/state', { auth: true }, async (ctx) => {
     me: { id: player.id, name: player.name, teamId: player.team_id, killPts: player.kill_pts, peaceEnd: peaceEnd(world, player.created_at) },
     team: team && { id: team.id, name: team.name, color: team.color },
     town: { id: townRow.id, name: townRow.name, x: townRow.x, y: townRow.y, state },
-    awayPop: away, marches, supportHere, mySupport, unseenReports: unseen.c, battles,
+    awayPop: away, marches, supportHere, mySupport, unseenReports: unseen.c, battles, vassals,
     chat: { world: lastWorld.last || 0, team: lastTeam.last || 0 },
   });
 });
@@ -272,16 +276,28 @@ route('GET', '/team', { auth: true }, async ({ db, world, player, now }) => {
 route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
   const t = gameTime(world, now);
   const rows = (await db.prepare(
-    'SELECT t.id, t.state, t.name AS town, p.name, p.team_id, p.kill_pts, p.bot FROM towns t JOIN players p ON p.id = t.player_id',
+    'SELECT t.id, t.state, t.name AS town, p.id AS pid, p.name, p.team_id, p.kill_pts, p.bot FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results;
   const teams = (await db.prepare('SELECT id, name, color FROM teams').all()).results;
+  const vrows = (await db.prepare('SELECT player_id, lord_player FROM vassals').all()).results;
   const players = rows.map((r) => {
     const s = JSON.parse(r.state);
     ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     const build = townScore(s);
-    return { name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts, bot: !!r.bot, botTier: r.bot && s.bot ? s.bot.tier || null : null };
-  }).sort((a, b) => b.score - a.score);
+    return { id: r.pid, name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts, bot: !!r.bot, botTier: r.bot && s.bot ? s.bot.tier || null : null };
+  });
+  // heren krijgen een deel van de punten van hun vazallen
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const share = vassalShare(vrows, (id) => (byId.get(id) ? byId.get(id).build : 0));
+  for (const p of players) {
+    p.vassalPts = share[p.id] || 0; p.score += p.vassalPts;
+    p.vassals = vrows.filter((v) => v.lord_player === p.id).length;
+    const lord = vrows.find((v) => v.player_id === p.id);
+    p.lord = lord && byId.get(lord.lord_player) ? byId.get(lord.lord_player).name : null;
+  }
+  players.sort((a, b) => b.score - a.score);
+  for (const p of players) delete p.id;
   const teamScores = teams.map((tm) => ({
     ...tm,
     score: players.filter((p) => p.teamId === tm.id).reduce((a, p) => a + p.score, 0),
@@ -322,8 +338,19 @@ route('POST', '/upgrade', { auth: true, active: true }, async (ctx) => {
 
 route('POST', '/train', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
-  const away = await awayPop(ctx.db, ctx.player.id);
-  return townAction(ctx, (s) => doTrain(s, String(body.unit), int(body.count), ctx.now, ctx.world.speed, away));
+  const away = await awayInfo(ctx.db, ctx.player.id);
+  return townAction(ctx, (s) => doTrain(s, String(body.unit), int(body.count), ctx.now, ctx.world.speed, away.pop, away.nobles));
+});
+
+route('POST', '/research', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  return townAction(ctx, (s) => doResearch(s, String(body.id), ctx.now, ctx.world.speed));
+});
+
+// vazal: losgeld betalen en meteen vrij zijn
+route('POST', '/vassal/ransom', { auth: true, active: true }, async (ctx) => {
+  const cost = await payRansom(ctx.db, ctx.world, ctx.player, ctx.now);
+  return json({ ok: true, cost });
 });
 
 route('POST', '/villagers', { auth: true, active: true }, async (ctx) => {
@@ -407,7 +434,8 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
   const kind = String(body.kind);
   if (!['attack', 'scout', 'support', 'trade'].includes(kind)) throw new GameError('Ongeldige opdracht.');
   const { warEnd } = worldTimes(world);
-  const home = await db.prepare('SELECT id, x, y FROM towns WHERE player_id = ?').bind(player.id).first();
+  const home = await db.prepare('SELECT id, x, y, state FROM towns WHERE player_id = ?').bind(player.id).first();
+  const homeTech = JSON.parse(home.state).tech || null;
 
   let target;
   let targetTeam = 0;
@@ -416,13 +444,16 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
     if (kind !== 'attack' && kind !== 'scout') throw new GameError('Rovers kan je enkel aanvallen of verkennen.');
     target = await db.prepare('SELECT id, x, y FROM camps WHERE id = ?').bind(int(body.targetId)).first();
   } else {
-    target = await db.prepare('SELECT t.id, t.x, t.y, p.team_id, p.created_at FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
+    target = await db.prepare('SELECT t.id, t.x, t.y, t.player_id, p.team_id, p.created_at FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
       .bind(int(body.targetId)).first();
     if (target) targetTeam = target.team_id;
   }
   if (!target) throw new GameError('Doelwit niet gevonden.');
   if (tkind === 'town' && target.id === home.id) throw new GameError('Dat is je eigen stad.');
-  const ally = tkind === 'town' && targetTeam === player.team_id;
+  // heer en vazal vallen elkaar niet aan, maar mogen elkaar wel helpen
+  const rel = tkind === 'town' ? await relation(db, player.id, target.player_id) : null;
+  const ally = tkind === 'town' && (targetTeam === player.team_id || !!rel);
+  if ((kind === 'attack' || kind === 'scout') && rel) throw new GameError(rel === 'lord' ? 'Dit is je vazal: die val je niet aan.' : 'Je kan je heer niet aanvallen. Koop je vrij of laat een clanlid je bevrijden.');
   if ((kind === 'attack' || kind === 'scout') && ally) throw new GameError('Je kan geen bondgenoten aanvallen.');
   if ((kind === 'support' || kind === 'trade') && !ally) throw new GameError('Dat kan enkel bij bondgenoten.');
 
@@ -436,7 +467,8 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
     if (!countUnits(units)) throw new GameError('Kies troepen.');
     if (kind === 'scout' && Object.keys(units).some((k) => k !== 'scout')) throw new GameError('Op verkenning stuur je enkel verkenners.');
   }
-  const speed = kind === 'trade' ? MARKET.merchantSpeed : slowestSpeed(units);
+  if (units.noble && kind !== 'attack' && kind !== 'support') throw new GameError('Een edelman gaat enkel mee met een aanval of als versterking.');
+  const speed = kind === 'trade' ? MARKET.merchantSpeed : slowestSpeed(units, homeTech);
   const dur = travelMs(world, home, target, speed);
   if ((kind === 'attack' || kind === 'scout') && now + dur > warEnd) throw new GameError('Je leger zou pas na het einde van het seizoen aankomen.');
   if ((kind === 'attack' || kind === 'scout') && tkind === 'town') {
@@ -639,7 +671,7 @@ route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const size = WORLD_SIZE;
   const terrain = generateTerrain(seed, size);
   const camps = generateCamps(seed, size, terrain, CAMP_EXTRA);
-  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs']
+  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs', 'vassals']
     .map((tb) => db.prepare(`DELETE FROM ${tb}`));
   stmts.push(db.prepare("DELETE FROM config WHERE k LIKE 'clan:%' OR k LIKE 'prey:%'")); // notities van de bots
   stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at, bots, bot_level) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
