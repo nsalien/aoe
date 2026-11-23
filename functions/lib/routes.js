@@ -1,5 +1,6 @@
 import { json, readJson, int, wrapDb, GameError } from './http.js';
 import { vapidKeys, validPushEndpoint, notifyDue, notifyPlayer } from './push.js';
+import { botTick, ensureBots, BOT_MAX } from './bots.js';
 import {
   hashPassword, newSalt, safeEqual, createSession, sessionCookie, clearCookie, getSessionPlayer,
   destroySession, validateName, validatePassword,
@@ -59,7 +60,13 @@ export async function handle(context) {
       if (phase === 'lobby') throw new GameError('Het spel is nog niet begonnen.');
       if (phase === 'ended') throw new GameError('Het seizoen is afgelopen.');
     }
-    return await r.fn(ctx);
+    const res = await r.fn(ctx);
+    // computerspelers: bij gewone verzoeken komt telkens één bot aan de beurt (na het antwoord, binnen de query-limiet)
+    if (ctx.world && r.process !== false && db.ctx.count <= 18) {
+      const bt = botTick(db, ctx.world, now).catch((e) => console.error('bot', e && e.stack));
+      if (context.waitUntil) context.waitUntil(bt); else await bt;
+    }
+    return res;
   } catch (e) {
     if (e instanceof GameError) return json({ error: e.message }, e.status || 400);
     console.error(e && e.stack);
@@ -102,21 +109,24 @@ route('POST', '/register', { process: false }, async ({ request, db, world, now 
   if (await db.prepare('SELECT id FROM players WHERE name = ?').bind(name).first()) throw new GameError('Die naam is al bezet.');
 
   // automatisch koppelen: vul eerst een team dat al spelers heeft, maak anders een nieuw team
-  const teams = (await db.prepare(
-    'SELECT t.id, t.slot, COUNT(p.id) AS c FROM teams t LEFT JOIN players p ON p.team_id = t.id GROUP BY t.id ORDER BY t.slot',
+  const all = (await db.prepare(
+    'SELECT t.id, t.slot, COUNT(p.id) AS c, COALESCE(SUM(p.bot), 0) AS b FROM teams t LEFT JOIN players p ON p.team_id = t.id GROUP BY t.id ORDER BY t.slot',
   ).all()).results;
+  // clans van computerspelers zijn enkel voor bots
+  const teams = all.filter((t) => !t.b);
   let team = null;
   const open = teams.filter((t) => t.c < world.team_size);
   if (open.length) {
     const most = Math.max(...open.map((t) => t.c));
     const cand = open.filter((t) => t.c === most);
     team = cand[Math.floor(Math.random() * cand.length)];
-  } else if (teams.length < MAX_TEAMS) {
-    const slot = teams.length;
+  } else if (all.length < MAX_TEAMS) {
+    const slot = all.length;
     const ins = await db.prepare('INSERT INTO teams (slot, name, color) VALUES (?, ?, ?)')
       .bind(slot, TEAM_NAMES[slot], TEAM_COLORS[slot]).run();
     team = { id: ins.meta.last_row_id, slot, c: 0 };
   } else {
+    if (!teams.length) throw new GameError('De wereld is vol.');
     const least = Math.min(...teams.map((t) => t.c));
     team = teams.find((t) => t.c === least);
   }
@@ -216,14 +226,14 @@ route('GET', '/state', { auth: true }, async (ctx) => {
 route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
   const t = gameTime(world, now);
   const towns = (await db.prepare(
-    'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.team_id, p.last_seen, p.created_at FROM towns t JOIN players p ON p.id = t.player_id',
+    'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.team_id, p.last_seen, p.created_at, p.bot FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results.map((r) => {
     const s = JSON.parse(r.state);
     ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     return {
       id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id, civ: s.civ,
-      online: now - r.last_seen < 5 * 60000, peaceEnd: peaceEnd(world, r.created_at), ...publicSummary(s),
+      online: !r.bot && now - r.last_seen < 5 * 60000, bot: !!r.bot, peaceEnd: peaceEnd(world, r.created_at), ...publicSummary(s),
     };
   });
   const camps = (await db.prepare('SELECT id, x, y, level, state FROM camps').all()).results.map((c) => {
@@ -261,7 +271,7 @@ route('GET', '/team', { auth: true }, async ({ db, world, player, now }) => {
 route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
   const t = gameTime(world, now);
   const rows = (await db.prepare(
-    'SELECT t.id, t.state, t.name AS town, p.name, p.team_id, p.kill_pts FROM towns t JOIN players p ON p.id = t.player_id',
+    'SELECT t.id, t.state, t.name AS town, p.name, p.team_id, p.kill_pts, p.bot FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results;
   const teams = (await db.prepare('SELECT id, name, color FROM teams').all()).results;
   const players = rows.map((r) => {
@@ -269,7 +279,7 @@ route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
     ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     const build = townScore(s);
-    return { name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts };
+    return { name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts, bot: !!r.bot };
   }).sort((a, b) => b.score - a.score);
   const teamScores = teams.map((tm) => ({
     ...tm,
@@ -611,6 +621,9 @@ function readTimes(body, w) {
   if (body.speed !== undefined && body.speed !== '') out.speed = Math.min(1000, Math.max(0.1, Number(body.speed)));
   if (body.teamSize !== undefined && body.teamSize !== '') out.team_size = Math.min(8, Math.max(1, int(body.teamSize)));
   if (body.joinCode !== undefined) out.join_code = String(body.joinCode).trim() || null;
+  // computerspelers: aantal en niveau (1 makkelijk, 2 normaal, 3 sterk)
+  if (body.bots !== undefined && body.bots !== '') out.bots = Math.max(0, Math.min(BOT_MAX, int(body.bots)));
+  if (body.botLevel !== undefined && body.botLevel !== '') out.bot_level = Math.max(1, Math.min(3, int(body.botLevel)));
   if ('prep_ms' in out && !(out.prep_ms >= 0)) throw new GameError('Ongeldige waarde voor de vrede.');
   for (const k of ['war_ms', 'speed']) if (k in out && !(out[k] > 0)) throw new GameError(`Ongeldige waarde voor ${k}.`);
   return { ...w, ...out };
@@ -619,7 +632,7 @@ function readTimes(body, w) {
 route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const body = await readJson(request);
   const w = readTimes(body, {
-    start_at: now, prep_ms: 24 * 3600000, war_ms: 28 * 86400000, speed: 1, team_size: 2, join_code: null,
+    start_at: now, prep_ms: 24 * 3600000, war_ms: 28 * 86400000, speed: 1, team_size: 2, join_code: null, bots: 4, bot_level: 2,
   });
   const seed = int(body.seed) || Math.floor(Math.random() * 1e9);
   const size = WORLD_SIZE;
@@ -627,13 +640,16 @@ route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const camps = generateCamps(seed, size, terrain, CAMP_EXTRA);
   const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs']
     .map((tb) => db.prepare(`DELETE FROM ${tb}`));
-  stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(seed, size, w.start_at, w.prep_ms, w.war_ms, w.speed, w.team_size, w.join_code, now));
+  stmts.push(db.prepare("DELETE FROM config WHERE k LIKE 'clan:%' OR k LIKE 'prey:%'")); // notities van de bots
+  stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at, bots, bot_level) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(seed, size, w.start_at, w.prep_ms, w.war_ms, w.speed, w.team_size, w.join_code, now, w.bots, w.bot_level));
   for (const c of camps) {
     stmts.push(db.prepare('INSERT INTO camps (x, y, level, state) VALUES (?, ?, ?, ?)')
       .bind(c.x, c.y, c.level, JSON.stringify(freshCampState(c.level))));
   }
   await db.batch(stmts);
+  // de computerspelers meteen aanmaken (ze halen de tijd sinds de start zelf in)
+  await ensureBots(db, await getWorld(db), now, 5);
   return json({ ok: true, seed, camps: camps.length });
 });
 
@@ -642,15 +658,16 @@ route('POST', '/admin/update', { admin: true }, async ({ db, request, now }) => 
   const cur = await getWorld(db);
   if (!cur) throw new GameError('Er is nog geen wereld.');
   const w = readTimes(body, cur);
-  await db.prepare('UPDATE world SET start_at = ?, prep_ms = ?, war_ms = ?, speed = ?, team_size = ?, join_code = ? WHERE id = 1')
-    .bind(w.start_at, w.prep_ms, w.war_ms, w.speed, w.team_size, w.join_code).run();
+  await db.prepare('UPDATE world SET start_at = ?, prep_ms = ?, war_ms = ?, speed = ?, team_size = ?, join_code = ?, bots = ?, bot_level = ? WHERE id = 1')
+    .bind(w.start_at, w.prep_ms, w.war_ms, w.speed, w.team_size, w.join_code, w.bots ?? 0, w.bot_level ?? 2).run();
+  await ensureBots(db, await getWorld(db), now, 5);
   return json({ ok: true, world: worldInfo(w, now) });
 });
 
 route('GET', '/admin/status', { admin: true }, async ({ db, now }) => {
   const w = await getWorld(db);
   const players = (await db.prepare(
-    'SELECT p.id, p.name, p.team_id, p.last_seen, p.kill_pts, t.name AS team FROM players p LEFT JOIN teams t ON t.id = p.team_id ORDER BY p.team_id',
+    'SELECT p.id, p.name, p.team_id, p.last_seen, p.kill_pts, p.bot, t.name AS team FROM players p LEFT JOIN teams t ON t.id = p.team_id ORDER BY p.team_id',
   ).all()).results;
   const marches = await db.prepare('SELECT COUNT(*) AS c FROM marches').first();
   return json({ world: w && { ...w, ...worldInfo(w, now), join_code: w.join_code }, players, marches: marches.c, now });
