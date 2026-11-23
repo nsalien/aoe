@@ -518,7 +518,6 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
   }
   deco.sort((a, b) => a.gx + a.gy - (b.gx + b.gy));
   const TS = trees();
-  window.__treeCount = deco.length;
   const vis = deco.filter((d) => !(d.h > 3 && hidden(d.gx, d.gy, d.h)));
   // eerst alle schaduwen van de bomen in één keer, dan de bomen van achter naar voor
   ctx.fillStyle = 'rgba(12,28,8,0.26)';
