@@ -40,9 +40,11 @@ Het spel draait volledig op het **gratis plan van Cloudflare Pages + D1** — er
   (die groeit ook mee met elk tijdperk), ontgin goudaders en rotswanden, jaag op everzwijnen en verwoest het
   barbarenkamp dat af en toe je stad overvalt.
 - **Economie**: voedsel, hout, steen en goud. Dorpelingen werken op werkplekken (boerderijen, kampen, mijnen).
-  Opslag, bevolking (huizen) en 4 tijdperken.
-- **14 gebouwen** met elk meerdere niveaus, **7 soorten troepen** (speerdrager, zwaardvechter, boogschutter,
-  verkenner, ruiter, ridder, stormram) met sterktes en zwaktes.
+  Opslag, bevolking (huizen) en **5 tijdperken** (Vuursteen, Brons, IJzer, Gilden, Kroon): elk tijdperk een niveau meer.
+- **20 gebouwen** met elk meerdere niveaus (o.a. molen, Academie, gildehuis, bouwloods, Adelshof, kathedraal),
+  **8 soorten troepen** (speerdrager, zwaardvechter, boogschutter, verkenner, ruiter, ridder, stormram, edelman) met sterktes en zwaktes.
+- **Academie**: onderzoek (schildmuur, vuurpijlen, lansen, kokende pek, ...) dat je ook aan je troepen ziet; de smidse bepaalt hun harnas.
+- **Edelmannen en vazallen**: verlaag met edelmannen de trouw van een stad tot ze 3 dagen je vazal wordt (schatting, punten).
 - **Gevechten** met muren, torens, smidse-bonussen, plunderen, verkennen, rammen die muren en monumenten slopen.
 - **Meldingen op je gsm**: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt) een melding, met in het spel
   een aftelling waarbij je al kan kiezen: zelf besturen of automatisch.
@@ -155,8 +157,8 @@ Alle cijfers (kosten, bouwtijden, productie, troepen, kampen…) staan op één 
 [`public/shared/rules.js`](public/shared/rules.js). Die code wordt zowel door de server als door de browser gebruikt,
 dus een aanpassing geldt meteen overal. Voer daarna `npm test` uit.
 
-Indicatie bij snelheid 1 voor een zeer actieve speler die enkel op economie speelt: tijdperk 2 na ±1,5 dag,
-tijdperk 3 na ±3,5 dagen, tijdperk 4 na ±7,5 dagen, en een volledig monument rond dag 14.
+Indicatie bij snelheid 1 voor een zeer actieve speler: tijdperk 2 na ±1 dag, tijdperk 3 na ±3 dagen, tijdperk 4 (Gilden)
+na ±6,5 dagen en tijdperk 5 (Kroon) na ±11 dagen.
 Wie ook een leger opbouwt of minder vaak inlogt, doet er langer over. Na 24 uur vrede kan je aangevallen worden: bouw dus tijdig een muur en een leger.
 
 ## Hoe zit het in elkaar?

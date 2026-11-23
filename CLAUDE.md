@@ -40,6 +40,20 @@ Daarom:
 ## Waar staat wat
 
 - `public/shared/rules.js` — **alle** spelregels en balans (kosten, tijden, troepen, kampen). Gedeeld door server en browser.
+  **5 tijdperken** (`AGES`, `MAX_AGE`): niveau N van een gebouw vraagt tijdperk N (`levelAge`, of `levelAges` per gebouw).
+  Nieuwe gebouwen: molen en gildehuis (`boost` = productiebonus), bouwloods (`builders`, `buildSpeed` → `maxBuilds`/`buildTime`
+  in `sim.js`; gebruik altijd `buildTime(s, ...)`, niet `levelTime`, voor bouwen), Academie (`research`), Adelshof (edelman),
+  kathedraal (`loyalty`, `score`). **Onderzoek**: `TECHS` (4 soorten × 3 rijen, `techAt`, `techTier`), in de stad `s.tech` en
+  `s.research` (`doResearch`/`checkResearch`, klaar in `advance()`); in de automatische slag via `auto` → `techMods` (`battle.js`:
+  `attTech`/`defTech`), in de live slag via `st.tk` en `TK()` (`fieldbattle.js`; schildmuur, vuurpijlen, taxusboog, pijlenregen,
+  hoefijzers `reg.sp`, lansen, flankrit, krijgsdrill `moLoss`, strijdkreet, kokende pek `pourPitch` → `g.pt`, torenkruisbogen,
+  ijzerbeslag). Hoefijzers versnellen ook marsen (`slowestSpeed(units, tech)`).
+- **Edelmannen en vazallen** (`functions/lib/vassal.js`, tabel `vassals`, migratie `0007`): trouw `s.loy` (ontbreekt = 100,
+  herstelt in `accrue`, niet als vazal), `LOYALTY`/`VASSAL` in `rules.js`. `attackTown` roept `applyNobles` op (−25 per
+  levende edelman, `nobleBlock`: al vazal, beschermd `s.loyShield`, < 45% van je punten, max. 2 vazallen); bij 0 `s.vas` +
+  rij in `vassals`. `processVassals` (in `processDue`, ≤ 2 per verzoek) stuurt schatting (`kind = 'tribute'`) en zet vazallen
+  na 3 dagen vrij; `liberateByAttack` na een gewonnen aanval op de heer door zijn clan; `/vassal/ransom`. Heer en vazal
+  vallen elkaar niet aan maar mogen elkaar helpen (`relation` in `/march`). Ranglijst: `vassalShare` (20% van de punten).
 - `public/shared/sim.js` — simulatie van één stad + acties (bouwen, trainen, vondsten oogsten, …). Vondsten verschijnen
   deterministisch in `advance()` (zelfde uitkomst in browser en server). `battle.js` — gevechten. `worldgen.js` — kaart uit seed.
 - `public/shared/territory.js` — het eigen gebied rond een stad (bomen, meren, bronnen, everzwijnen, barbarenkamp), puur uit
@@ -121,6 +135,9 @@ Daarom:
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.
 - `public/js/art.js` — procedurele tekeningen (gebouwen, mensen, bomen; geen afbeeldingsbestanden).
+- `public/js/troops.js` — uitzicht van de soldaten (`soldierOpts`, `lookOf`): uitrusting volgens de smidse (`gear`, `plate`)
+  en details van het onderzoek (`kit`: S schild, P pluim, G goud, F vuurpijlen, L lange boog, Q twee pijlkokers, B kleed,
+  N lans, H paardenpluim). Nieuwe opties ook toevoegen aan `FIG_KEYS` in `sprite3d.js` en aan de sleutels in `figures.js`.
 - **3D-look** (zoals vooraf gerenderde sprites in klassieke RTS-spellen): `render3d.js` is een kleine straalvolger
   (vormen: convexe veelvlakken, cilinders, kegels, ellipsoïden, capsules; procedurele materialen; zon, slagschaduw,
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
