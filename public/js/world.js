@@ -394,7 +394,7 @@ export class WorldView {
     const sel = this.selected && this.selected.kind === 'town' && this.selected.obj.id === tw.id;
     if (this.cam.zoom < 0.6 && !mine && !sel) return;
     const peace = now < (tw.peaceEnd || 0) ? ' · vrede' : '';
-    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player}${tw.bot ? ' (computer)' : ''} · ${tw.score} ptn${peace}${tw.online ? ' · ●' : ''}` : null;
+    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player}${tw.bot ? ` (computer${tw.botTier ? `, ${tw.botTier}` : ''})` : ''} · ${tw.score} ptn${peace}${tw.online ? ' · ●' : ''}` : null;
     this.label(ctx, s.x, s.y, tw.name, sub, col, mine);
   }
 
