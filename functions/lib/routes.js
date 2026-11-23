@@ -525,13 +525,14 @@ route('POST', '/march/mode', { auth: true, active: true }, async (ctx) => {
 // ---------- veldslagen (zelf besturen of automatisch) ----------
 
 route('GET', '/battle', { auth: true, process: false }, async ({ db, world, player, now, url }) => {
-  return json({ now, battle: await battleView(db, world, int(url.searchParams.get('id')), player.id, now) });
+  const have = url.searchParams.get('have');
+  return json({ now, battle: await battleView(db, world, int(url.searchParams.get('id')), player.id, now, have ? Number(have) : null) });
 });
 
 route('POST', '/battle/mode', { auth: true, process: false }, async (ctx) => {
   const { db, world, player, now } = ctx;
   const body = await readJson(ctx.request);
-  return json({ now, battle: await setBattleMode(db, world, int(body.id), player.id, String(body.mode || ''), now) });
+  return json({ now, battle: await setBattleMode(db, world, int(body.id), player.id, String(body.mode || ''), now, body.have != null ? Number(body.have) : null) });
 });
 
 // oefenslag: meteen een slag van 30 tegen 30 tegen de computer (zonder gevolgen)
