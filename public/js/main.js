@@ -187,7 +187,8 @@ function showAuth(msg) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   let html = msg || '';
   if (w && !msg) {
-    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>.`, prep: `${UI.icon('dove')} Vredestijd tot <b>${f(w.prepEnd)}</b>.`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>!`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
+    const peace = `${UI.icon('dove')} Nieuwe spelers krijgen ${UI.peaceText(w.peaceMs)} vrede.`;
+    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>. ${peace}`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>! ${peace}`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
     html = `${phase}<br>${app.info.players} heerser(s) in de vallei · teams van ${w.teamSize}`;
     $('#joinCodeRow').hidden = !w.needsCode;
   }
@@ -289,12 +290,12 @@ function applyState(data, first = false) {
   if (fieldQueue.length) setBaseState(data.town.state);
   const off = data.now - Date.now();
   if (first || Math.abs(off - app.offset) > 1500) app.offset = off;
-  app.canAct = data.world.phase === 'prep' || data.world.phase === 'war';
+  app.canAct = data.world.phase === 'war';
+  app.inPeace = app.now() < data.me.peaceEnd;
   town.setTown(data.town.id, data.team.color);
   computeLive(true);
   world.setMarches(data.marches);
   if (prevPhase && prevPhase !== data.world.phase) {
-    if (data.world.phase === 'war') toast('De oorlog is begonnen! Je kan nu vijandelijke steden aanvallen.', 'err', 'swords');
     if (data.world.phase === 'ended') { toast('Het seizoen is voorbij!', '', 'flag'); openModal('leaderboard'); }
   }
   // nieuwe rapporten
@@ -483,7 +484,12 @@ function tick() {
   renderAlert();
   const w = app.data.world;
   const now = app.now();
-  if ((w.phase === 'prep' && now >= w.prepEnd) || (w.phase === 'war' && now >= w.warEnd) || (w.phase === 'lobby' && now >= w.startAt)) {
+  if (app.inPeace && now >= app.data.me.peaceEnd) {
+    app.inPeace = false;
+    toast('Je vrede is voorbij! Je kan nu vijandelijke steden aanvallen, en zij jou.', 'err', 'swords');
+    renderAll();
+  }
+  if ((w.phase === 'war' && now >= w.warEnd) || (w.phase === 'lobby' && now >= w.startAt)) {
     w.phase = 'x';
     refresh();
   }
@@ -551,7 +557,7 @@ function renderResBar() {
 }
 
 function renderPhase() {
-  const p = UI.phaseHtml(app.data.world, app.now());
+  const p = UI.phaseHtml(app.data.world, app.now(), app.data.me.peaceEnd);
   const el = $('#phase');
   el.className = `phase ${p.cls}`;
   setHTML(el, p.html);
@@ -964,7 +970,7 @@ const sendCtx = { target: null, kind: null };
 
 function townTarget(id) {
   const t = app.map && app.map.towns.find((x) => x.id === id);
-  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y };
+  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y, peaceEnd: t.peaceEnd };
 }
 
 function openSend(target, kind) {
@@ -1001,7 +1007,7 @@ async function openModal(type, arg) {
   const body = $('#modalBody');
   $('#modal').hidden = false;
   clearInterval(chatTimer);
-  if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world);
+  if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world, app.data.me.peaceEnd);
   if (type === 'send') {
     body.innerHTML = UI.sendHtml(app, app.live, sendCtx.target, sendCtx.kind);
     updateSendSummary();
@@ -1226,7 +1232,7 @@ const actions = {
     const o = sel.obj;
     const target = sel.kind === 'camp'
       ? { kind: 'camp', id: o.id, name: `Roverskamp (niveau ${o.level})`, x: o.x, y: o.y }
-      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y };
+      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd };
     openSend(target, el.dataset.kind);
   },
   async sendTo(el) {

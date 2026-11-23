@@ -147,9 +147,15 @@ export function resBarHtml(live, speed, bumps = []) {
     </div>`;
 }
 
-export function phaseHtml(w, now) {
+// '24 uur', '30 min', …
+export function peaceText(ms) {
+  const m = Math.round(ms / 60000);
+  return m >= 60 && m % 60 === 0 ? `${m / 60} uur` : m >= 60 ? `${(m / 60).toFixed(1).replace('.', ',')} uur` : `${m} min`;
+}
+
+export function phaseHtml(w, now, peaceEnd) {
   if (w.phase === 'lobby') return { cls: 'lobby', html: `${icon('hourglass')} Start over <span class="timer" data-end="${w.startAt}"></span>` };
-  if (w.phase === 'prep') return { cls: 'prep', html: `${icon('dove')} Vredestijd · nog <span class="timer" data-end="${w.prepEnd}"></span>` };
+  if (w.phase === 'war' && now < peaceEnd) return { cls: 'prep', html: `${icon('dove')} Vrede · nog <span class="timer" data-end="${peaceEnd}"></span>` };
   if (w.phase === 'war') return { cls: 'war', html: `${icon('swords')} Oorlog! · nog <span class="timer" data-end="${w.warEnd}"></span>` };
   return { cls: 'ended', html: `${icon('flag')} Seizoen voorbij` };
 }
@@ -610,7 +616,7 @@ export function worldPanelHtml(app, sel) {
     const u = campUnits(c.level);
     const loot = campLoot(c.level);
     return `<div class="ph"><div><h2>Roverskamp</h2><div class="lvl">Niveau ${c.level} · positie (${c.x}, ${c.y}) · ${dist.toFixed(1)} tegels</div></div></div>
-      <p class="desc">Rovers plunderen de vallei. Versla ze voor buit en punten — ook tijdens de vredestijd! Na een aanval herstelt het kamp zich na een tijdje.</p>
+      <p class="desc">Rovers plunderen de vallei. Versla ze voor buit en punten — ook tijdens je vrede! Na een aanval herstelt het kamp zich na een tijdje.</p>
       ${targetMarchesHtml(app, 'camp', c.id)}
       ${c.plundered ? `<div class="card"><b>Verlaten.</b> De rovers keren terug over ${timer(c.refreshAt)}.</div>` : ''}
       <div class="card"><h3>Geschatte bezetting (vol kamp)</h3><div class="unitgrid">${Object.keys(u).map((k) => `<div class="ucell"><img src="${unitThumb(k, '#333333')}" alt=""><b>${u[k]}</b>${UNITS[k].name}</div>`).join('')}</div>
@@ -639,10 +645,13 @@ export function worldPanelHtml(app, sel) {
       <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
       <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
   } else {
-    const war = d.world.phase === 'war';
-    html += `${war ? '' : `<p class="req">Vredestijd: spelers aanvallen kan pas vanaf de oorlogsweek (over ${timer(d.world.prepEnd)}).</p>`}
-      <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${war && app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
-      <button class="btn" data-action="send" data-kind="scout" ${war && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
+    // vrede: een aanval mag pas aankomen als de vrede van beide spelers voorbij is
+    const mine = now < d.me.peaceEnd;
+    const theirs = now < (t.peaceEnd || 0);
+    if (mine) html += `<p class="req">${icon('dove')} Je hebt nog vrede (nog ${timer(d.me.peaceEnd)}): tot dan kan je geen spelers aanvallen, en zij jou niet.</p>`;
+    else if (theirs) html += `<p class="req">${icon('dove')} ${esc(t.player)} is net begonnen en heeft nog vrede (nog ${timer(t.peaceEnd)}, tot ${clockTime(t.peaceEnd - (app.offset || 0))}). Je leger mag pas daarna aankomen.</p>`;
+    html += `<div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${!mine && app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
+      <button class="btn" data-action="send" data-kind="scout" ${!mine && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
   }
   return html + `<div class="actions"><button class="btn ghost" data-action="deselect">← Overzicht</button></div>`;
 }
@@ -795,7 +804,11 @@ export function sendSummaryHtml(app, live, target, kind, units, res) {
     html += `<span>${icon('swords')} Aanvalskracht <b>${fmt(p.total)}</b></span><span>${icon('cart')} Draagvermogen <b>${fmt(carryCapacity(units))}</b></span>`;
   }
   if (kind === 'trade') html += `<span>Totaal <b>${fmt(Object.values(res).reduce((a, b) => a + b, 0))}</b></span>`;
-  if ((kind === 'attack' || kind === 'scout') && target.kind === 'town' && app.now() + ms > d.world.warEnd) html += '<span class="req">Komt pas na het einde van het seizoen aan!</span>';
+  if ((kind === 'attack' || kind === 'scout') && target.kind === 'town') {
+    const peace = Math.max(d.me.peaceEnd, target.peaceEnd || 0);
+    if (app.now() + ms > d.world.warEnd) html += '<span class="req">Komt pas na het einde van het seizoen aan!</span>';
+    else if (app.now() + ms < peace) html += `<span class="req">${icon('dove')} Komt aan tijdens de vrede (die eindigt ${clockTime(peace - (app.offset || 0))}): dat mag niet.</span>`;
+  }
   return html;
 }
 
@@ -905,10 +918,11 @@ export function leaderboardHtml(app, lb) {
 }
 
 // ---------- hulp ----------
-export function helpHtml(w) {
+export function helpHtml(w, peaceEnd) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const pt = peaceText(w.peaceMs);
   return `<div class="help"><h2>${icon('book')} Hoe speel je?</h2>
-    <div class="timeline"><div class="tp">${icon('dove')} Vredestijd<br><small>${f(w.startAt)}</small></div><div class="tw">${icon('swords')} Oorlog<br><small>${f(w.prepEnd)}</small></div></div>
+    <div class="timeline"><div class="tp">${icon('dove')} Vrede (${pt})<br><small>${f(peaceEnd - w.peaceMs)}</small></div><div class="tw">${icon('swords')} Oorlog<br><small>${f(peaceEnd)}</small></div></div>
     <p>Het seizoen eindigt op <b>${f(w.warEnd)}</b>. Het team met de meeste punten wint.</p>
     <h3>1. Bouw je economie</h3>
     <ul><li>Je <b>dorpelingen</b> verzamelen voedsel, hout, steen en goud — ook als je offline bent.</li>
@@ -943,10 +957,12 @@ export function helpHtml(w) {
     <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
     (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,
     haalt de buit op en gaat daarna terug aan zijn vorige taak. Vondsten blijven liggen tot je ze ophaalt (maximaal 4 tegelijk).</p>
-    <h3>2. Vredestijd (eerste weken)</h3>
-    <p>Spelers kunnen elkaar nog niet aanvallen. Train wel al troepen en versla de <b>roverskampen</b> op de kaart: dat levert buit en punten op. Kampen dicht bij het midden zijn sterker.</p>
-    <h3>3. Oorlogsweek</h3>
-    <p>Nu mag je vijandelijke steden aanvallen en plunderen. Stuur eerst <b>verkenners</b>. Rammen beschadigen muren en monumenten. Een opslagplaats verbergt een deel van je grondstoffen.</p>
+    <h3>2. Vrede (je eerste ${pt})</h3>
+    <p>De eerste ${pt} nadat je begint, kan niemand je aanvallen en kan jij zelf geen spelers aanvallen. Gebruik die tijd om je economie op te bouwen,
+    een muur te zetten en troepen te trainen. <b>Roverskampen</b> mag je altijd aanvallen: dat levert buit en punten op. Kampen dicht bij het midden zijn sterker.</p>
+    <h3>3. Oorlog</h3>
+    <p>Na je vrede mag je op eender welk moment vijandelijke steden aanvallen en plunderen, en zij jou. Wie later begint, krijgt ook ${pt} vrede:
+    zo'n stad toont op de kaart hoelang nog. Stuur eerst <b>verkenners</b>. Rammen beschadigen muren en monumenten. Een opslagplaats verbergt een deel van je grondstoffen.</p>
     <h3>4. Bondgenoten</h3>
     <p>Je wordt automatisch aan een bondgenoot gekoppeld. Stuur elkaar <b>versterking</b> (die verdedigt mee) en <b>karavanen</b> met grondstoffen via de markt. Overleg in de teamchat!</p>
     <h3>Veldslagen: zelf besturen of automatisch</h3>
