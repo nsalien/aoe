@@ -70,10 +70,21 @@ Daarom:
   `inZone`, knop Start = `{ready}`), daarna de slag (vaste tikken van 100 ms, deterministisch, geen Math.random/hypot).
   De aanvaller komt uit de richting van zijn stad (`dir`); de verdediger kan door zijn poorten en zijn voetvolk/schutters op de muur
   (`p1 === 3`). Wie niet zelf bestuurt, wordt door `aiDefend`/`aiAttack` geleid (schutters op de muur aan de kant van de aanval,
-  voetvolk achter de bedreigde poort; rammen op de poort). Winnen: alle verdedigers weg, of het plein (`plaza`) `FB.capMs` houden.
+  voetvolk achter de bedreigde poort; rammen op de poort). Winnen: alle verdedigers weg of op de vlucht, of het plein (`plaza`) `FB.capMs` houden.
+  **Regimenten zoals Rome: Total War** (`st.regs`, soldaat → `u.sq` = regiment-id, `regOf`): per soort hooguit `FB.squad` figuren.
+  Een regiment heeft een formatie (`FORMS`: linie, blok, wig, los, kring; `slotOffsets` enkel met + en ×, geen goniometrie), een richting
+  (`fx, fy`) en een vaandel (`x, y`) dat één route volgt (`regMove`, `advanceAnchor`, wacht op wie achterop raakt); elke soldaat loopt
+  naar zijn plaats rond het vaandel (`oa, ob`) en staat daarna op zijn thuisplek (`hx, hy`, altijd aan dezelfde kant van de muur: `sideAt`).
+  Toestanden: `hold`, `move`, `attack`/`charge` (`eng` = in gevecht), `wall`, `rout`. Groepen stellen zich op in slagorde (`groupPlan`),
+  een getrokken lijn geeft richting en breedte (`fx, fy, w` → `fitWidth`). Schade: formatie, flank/rug en stormloop (`u.mv`) in `damage()`.
+  Moed (`r.mo`): verliezen en flankaanvallen kosten moed, onder `FB.rout` vlucht het regiment naar `rallyPoint` en hergroepeert het na rust.
+  Bevelen gelden voor het hele regiment van de meegestuurde soldaten; vluchtende regimenten luisteren niet.
   Bevelen gaan via `/battle/order` met de tik `at` in een wachtrij (`queueOrder`, `st.q`); de server rekent `FB.delay` achter op de
   klok zodat ze op dezelfde tik uitgevoerd worden als in de browser. De browser (`battleview.js` + `siegeview.js`, een `TownView`
-  met `battleMode`) peilt `/battle?id=` elke `FB.pollMs` (0,6 s), rekent zelf verder en laat verschillen bijglijden (max. 2,5 tegels/s).
+  met `battleMode`) peilt `/battle?id=&have=t0` elke `FB.pollMs` (0,6 s; met `have` laat de server de vaste delen `grid`/`ins`/`meta`
+  weg), rekent zelf verder en laat verschillen bijglijden (max. 2,5 tegels/s). Kiezen gebeurt per regiment (kaartje, vaandel of soldaat),
+  rechts slepen (of de knop Lijn op een gsm) trekt een lijn (`cam.onRightDrag` / `cam.lineMode` in `iso.js`). Verhoog `FB.v` als de
+  toestand van een slag verandert: lopende slagen van een oudere versie worden dan automatisch afgerond.
   Een bevel gaat `FB.lead` tikken na de tik in, zodat de tegenstander het meestal al kent. Aanraakscherm: met troepen gekozen is
   een tik altijd een bevel (andere troep kiezen = kaartje of dubbeltik); muis: links klikken kiest, rechts klikken = bevel. De server rekent per verzoek
   hooguit `FB.maxTicksPerCall` tikken. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af.

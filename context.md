@@ -99,9 +99,14 @@ registratie; oude spelers kregen een vast willekeurig volk.
      eerst een **opstelling** (max. 75 s, tot beide op Start drukken), dan de slag (max. 10 minuten). De aanvaller staat
      aan de kant van zijn eigen stad; de verdediger zet schutters op de muur en voetvolk achter de poort aan die kant.
      Aanvallers kunnen niet door poorten of over muren: rammen (of voetvolk) slaan een bres. Winnen: alle verdedigers
-     verslaan of het plein voor het stadscentrum 30 s houden. Gevechten bewust traag (`FB.pace`): een slag duurt minuten.
-     Kaartjes per eenheid onderaan (1 tik = die eenheid, 2 tikken = alle van die soort), ingedrukt houden = heel leger.
-     Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
+     verslaan of op de vlucht jagen, of het plein voor het stadscentrum 30 s houden. Een slag duurt ±1–3 minuten.
+     **Zoals Rome: Total War** (gevraagd door de gebruiker): troepen vechten in **regimenten** (hooguit 12 figuren per kaartje)
+     met een **vaandel** (soort, aantal, levens, moed). Ze lopen als één blok in **formatie** (Linie, Blok, Wig, Los, Kring),
+     houden hun richting aan en vechten samen. 1 tik = dat regiment, 2 tikken = alle van die soort, ingedrukt = heel leger.
+     Tik op de grond = in formatie erheen (meerdere regimenten in slagorde: voetvolk vooraan, schutters erachter, ruiters op
+     de flanken); **lijn trekken** (rechts slepen, gsm: knop Lijn) = richting en breedte. Flank/rug en stormloop doen meer
+     schade. **Moed**: wie zwaar verliest of omsingeld wordt, vlucht (witte vlag) en hergroepeert na rust; vlucht een heel
+     leger, dan is de slag verloren. Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
 
 **Punten**: opbouwpunten (gebouwen, dorpelingen, troepen; monument +1500/niveau) + gevechtspunten.
 
@@ -120,7 +125,13 @@ registratie; oude spelers kregen een vast willekeurig volk.
 - `npm test` (Node test runner, `tests/game.test.js`, ±60 tests): simulatie, gevechten, gebied, muren/poorten,
   afbreken, belegeringen (determinisme na JSON heen en terug, opstelling, AI, bres), meldingen (met `node:sqlite`).
 - Belegering zonder browser: maak een stad met `newTownState` + muren/poorten en speel `createBattle` + `stepTo` af
-  (beide kanten AI) om duur en verloop te controleren.
+  (beide kanten AI) om duur en verloop te controleren. Handig: snapshots (`units`, `regs`, `walls`) bewaren en ze in Chromium
+  als bovenaanzicht tekenen (raster + stippen per soldaat + vaandel met toestand en moed): zo zie je meteen wie vastloopt.
+  Determinisme: dezelfde slag in het geheugen én telkens via JSON afspelen, met bevelen, en vergelijken.
+- Twee spelers met vertraging: geef beide steden troepen (`json_set` op `$.units`), stuur een aanval via `/api/march`, zet
+  `marches.arrive_at` vlak in de toekomst, laat beide pagina's peilen (`visibilitychange`) en kies 'Zelf besturen'. Meet per beeld
+  de verplaatsing (sprongen) en vergelijk beide schermen. Wereldsnelheid hoog zetten werkt niet: dan overvallen barbaren alles.
+- Een oefenslag blijft 30 s lopen nadat je ze verlaat: gebruik voor elke test een nieuwe speler.
 - Lokaal spel: `npm run db:init:local` en `npx wrangler pages dev --port 8788`.
 - Browsertests met Playwright (scripts in je scratchpad, niet in de repo):
   - `const { chromium } = createRequire(import.meta.url)('playwright')` (ESM-import vindt het niet).
@@ -209,6 +220,15 @@ registratie; oude spelers kregen een vast willekeurig volk.
 25. **Vrede per speler** (gevraagd: "vrede maar 24 uur nadat iemand begint, geen 3 weken; daarna eender wanneer
     aanvallen"). Geen gezamenlijke vredestijd meer (fase is enkel nog `lobby`/`war`/`ended`). Beheer: "Vrede per speler
     (uren)" en "Lengte seizoen (dagen)".
+
+26. **Veldslagen zoals Rome: Total War** (gevraagd: "manueel gevecht doorlopen tot alles vlekkeloos is, formaties instellen").
+    Nieuwe kern in `fieldbattle.js`: regimenten met formaties, vaandel en één route per regiment (voorheen liep elke soldaat los en
+    zocht elk zijn eigen route: chaotisch, gemengde groepen kropen aan rammentempo, soms vastgelopen), slagorde voor groepen,
+    lijn trekken, flank/rug/stormloop, moed en vluchten, formaties blijven aan de juiste kant van de muur. De computer stuurt
+    ook regimenten (rammen op de poort, voetvolk in slagorde ervoor, ruiters wachten op een bres). Browser: vaandels, plaatsen
+    waar een regiment komt te staan, formatieknoppen, minder schokjes bij elke peiling (oude en nieuwe stand op hetzelfde moment
+    vergeleken), kleinere antwoorden (`have`). Getest: computer tegen computer (open, ommuurd, kamp, groot leger), pc en gsm
+    (rechtop/liggend, aanraakscherm, trage processor), twee spelers met 300–450 ms vertraging (verschil < 0,3 tegel, geen sprongen).
 
 ## 8. Bekende beperkingen en ideeën
 
