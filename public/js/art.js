@@ -1495,9 +1495,11 @@ const SIZES = { tc: 2, monument: 2 };
 
 const cache = new Map();
 
-export function buildingSprite(type, level, team = '#c0392b', civ = null) {
+// variant: huizen krijgen per gebouw een iets andere tint van muur en dak (minder eentonig)
+export function buildingSprite(type, level, team = '#c0392b', civ = null, id = 0) {
   const st = STYLES[civ] || null;
-  const key = `${type}:${level}:${team}:${st ? civ : ''}`;
+  const variant = type === 'house' ? Math.abs(id) % 3 : 0;
+  const key = `${type}:${level}:${team}:${st ? civ : ''}:${variant}`;
   let spr = cache.get(key);
   if (spr) return spr;
   const size = SIZES[type] || 1;
@@ -1515,6 +1517,13 @@ export function buildingSprite(type, level, team = '#c0392b', civ = null) {
   LIGHTS = [];
   rs = 12345;
   if (st) { Object.assign(C, st.palette); STYLE = st; }
+  if (variant) {
+    const tint = (c, a) => { const v = shade(c, a); const m = v.match(/\d+/g).map(Number); return '#' + m.map((x) => x.toString(16).padStart(2, '0')).join(''); };
+    const k = variant === 1 ? 1 : -1;
+    C.plaster = tint(C.plaster, -0.05 * (variant === 1 ? 1 : 0.4));
+    C.roof = tint(C.roof, 0.1 * k); C.roofDark = tint(C.roofDark, 0.1 * k); C.thatch = tint(C.thatch, -0.08 * k);
+    PLASTERS.add(C.plaster); WOODS.add(C.wood);
+  }
   try {
     apron(g0, size, type);
     const L = Math.max(1, level);

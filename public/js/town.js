@@ -14,6 +14,7 @@ import { ICON } from './ui.js';
 import * as NAT from './nature.js';
 import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
+import { buildDress, drawProp, dressKey } from './towndress.js';
 import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
@@ -183,6 +184,9 @@ function groundDetail() {
   detailCv = cv;
   return cv;
 }
+
+// kleine gebouwen iets groter tekenen dan hun tegel, zodat de stad voller en gedetailleerder oogt
+const bScale = (b) => ((BUILDINGS[b.type].size || 1) === 1 ? 1.12 : 1);
 
 const FOG_SCALE = 0.25;
 
@@ -487,7 +491,7 @@ export class TownView {
       const img = bc.createImageData(NW, NW);
       const px = img.data;
       const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
-      const C0 = hex('#6aa940'); const C1 = hex('#a0cc5e'); const DRY = hex('#bcc56e'); const OUT = hex('#5b8c36');
+      const C0 = hex('#5c9838'); const C1 = hex('#93bd54'); const DRY = hex('#b9b764'); const OUT = hex('#557f33');
       const FOR = hex('#3c6628'); const MOSS = hex('#5d6f2c'); const SAND = hex('#cdbb85');
       const lerp = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
       const c = [0, 0, 0];
@@ -1753,6 +1757,24 @@ export class TownView {
 
   // De grond met alle boomschaduwen erop, als één laag. Wordt enkel opnieuw samengesteld als het bos,
   // de stand van de zon of de duisternis merkbaar verandert; per beeld is het dan één enkele kopie.
+  // de aankleding opnieuw maken als er gebouwd is of de zon verder staat
+  townDress(segs, wallLevel, light) {
+    const s = this.state;
+    const len = 0.75 + Math.min(0.7, Math.abs(light.hour - 13) / 8);
+    const alpha = 0.26 * (1 - light.dark * 0.75);
+    const lk = `${Math.round(len * 10)}|${Math.round(alpha * 40)}`;
+    if (this.dressState !== s || this.dressLight !== lk) {
+      this.dressState = s; this.dressLight = lk;
+      const key = dressKey(s, `${lk}|${wallLevel}`);
+      if (!this.dress || this.dress.key !== key) {
+        const wallTiles = [...(s.walls || []), ...(s.gates || [])].map((t) => { const q = tileOf(t); return [q.i, q.j]; });
+        this.dress = buildDress({ state: s, seed: this.seed, wallTiles, shadows: (g) => this.drawShadows(g, segs, wallLevel, light, null) });
+        this.dress.key = key;
+      }
+    }
+    return this.dress;
+  }
+
   groundLayer(light) {
     const len = 0.75 + Math.min(0.7, Math.abs(light.hour - 13) / 8);
     const alpha = 0.26 * (1 - light.dark * 0.75);
@@ -1903,7 +1925,10 @@ export class TownView {
     const wall = s.buildings.find((b) => b.type === 'wall');
     const wallLevel = wall ? Math.max(wall.level, (s.walls || []).length || (s.gates || []).length ? 1 : 0) : 0;
     const segs = this.wallSegments(wallLevel);
-    this.drawShadows(ctx, segs, wallLevel, light, vis);
+    // aankleding (straten, paadjes, tuintjes, zachte schaduwen) als één afbeelding; in een slag gewone schaduwen
+    const dress = this.battleMode ? null : this.townDress(segs, wallLevel, light);
+    if (dress) drawSub(ctx, dress.cv, dress.scale, dress.x, dress.y, dress.W, dress.H, vis);
+    else this.drawShadows(ctx, segs, wallLevel, light, vis);
 
     const items = [];
     const nodes = s.nodes || [];
@@ -1934,6 +1959,7 @@ export class TownView {
       items.push({ depth: b.x + b.y + size, kind: 'building', b });
     }
     for (const seg of segs) items.push({ depth: (seg.x0 + seg.x1) / 2 + (seg.y0 + seg.y1) / 2 + 0.2, kind: 'wall', seg });
+    if (dress) for (const p of dress.props) if (inView(toWorld(p.gx, p.gy))) items.push({ depth: p.depth, kind: 'prop', p });
     for (const w of this.walkers) if (w.wait <= 0 || w.phase === 'work' || w.job === 'idle') items.push({ depth: w.gx + w.gy, kind: 'walker', w });
     for (const sol of this.soldierSpots()) items.push({ depth: sol.gx + sol.gy, kind: 'soldier', sol });
     for (const sh of this.sheep) items.push({ depth: sh.gx + sh.gy, kind: 'sheep', sh });
@@ -1975,6 +2001,7 @@ export class TownView {
     for (const it of items) {
       switch (it.kind) {
         case 'decor': this.drawDecor(ctx, it.d, t); break;
+        case 'prop': drawProp(ctx, it.p); break;
         case 'tree': this.drawTree(ctx, it.tr, t, it.shake); break;
         case 'stump': this.drawStump(ctx, it.st); break;
         case 'wall': this.drawWallPiece(ctx, it.seg, wallLevel); break;
@@ -2004,6 +2031,7 @@ export class TownView {
     if (!this.battleMode) this.drawFog(ctx, vis);
 
     // licht en donker
+    FX.grade(ctx, this.canvas.width, this.canvas.height, light);
     FX.applyLight(ctx, this.canvas.width, this.canvas.height, light);
     cam.apply(ctx);
     if (night > 0.05) this.drawNightLights(ctx, t, night, segs, wallLevel);
@@ -2748,13 +2776,21 @@ export class TownView {
     for (const b of s.buildings) {
       if (!isPlaced(b) || b.level === 0) continue;
       const c = this.footprintCenter(b);
-      const spr = A.buildingSprite(b.type, b.level, this.team, this.state.civ);
+      const spr = A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id);
+      const k = bScale(b);
       for (const [lx, ly, r] of spr.lights || []) {
         const fl = 0.85 + Math.sin(t * 0.003 + lx * 3.1 + b.id) * 0.08;
-        FX.drawGlow(ctx, c.x + lx, c.y + ly, 9 * r, FX.WARM, night * fl * 0.85);
+        FX.drawGlow(ctx, c.x + lx * k, c.y + ly * k, 9 * r, FX.WARM, night * fl * 0.85);
       }
       if (b.type === 'smithy') FX.drawGlow(ctx, c.x + 4, c.y - 2, 26, FX.FIRE, night * (0.7 + Math.sin(t * 0.02) * 0.15));
       if (b.type === 'tc') FX.drawGlow(ctx, c.x + 6, c.y + 24, 40, FX.WARM, night * 0.45);
+    }
+    if (this.dress && !this.battleMode) {
+      for (const l of this.dress.lamps) {
+        const p = toWorld(l.gx, l.gy);
+        FX.drawGlow(ctx, p.x + 7.1, p.y - 21.5, 16, FX.WARM, night * (0.85 + Math.sin(t * 0.004 + l.gx * 7) * 0.08));
+        FX.drawGlow(ctx, p.x + 4, p.y, 22, FX.WARM, night * 0.25);
+      }
     }
     for (const seg of segs) {
       if (!seg.gate) continue;
@@ -2858,7 +2894,7 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ), c.x, c.y);
+      A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id), c.x, c.y, bScale(b));
       this.drawOverlay(ctx, b, c, t);
       if (sel) {
         // voorste randen van de voet in goud, over het gebouw heen: zo zie je duidelijk wat gekozen is
@@ -2880,7 +2916,8 @@ export class TownView {
 
   drawOverlay(ctx, b, c, t) {
     const L = b.level;
-    const at = (x, y, z) => { const [px, py] = A.P(x, y, z); return [c.x + px, c.y + py]; };
+    const k = bScale(b);
+    const at = (x, y, z) => { const [px, py] = A.P(x, y, z); return [c.x + px * k, c.y + py * k]; };
     switch (b.type) {
       case 'tc': {
         const st = A.STYLES[this.state.civ];

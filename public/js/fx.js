@@ -49,6 +49,34 @@ export function applyLight(ctx, w, h, light) {
   ctx.restore();
 }
 
+// Sfeer overdag: warm zonlicht linksboven, iets koeler rechtsonder en zachte donkere randen.
+// Eén voorbereide afbeelding per schermgrootte, met 'soft-light' over het beeld gelegd.
+let gradeCv = null;
+export function grade(ctx, w, h, light) {
+  const a = (1 - light.dark) * 0.9;
+  if (a < 0.05 || w < 2 || h < 2) return;
+  const S = 4; // op lage resolutie: het zijn enkel zachte verlopen
+  const gw = Math.ceil(w / S); const gh = Math.ceil(h / S);
+  if (!gradeCv || gradeCv.width !== gw || gradeCv.height !== gh) {
+    gradeCv = document.createElement('canvas');
+    gradeCv.width = gw; gradeCv.height = gh;
+    const g = gradeCv.getContext('2d');
+    const lin = g.createLinearGradient(0, 0, gw, gh);
+    lin.addColorStop(0, 'rgb(255,214,150)'); lin.addColorStop(0.5, 'rgb(128,128,128)'); lin.addColorStop(1, 'rgb(92,104,140)');
+    g.fillStyle = lin; g.fillRect(0, 0, gw, gh);
+    const r = Math.hypot(gw, gh) / 2;
+    const rad = g.createRadialGradient(gw / 2, gh / 2, r * 0.45, gw / 2, gh / 2, r * 1.05);
+    rad.addColorStop(0, 'rgba(0,0,0,0)'); rad.addColorStop(1, 'rgba(20,12,4,0.55)');
+    g.fillStyle = rad; g.fillRect(0, 0, gw, gh);
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = a;
+  ctx.drawImage(gradeCv, 0, 0, w, h);
+  ctx.restore();
+}
+
 // ---------- gloed ----------
 
 const glowCache = new Map();
