@@ -12,7 +12,7 @@
 // stormlopen en de formatie veranderen de schade.
 // Vaste tikken van 100 ms en volledig deterministisch (geen Math.random, Math.hypot of goniometrie), zodat de
 // server (gezaghebbend) en de browser (vloeiend, rekent zelf verder) exact hetzelfde verloop zien.
-import { UNITS, FIELD, TOWER, TC_POS } from './rules.js';
+import { UNITS, FIELD, TOWER, TC_POS, TECH_IDS } from './rules.js';
 import { hitDamage } from './skirmish.js';
 import { territory, tileIndex, tileOf, ringOf, ringForAge, T_MIN, T_MAX, TILE } from './territory.js';
 import { occupied, isBuildable, clearedSet, insideSet, bLevel, age as townAge } from './sim.js';
@@ -56,6 +56,11 @@ const climbs = (k) => !isCav(k) && !isSiege(k); // mag op de muur
 const meleeK = (k) => !isRangedK(k) && k !== 'ram';
 export const mobile = (u) => u.k !== 'tower';
 const speedOf = (k) => FIELD.speed[k] || 1;
+// onderzoek van de Academie: st.tk = [aanvaller, verdediger], elk { id: 1 }
+const TK = (st, s, id) => !!(st.tk && st.tk[s] && st.tk[s][id]);
+const pickTech = (t) => { const o = {}; for (const id of TECH_IDS) if (t && t[id]) o[id] = 1; return o; };
+// moedverlies van een regiment (krijgsdrill: voetvolk verliest een kwart minder)
+const moLoss = (st, r, v) => (role(r.k) === 'inf' && TK(st, r.s, 'drill') ? v * 0.75 : v);
 export const aliveN = (u) => Math.max(0, Math.min(u.n || 1, Math.ceil(u.hp / u.hp0 - 1e-9)));
 export const wallHp = (L) => 160 + 90 * Math.max(1, L);
 
@@ -360,7 +365,7 @@ export function createBattle(o) {
     v: FB.v, kind: o.kind, t0: o.now, t: o.now, n: 0, phase: 'deploy', ph1: null, nv: 0,
     ma: 1 + 0.05 * (o.smithyA || 0), md: 1 + 0.05 * (o.smithyD || 0),
     units: [], regs: [], walls: [], q: [], ack: [], ai: [!!o.aiAtt, !!o.aiDef], ready: [!!o.aiAtt, !!o.aiDef],
-    cap: 0, over: null, retreat: false, uid: 1, aiF: -1,
+    cap: 0, over: null, retreat: false, uid: 1, aiF: -1, tk: [pickTech(o.techA), pickTech(o.techD)],
   };
   if (o.kind === 'town' && o.town) townMap(st, o.town, o.townId);
   else campMap(st, o.campSeed || 1);
@@ -410,6 +415,7 @@ export function createBattle(o) {
         const lo = Math.floor((r * figs.length) / nr); const hi = Math.floor(((r + 1) * figs.length) / nr);
         const f0 = face0(side);
         const reg = { id: st.regs.length + 1, s: side, k, g, f: defaultForm(k), wid: null, fx: R3(f0.x), fy: R3(f0.y), x: st.plaza.x, y: st.plaza.y, st: 'hold', m: hi - lo, m0: hi - lo, ml: hi - lo, mo: 100, eng: 0, tr: 0, tu: 0, tw: -1, path: null, spread: 0 };
+        if (isCav(k) && k !== 'noble' && TK(st, side, 'horseshoes')) reg.sp = 1.1; // hoefijzers
         st.regs.push(reg);
         for (let i = lo; i < hi; i++) {
           const hp0 = K(k).hp || 30;
@@ -423,7 +429,7 @@ export function createBattle(o) {
   for (const grp of o.defGroups) add(1, grp.units, grp.key, sD);
   // wachttorens van de verdediger
   for (const tw of st.towerDefs || []) {
-    const L = Math.max(1, Math.min(3, tw.level));
+    const L = Math.max(1, Math.min(TOWER.hp.length - 1, tw.level));
     st.units.push({ id: st.uid++, s: 1, k: 'tower', b: tw.id, L, x: tw.x, y: tw.y, hp: TOWER.hp[L], hp0: TOWER.hp[L], n: 1, cd: 600, tg: null, tw: -1, at: -1 });
   }
   delete st.towerDefs;
@@ -463,8 +469,9 @@ function townMap(st, s, seed) {
   st.grid = grid; st.ins = ins ? insS : null;
   const L = Math.max(1, bLevel(s, 'wall'));
   st.wallL = L;
+  const ib = !!(s.tech && s.tech.ironbound); // ijzerbeslag: poorten houden langer stand
   for (const idx of s.walls || []) addWall(st, idx, L, false);
-  for (const idx of s.gates || []) addWall(st, idx, L, true);
+  for (const idx of s.gates || []) addWall(st, idx, L, true, ib);
   st.ring = k + 1;
   // het plein voor de deur van het stadscentrum
   const tc = s.buildings.find((b) => b.type === 'tc') || { x: TC_POS.x, y: TC_POS.y };
@@ -479,10 +486,10 @@ function townMap(st, s, seed) {
   NAV.delete(st);
 }
 
-function addWall(st, idx, L, gate) {
+function addWall(st, idx, L, gate, iron = false) {
   const { i, j } = tileOf(idx);
   if (i < st.box.x0 || j < st.box.y0 || i >= st.box.x0 + st.box.w || j >= st.box.y0 + st.box.h) return;
-  const hp = Math.round(wallHp(L) * (gate ? 0.75 : 1));
+  const hp = Math.round(wallHp(L) * (gate ? 0.75 : 1) * (gate && iron ? 1.5 : 1));
   st.walls.push({ i, j, g: gate ? 1 : 0, hp, hp0: hp, wall: 1 });
 }
 
@@ -542,7 +549,7 @@ export function membersMap(st) {
   }
   return M;
 }
-const regSpeed = (r) => speedOf(r.k) * (fxOf(r).speed || 1);
+const regSpeed = (r) => speedOf(r.k) * (fxOf(r).speed || 1) * (r.sp || 1);
 // waar een soldaat in de formatie hoort, rond het vaandel van zijn regiment
 export const slotPos = (r, u) => ({ x: r.x + r.fx * u.oa - r.fy * u.ob, y: r.y + r.fy * u.oa + r.fx * u.ob });
 
@@ -935,9 +942,9 @@ function fitWidth(regs, M, w) {
 // ---------- de slag zelf ----------
 function reachOf(st, nv, u, e) {
   let r;
-  if (u.k === 'tower') r = TOWER.range;
+  if (u.k === 'tower') r = TOWER.range + (TK(st, u.s, 'xbow') ? 1 : 0);
   else if (u.k === 'stonethrower') r = FB.siegeRange;
-  else if (isRangedK(u.k)) r = FB.ranged + (onWall(st, nv, u) ? FB.wallRange : 0);
+  else if (isRangedK(u.k)) r = FB.ranged + (onWall(st, nv, u) ? FB.wallRange : 0) + (TK(st, u.s, 'yew') ? 1 : 0);
   else r = FB.melee;
   if (e && (e.k === 'tower' || e.wall)) r += 0.55; // groot doelwit
   return r;
@@ -959,31 +966,39 @@ function counter(ka, kb) {
 function damage(st, nv, u, e) {
   const mult = u.s ? st.md : st.ma;
   const n = aliveN(u);
+  // vuurpijlen: schutters doen veel meer schade aan muren, poorten, torens en rammen
+  const fire = isRangedK(u.k) && !isSiege(u.k) && u.k !== 'tower' && TK(st, u.s, 'firearrows') ? 1.6 : 1;
   if (e.wall) {
     const base = K(u.k).dmg || 2;
-    const f = u.k === 'ram' ? 8 : u.k === 'stonethrower' ? 1.6 : isRangedK(u.k) ? 0.08 : 0.3;
+    const f = u.k === 'ram' ? 8 : u.k === 'stonethrower' ? 1.6 : isRangedK(u.k) ? 0.08 * fire : 0.3;
     return base * f * n * mult;
   }
-  const fe = fxOf(regOf(st, e));
+  const re = regOf(st, e); const fe = fxOf(re);
+  // schildmuur: voetvolk in linie of blok krijgt minder schade van pijlen en torens
+  const shield = re && role(e.k) === 'inf' && (re.f === 'line' || re.f === 'block') && TK(st, e.s, 'shieldwall') ? 0.7 : 1;
   if (u.k === 'tower') {
     const def = K(e.k).def ? K(e.k).def.rng : 10;
-    return TOWER.dmg[u.L] * (FIELD.armorK / (FIELD.armorK + def)) * cover(st, nv, e) * (fe.missile || 1);
+    return TOWER.dmg[u.L] * (TK(st, u.s, 'xbow') ? 1.2 : 1) * (FIELD.armorK / (FIELD.armorK + def)) * cover(st, nv, e) * (fe.missile || 1) * shield;
   }
-  if (e.k === 'tower') return (K(u.k).dmg || 2) * n * mult * (isSiege(u.k) ? 6 : isRangedK(u.k) ? 0.15 : 0.5);
+  if (e.k === 'tower') return (K(u.k).dmg || 2) * n * mult * (isSiege(u.k) ? 6 : isRangedK(u.k) ? 0.15 * fire : 0.5);
   let d = hitDamage(u.k, e.k, mult) * counter(u.k, e.k) * n * FB.pace;
-  if (isRangedK(u.k)) return d * cover(st, nv, e) * (onWall(st, nv, u) ? 1.15 : 1) * (fe.missile || 1);
-  const ru = regOf(st, u); const re = regOf(st, e); const fu = fxOf(ru);
+  if (isRangedK(u.k)) return d * cover(st, nv, e) * (onWall(st, nv, u) ? 1.15 : 1) * (fe.missile || 1) * shield * (e.k === 'ram' ? fire : 1);
+  const ru = regOf(st, u); const fu = fxOf(ru);
   d *= (fu.dealt || 1) * (fe.taken || 1);
   if (isCav(u.k) && fe.cav) d *= fe.cav;
   // flank en rug: wie van opzij of van achter komt, doet meer schade
   if (re && !re.spread) {
     const vx = u.x - e.x; const vy = u.y - e.y; const vl = Math.sqrt(vx * vx + vy * vy) || 1;
     const dot = (vx * re.fx + vy * re.fy) / vl;
-    const fl = fe.flank ?? 1;
+    const fl = (fe.flank ?? 1) * (isCav(u.k) && TK(st, u.s, 'flank') ? 1.5 : 1); // flankrit
     if (dot < -0.45) d *= 1 + 0.5 * fl; else if (dot < 0.3) d *= 1 + 0.2 * fl;
   }
-  // stormloop: de eerste klap na een aanloop
-  if (u.mv >= 0.8) { d *= (isCav(u.k) ? 1.8 : 1.3) + (fu.charge || 0); u.mv = 0; }
+  // stormloop: de eerste klap na een aanloop (lansen: sterker; strijdkreet: kost de vijand moed)
+  if (u.mv >= 0.8) {
+    d *= ((isCav(u.k) ? 1.8 : 1.3) + (fu.charge || 0)) * (isCav(u.k) && TK(st, u.s, 'lances') ? 1.25 : 1);
+    if (!isCav(u.k) && re && re.st !== 'rout' && TK(st, u.s, 'warcry')) re.mo = R3(Math.max(0, (re.mo ?? 100) - 3));
+    u.mv = 0;
+  }
   return d;
 }
 
@@ -1107,6 +1122,7 @@ function hit(st, nv, u, e, bt) {
   const dmg = damage(st, nv, u, e);
   e.hp = R3(Math.max(0, e.hp - dmg));
   u.cd = u.k === 'tower' ? TOWER.rate : K(u.k).rate || 1500;
+  if (isRangedK(u.k) && u.k !== 'tower' && !isSiege(u.k) && TK(st, u.s, 'volley')) u.cd = Math.round(u.cd * 0.85); // pijlenregen
   u.at = bt; u.ax = R3(e.wall ? e.i + 0.5 : e.x); u.ay = R3(e.wall ? e.j + 0.5 : e.y);
   if (e.wall) { if (e.hp <= 0) breakWall(st, e, bt); return; }
   if (e.hp <= 0) { e.died = bt; return; }
@@ -1117,7 +1133,7 @@ function hit(st, nv, u, e, bt) {
   if (re && !re.spread && re.st !== 'rout' && meleeK(u.k) && FORMS[re.f] && (FORMS[re.f].fx.flank ?? 1) > 0) {
     const vx = u.x - e.x; const vy = u.y - e.y; const vl = Math.sqrt(vx * vx + vy * vy) || 1;
     const dot = (vx * re.fx + vy * re.fy) / vl;
-    if (dot < 0.3) re.mo = R3(Math.max(0, (re.mo ?? 100) - (dot < -0.45 ? 1.2 : 0.5)));
+    if (dot < 0.3) re.mo = R3(Math.max(0, (re.mo ?? 100) - moLoss(st, re, dot < -0.45 ? 1.2 : 0.5)));
   }
 }
 
@@ -1208,7 +1224,8 @@ function goSlot(st, nv, u, r, spd) {
   }
   const d2 = SQ(tx - u.x) + SQ(ty - u.y);
   if (d2 < 0.0036) { u.path = null; return; }
-  approach(st, nv, u, tx, ty, 0.05, spd * (r.st !== 'hold' && d2 > 0.25 ? FB.catchUp : 1));
+  const cu = FB.catchUp * (role(r.k) === 'inf' && TK(st, r.s, 'drill') ? 1.2 : 1);
+  approach(st, nv, u, tx, ty, 0.05, spd * (r.st !== 'hold' && d2 > 0.25 ? cu : 1));
 }
 
 function actUnit(st, nv, u, alive, byId, bt, r, M) {
@@ -1222,10 +1239,10 @@ function actUnit(st, nv, u, alive, byId, bt, r, M) {
     return;
   }
   if (!r) return;
-  if (r.st === 'rout') { u.tg = null; approach(st, nv, u, r.x + ((u.id % 5) - 2) * 0.5, r.y + ((u.id % 3) - 1) * 0.5, 0.3, speedOf(u.k) * 1.15); return; }
+  if (r.st === 'rout') { u.tg = null; approach(st, nv, u, r.x + ((u.id % 5) - 2) * 0.5, r.y + ((u.id % 3) - 1) * 0.5, 0.3, speedOf(u.k) * 1.15 * (r.sp || 1)); return; }
   const uc = cellOf(st, u.x, u.y);
   const ranged = isRangedK(u.k);
-  const spd = speedOf(u.k) * (fxOf(r).speed || 1);
+  const spd = speedOf(u.k) * (fxOf(r).speed || 1) * (r.sp || 1);
   let e = u.tg != null ? byId.get(u.tg) : null;
   if (e && e.hp <= 0) e = null;
   // A. op een muur of poort beuken (wie aangevallen wordt, verweert zich)
@@ -1403,7 +1420,7 @@ function regRout(st, r, list, M) {
     const ol = M.get(o.id);
     if (!ol || !ol.length) continue;
     const oc = centroid(ol);
-    if (SQ(oc.x - c.x) + SQ(oc.y - c.y) < 36) o.mo = R3(Math.max(0, (o.mo ?? 100) - 8));
+    if (SQ(oc.x - c.x) + SQ(oc.y - c.y) < 36) o.mo = R3(Math.max(0, (o.mo ?? 100) - moLoss(st, o, 8)));
   }
 }
 
@@ -1411,7 +1428,7 @@ function regTick(st, nv, r, list, M, alive, byId) {
   const m = list.length;
   // moed: gesneuvelden kosten moed, rust geeft het langzaam terug
   if (r.mo == null) { r.mo = 100; r.m0 = m; r.ml = m; }
-  if (m < r.ml) { r.mo = R3(Math.max(0, r.mo - ((r.ml - m) * 100) / Math.max(1, r.m0))); r.ml = m; }
+  if (m < r.ml) { r.mo = R3(Math.max(0, r.mo - moLoss(st, r, ((r.ml - m) * 100) / Math.max(1, r.m0)))); r.ml = m; }
   if (r.st === 'rout') {
     if ((st.n + r.id) % 5 === 0) {
       const near = list.some((u) => alive.some((e) => e.s !== r.s && e.hp > 0 && mobile(e) && SQ(e.x - u.x) + SQ(e.y - u.y) < 16));
@@ -1601,6 +1618,7 @@ function step(st) {
     if (st.nv !== nv.nv) nv = nav(st);
   }
   planPaths(st, nv);
+  if (TK(st, 1, 'pitch') && (st.n - st.ph1) % 20 === 10) pourPitch(st, alive, bt);
   for (const u of alive) {
     if (u.hp <= 0) continue;
     actUnit(st, nv, u, alive, byId, bt, regOf(st, u), M);
@@ -1610,6 +1628,22 @@ function step(st) {
   st.n++;
   st.t = st.t0 + st.n * FB.tick;
   judge(st, nv);
+}
+
+// kokende pek: om de 2 s krijgt wie (van de aanvaller) tegen een poort staat, schade. g.pt = tijdstip (voor de browser)
+function pourPitch(st, alive, bt) {
+  for (const g of st.walls) {
+    if (!g.g || g.hp <= 0) continue;
+    const gx = g.i + 0.5; const gy = g.j + 0.5;
+    let any = false;
+    for (const u of alive) {
+      if (u.s !== 0 || u.hp <= 0 || !mobile(u) || SQ(u.x - gx) + SQ(u.y - gy) > 2.89) continue;
+      u.hp = R3(Math.max(0, u.hp - 4 * aliveN(u)));
+      if (u.hp <= 0) u.died = bt;
+      any = true;
+    }
+    if (any) g.pt = bt;
+  }
 }
 
 // een beetje uit elkaar gaan zodat ze niet op één hoop staan
