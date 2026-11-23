@@ -281,9 +281,9 @@ export function botEconomy(s, speed = 1, opt = {}) {
   if (a >= 2 && !saving && !findType(s, 'mill').length) grow(s, s.t, speed, out, 'mill', 1);
   if (a >= 3 && !findType(s, 'academy').length) grow(s, s.t, speed, out, 'academy', 1);
   if (a >= 4 && !saving) for (const ty of ['lodge', 'guild']) if (!findType(s, ty).length) grow(s, s.t, speed, out, ty, 1);
-  if (a >= 5 && !saving) {
-    if (!findType(s, 'cathedral').length) grow(s, s.t, speed, out, 'cathedral', 1);
+  if (a >= 5 && !saving) { // sterke bots eerst het Adelshof (edelmannen), daarna de kathedraal
     if (opt.nobles && !findType(s, 'court').length) grow(s, s.t, speed, out, 'court', 1);
+    if (!findType(s, 'cathedral').length && (!opt.nobles || findType(s, 'court').length)) grow(s, s.t, speed, out, 'cathedral', 1);
   }
   // edelmannen (enkel sterke bots): zoveel als zijn Adelshof toelaat
   if (opt.nobles && noblesMax(s) && noblesOwned(s, (opt.away || {}).noble || 0) < noblesMax(s) && !(s.queues.court || []).length) {
