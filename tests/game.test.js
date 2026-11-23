@@ -1263,3 +1263,267 @@ test('bots: geen jacht op veel zwakkere spelers (tenzij wraak), en te sterke bot
   for (let k = 1; k <= 12 && !attacks(); k++) { db.raw.prepare('UPDATE players SET bot_next = 0 WHERE id = ?').run(bot.id); await botTick(db, world, now + 5 * 60000 + k * 10 * 60000); }
   assert.ok(attacks() >= 1, 'wraak op wie hem aanviel');
 });
+
+// ---------- vijf tijdperken, nieuwe gebouwen, Academie ----------
+import { AGES, AGE_UP, MAX_AGE, BUILDINGS as BLD, TECHS, levelAge as lvlAge, techTier, LOYALTY, VASSAL } from '../public/shared/rules.js';
+import {
+  rates as rateOf, maxBuilds as maxB, buildTime, checkResearch, doResearch, townScore as tScore, checkTrain as cTrain, loyalty as loyOf,
+  doUpgrade as doUp,
+} from '../public/shared/sim.js';
+import { techMods } from '../public/shared/battle.js';
+
+function bigTown(a = 5) {
+  const s = newTownState(0, 'greek');
+  s.buildings[0].level = a;
+  s.res = { food: 90000, wood: 90000, stone: 90000, gold: 90000 };
+  let id = 10;
+  for (const [type, x, y, level] of [['storage', 1, 1, 5], ['storage', 2, 1, 5], ['house', 3, 1, 5], ['house', 4, 1, 5], ['farm', 1, 3, 2]]) s.buildings.push({ id: id++, type, x, y, level });
+  s.nextId = id;
+  return s;
+}
+const addB = (s, type, level, x, y) => { const b = { id: s.nextId++, type, x, y, level }; s.buildings.push(b); return b; };
+
+test('tijdperken: vijf, met namen, niveau N vraagt tijdperk N', () => {
+  assert.equal(MAX_AGE, 5);
+  assert.deepEqual(AGES.slice(1).map((a) => a.short), ['Vuursteen', 'Brons', 'IJzer', 'Gilden', 'Kroon']);
+  assert.ok(AGE_UP[5].cost.food > AGE_UP[4].cost.food);
+  assert.equal(BLD.tc.maxLevel, 5);
+  assert.equal(lvlAge('house', 4), 4);
+  assert.equal(lvlAge('house', 5), 5);
+  assert.equal(lvlAge('academy', 1), 3);
+  assert.equal(lvlAge('academy', 2), 4);
+  assert.equal(lvlAge('academy', 3), 5);
+  assert.equal(lvlAge('court', 1), 5);
+  const s = bigTown(4);
+  const h = s.buildings.find((b) => b.type === 'house');
+  h.level = 4;
+  assert.throws(() => doUp(s, h.id, 0, 1), /Tijdperk van de Kroon/);
+  s.buildings[0].level = 5;
+  doUp(s, h.id, 0, 1);
+  // naar de Kroon: vanuit de Gilden
+  const t = bigTown(4);
+  doUp(t, 1, 0, 1);
+  advance(t, 60 * 3600000, 1);
+  assert.equal(age(t), 5);
+});
+
+test('nieuwe gebouwen: molen en gildehuis verhogen de productie, de bouwloods geeft een bouwer extra', () => {
+  const s = bigTown(5);
+  s.villagers = { idle: 0, food: 10, wood: 10, stone: 0, gold: 0 };
+  const base = rateOf(s, 1);
+  addB(s, 'mill', 2, 6, 1);
+  assert.ok(Math.abs(rateOf(s, 1).food / base.food - 1.1) < 1e-9, 'molen niveau 2: +10% voedsel');
+  assert.equal(rateOf(s, 1).wood, base.wood);
+  addB(s, 'guild', 1, 7, 1);
+  assert.ok(Math.abs(rateOf(s, 1).wood / base.wood - 1.03) < 1e-9, 'gildehuis: +3% alles');
+  const before = maxB(s);
+  const lodge = addB(s, 'lodge', 2, 8, 1);
+  assert.equal(maxB(s), before + 1);
+  assert.equal(buildTime(s, 'house', 3, 1), Math.round(levelTime('house', 3, 1) * 0.9));
+  assert.equal(buildTime(s, 'tc', 5, 1), levelTime('tc', 5, 1), 'een nieuw tijdperk gaat niet sneller');
+  lodge.level = 0;
+});
+
+test('Academie: rijen per niveau, van links naar rechts, en het onderzoek is klaar na de tijd', () => {
+  const s = bigTown(3);
+  assert.match(checkResearch(s, 'firearrows'), /Academie/);
+  const ac = addB(s, 'academy', 1, 6, 1);
+  assert.equal(checkResearch(s, 'firearrows'), null);
+  assert.match(checkResearch(s, 'yew'), /niveau 2/);
+  doResearch(s, 'firearrows', 0, 1);
+  assert.match(checkResearch(s, 'shieldwall'), /loopt al/);
+  const sc = tScore(s);
+  advance(s, TECHS.firearrows.time * 1000 + 1, 1);
+  assert.ok(s.tech.firearrows && !s.research);
+  assert.ok(tScore(s) > sc, 'onderzoek telt mee in de score');
+  ac.level = 2; s.buildings[0].level = 4;
+  assert.equal(checkResearch(s, 'yew'), null);
+  assert.match(checkResearch(s, 'drill'), /Schildmuur/, 'eerst de vorige in dezelfde soort');
+  assert.equal(techTier(s.tech, 'rng'), 1);
+  assert.equal(techTier(s.tech, 'inf'), 0);
+});
+
+test('Academie: onderzoek telt in een automatische slag', () => {
+  const groups = [{ key: 'home', units: { spear: 40, sword: 20 } }];
+  const plain = resolveBattle({ attUnits: { archer: 60 }, groups, towerDef: 200 });
+  const shield = resolveBattle({ attUnits: { archer: 60 }, groups, towerDef: 200, defTech: { shieldwall: 1 } });
+  assert.ok(shield.D > plain.D * 1.15, 'schildmuur: voetvolk houdt beter stand tegen pijlen');
+  const fire = resolveBattle({ attUnits: { archer: 60 }, groups, towerDef: 200, attTech: { firearrows: 1 } });
+  assert.ok(fire.D < plain.D && fire.A > plain.A, 'vuurpijlen: torens minder sterk, schutters iets sterker');
+  const xb = resolveBattle({ attUnits: { archer: 60 }, groups, towerDef: 200, defTech: { xbow: 1 } });
+  assert.ok(xb.D > plain.D);
+  assert.equal(techMods({ ironbound: 1 }).rams, 0.67);
+  const walls = (t) => resolveBattle({ attUnits: { sword: 100, ram: 12 }, groups: [{ key: 'home', units: {} }], wall: 3, defTech: t });
+  assert.ok(walls({ ironbound: 1, pitch: 1 }).D > walls(null).D, 'pek en ijzerbeslag: de muur houdt beter');
+});
+
+test('Academie: vuurpijlen, taxusboog, schildmuur, lansen en kokende pek in de live slag', () => {
+  const mk = (techA, techD, att = { archer: 4 }, def = { sword: 4 }) => createBattle({
+    kind: 'town', att, defGroups: [{ key: 'home', units: def }], town: siegeTown(), townId: 7, dir: { x: -1, y: 0 }, aiAtt: false, aiDef: false, now: 0, techA, techD,
+  });
+  const a = mk(null, null); const b = mk({ firearrows: 1 }, null);
+  const ua = a.units.find((u) => u.s === 0); const ub = b.units.find((u) => u.s === 0);
+  const wa = a.walls.find((w) => w.g); const wb = b.walls.find((w) => w.g);
+  assert.ok(FBT.damage(b, ub, wb) > FBT.damage(a, ua, wb) * 1.5, 'vuurpijlen: veel meer schade aan een poort');
+  // schildmuur: zwaardvechters in linie krijgen minder schade van pijlen
+  const c = mk(null, { shieldwall: 1 });
+  const ea = a.units.find((u) => u.s === 1 && u.k === 'sword'); const ec = c.units.find((u) => u.s === 1 && u.k === 'sword');
+  a.regs[ea.sq - 1].f = 'line'; c.regs[ec.sq - 1].f = 'line';
+  const uc = c.units.find((u) => u.s === 0);
+  assert.ok(FBT.damage(c, uc, ec) < FBT.damage(a, ua, ea) * 0.75);
+  // lansen: een sterkere stormloop
+  const d = mk(null, null, { knight: 2 }); const e = mk({ lances: 1 }, null, { knight: 2 });
+  const kd = d.units.find((u) => u.s === 0); const ke = e.units.find((u) => u.s === 0);
+  const td = d.units.find((u) => u.s === 1); const te = e.units.find((u) => u.s === 1);
+  for (const [k, t] of [[kd, td], [ke, te]]) { k.x = t.x + 0.6; k.y = t.y; k.mv = 2; }
+  assert.ok(FBT.damage(e, ke, te) > FBT.damage(d, kd, td) * 1.2);
+  // hoefijzers: ruiterij sneller
+  assert.equal(e.regs.find((r) => r.s === 0).sp, undefined);
+  assert.equal(mk({ horseshoes: 1 }, null, { knight: 2 }).regs.find((r) => r.s === 0).sp, 1.1);
+  // ijzerbeslag: poorten met meer levens
+  const town = siegeTown(); town.tech = { ironbound: 1 };
+  const f = createBattle({ kind: 'town', att: { sword: 2 }, defGroups: [{ key: 'home', units: {} }], town, townId: 7, dir: { x: -1, y: 0 }, aiAtt: false, aiDef: false, now: 0 });
+  assert.ok(Math.abs(f.walls.find((w) => w.g).hp - a.walls.find((w) => w.g).hp * 1.5) <= 1);
+});
+
+test('Academie: kokende pek raakt wie aan de poort staat, en de slag blijft deterministisch', () => {
+  const run = (techD, roundTrip) => {
+    let st = createBattle({ kind: 'town', att: { sword: 20, ram: 2 }, defGroups: [{ key: 'home', units: { archer: 6 } }], town: siegeTown(), townId: 7, dir: { x: -1, y: 0 }, aiAtt: true, aiDef: true, now: 0, techD, techA: { firearrows: 1, yew: 1, volley: 1, horseshoes: 1, lances: 1, flank: 1, shieldwall: 1, drill: 1, warcry: 1 } });
+    for (let t = 0; t < 240000; t += 3000) { stepTo(st, t, 40); if (roundTrip) st = JSON.parse(JSON.stringify(st)); }
+    return st;
+  };
+  const p = run({ pitch: 1 }, false);
+  assert.ok(p.walls.some((w) => w.g && w.pt > 0), 'de pek werd gegoten');
+  assert.deepEqual(JSON.parse(JSON.stringify(p)), run({ pitch: 1 }, true));
+});
+
+test('edelman: in het Adelshof, één tegelijk, zoveel als het niveau', () => {
+  const s = bigTown(5);
+  assert.match(cTrain(s, 'noble', 1), /Adelshof/);
+  const c = addB(s, 'court', 1, 6, 1);
+  assert.equal(cTrain(s, 'noble', 1), null);
+  assert.match(cTrain(s, 'noble', 2), /één edelman/);
+  s.units.noble = 1;
+  assert.match(cTrain(s, 'noble', 1), /verbeter je Adelshof/);
+  c.level = 2;
+  assert.equal(cTrain(s, 'noble', 1), null);
+  assert.match(cTrain(s, 'noble', 1, 0, 1), /verbeter je Adelshof/, 'ook wie onderweg is, telt mee');
+  // trouw herstelt vanzelf, sneller met een kathedraal
+  const t = bigTown(5); t.loy = 50;
+  advance(t, 3600000, 1);
+  assert.ok(Math.abs(loyOf(t) - (50 + LOYALTY.regen)) < 1e-6);
+  addB(t, 'cathedral', 2, 7, 1);
+  advance(t, 2 * 3600000, 1);
+  assert.ok(Math.abs(loyOf(t) - (50 + LOYALTY.regen + LOYALTY.regen + 2)) < 1e-6);
+  t.vas = { lord: 1, until: 99 * 3600000 };
+  advance(t, 3 * 3600000, 1);
+  assert.ok(Math.abs(loyOf(t) - (50 + LOYALTY.regen * 2 + 2)) < 1e-6, 'een vazal herstelt niet');
+});
+
+test('vazallen: edelmannen onderwerpen een stad, schatting, geen aanvallen, losgeld, bescherming en bevrijding', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const realNow = Date.now;
+  let clock = realNow();
+  Date.now = () => clock;
+  try {
+    const call = async (method, path, body, cookie) => {
+      const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+      if (cookie) headers.cookie = cookie;
+      const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+      return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+    };
+    assert.equal((await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 1, bots: 0, seed: 11 })).status, 200);
+    const reg = async (name) => (await call('POST', '/register', { name, password: 'geheim123', civ: 'greek' })).cookie;
+    const A = await reg('Anna'); const B = await reg('Bert'); const C = await reg('Cees'); const D = await reg('Dirk');
+    const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+    const get = (q, ...v) => db.raw.prepare(q).get(...v);
+    const town = (n) => get('SELECT t.id, t.state, p.id AS pid, p.team_id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = ?', n);
+    sql('UPDATE world SET start_at = ?', clock - 5 * 86400000);
+    sql('UPDATE players SET created_at = ?', clock - 4 * 86400000);
+    // Anna: Kroon, Adelshof, een groot leger en edelmannen; Bert: Gilden met een monument (genoeg punten); Cees zit in Berts clan
+    const put = (n, fn) => { const r = town(n); const s = JSON.parse(r.state); fn(s); sql('UPDATE towns SET state = ? WHERE id = ?', JSON.stringify(s), r.id); };
+    put('Anna', (s) => { s.buildings[0].level = 5; s.buildings.push({ id: 90, type: 'court', x: 1, y: 1, level: 3 }); s.units = { knight: 400, noble: 4 }; });
+    put('Bert', (s) => { s.buildings[0].level = 4; s.buildings.push({ id: 90, type: 'monument', x: 1, y: 1, level: 2 }); s.units = { spear: 5 }; s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 }; s.villagers = { idle: 0, food: 20, wood: 20, stone: 10, gold: 10 }; });
+    put('Cees', (s) => { s.buildings[0].level = 5; s.units = { knight: 900 }; });
+    sql('UPDATE players SET team_id = ? WHERE name = ?', town('Bert').team_id, 'Cees');
+    const bert = town('Bert').id; const anna = town('Anna').id;
+    // legers laten aankomen; Dirk kijkt toe (wie meevecht is niet online: dan een automatische slag)
+    const land = async () => { sql("UPDATE marches SET arrive_at = ? WHERE status IN ('out', 'back')", clock - 1); sql("UPDATE players SET last_seen = 0 WHERE name != 'Dirk'"); clock += 1000; await call('GET', '/state', null, D); };
+    const attack = async (units, cookie = A, target = bert) => call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: target, units }, cookie);
+
+    // 1. één edelman: de trouw zakt van 100 naar 75
+    clock += 120000; // niemand meer online: automatische slag
+    assert.equal((await attack({ knight: 100, noble: 1 })).status, 200);
+    await land();
+    assert.equal(JSON.parse(town('Bert').state).loy, 75);
+    let rep = JSON.parse(get("SELECT data FROM reports WHERE player_id = ? AND kind = 'attack' ORDER BY id DESC", town('Anna').pid).data);
+    assert.equal(rep.noble.after, 75);
+    await land(); // terug naar huis
+    // 2. drie edelmannen: 75 - 75 = 0 → Bert is vazal van Anna
+    assert.equal((await attack({ knight: 200, noble: 3 })).status, 200);
+    await land();
+    const v = get('SELECT * FROM vassals WHERE town_id = ?', bert);
+    assert.ok(v && v.lord_player === town('Anna').pid, 'Bert is vazal van Anna');
+    assert.equal(JSON.parse(town('Bert').state).vas.lord, town('Anna').pid);
+    assert.match(get("SELECT title FROM reports WHERE player_id = ? ORDER BY id DESC", town('Bert').pid).title, /vazal van Anna/);
+    await land();
+    // 3. heer en vazal vallen elkaar niet aan
+    assert.match((await attack({ knight: 10 })).data.error, /je vazal/);
+    assert.match((await attack({ knight: 1 }, B, anna)).data.error, /heer niet aanvallen/);
+    // 4. kaart en ranglijst
+    const map = await call('GET', '/map', null, A);
+    assert.equal(map.data.towns.find((t) => t.id === bert).vassal.lname, 'Anna');
+    const lb = await call('GET', '/leaderboard', null, A);
+    assert.ok(lb.data.players.find((p) => p.name === 'Anna').vassalPts > 0);
+    assert.equal(lb.data.players.find((p) => p.name === 'Bert').lord, 'Anna');
+    const st = await call('GET', '/state', null, A);
+    assert.equal(st.data.vassals.length, 1);
+    // 5. schatting: na 6 uur vertrekt een karavaan van Bert naar Anna
+    clock += VASSAL.tributeMs + 1000;
+    await call('GET', '/state', null, D);
+    const tr = get("SELECT * FROM marches WHERE kind = 'tribute'");
+    assert.ok(tr && tr.from_town === bert && tr.target_id === anna, 'schatting onderweg');
+    assert.ok(Object.values(JSON.parse(tr.res)).reduce((a, b) => a + b, 0) > 0);
+    await land();
+    assert.match(get("SELECT title FROM reports WHERE player_id = ? ORDER BY id DESC", town('Anna').pid).title, /Schatting van Bert/);
+    // 6. bevrijding: Cees (Berts clan) wint een aanval op Anna
+    sql("UPDATE towns SET state = json_set(state, '$.units', json('{\"spear\":5}')) WHERE id = ?", anna);
+    assert.equal((await attack({ knight: 600 }, C, anna)).status, 200);
+    await land();
+    assert.equal(get('SELECT COUNT(*) AS c FROM vassals').c, 0, 'Bert is bevrijd');
+    const bs = JSON.parse(town('Bert').state);
+    assert.ok(!bs.vas && bs.loyShield > clock, 'en beschermd tegen edelmannen');
+    await land();
+    // 7. beschermd: edelmannen doen niets
+    put('Anna', (s) => { s.units = { knight: 400, noble: 4 }; });
+    assert.equal((await attack({ knight: 200, noble: 4 })).status, 200);
+    await land();
+    rep = JSON.parse(get("SELECT data FROM reports WHERE player_id = ? AND kind = 'attack' ORDER BY id DESC", town('Anna').pid).data);
+    assert.match(rep.noble.blocked, /bevrijd/);
+    assert.equal(get('SELECT COUNT(*) AS c FROM vassals').c, 0);
+    await land();
+    // 8. na de bescherming: opnieuw vazal, en daarna vrij met losgeld
+    clock += LOYALTY.shieldMs + 1000;
+    assert.equal((await attack({ knight: 200, noble: 4 })).status, 200);
+    await land();
+    assert.equal(get('SELECT COUNT(*) AS c FROM vassals').c, 1);
+    put('Bert', (s) => { s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 }; });
+    const ransom = await call('POST', '/vassal/ransom', {}, B);
+    assert.equal(ransom.status, 200, JSON.stringify(ransom.data));
+    assert.equal(get('SELECT COUNT(*) AS c FROM vassals').c, 0);
+    assert.ok(Math.abs(JSON.parse(town('Bert').state).res.food - (9000 - VASSAL.ransom * 4)) < 5, 'losgeld betaald');
+    // 9. na 3 dagen is een vazal vanzelf vrij
+    await land();
+    clock += LOYALTY.shieldMs + 1000;
+    put('Bert', (s) => { delete s.loyShield; });
+    assert.equal((await attack({ knight: 200, noble: 4 })).status, 200);
+    await land();
+    assert.equal(get('SELECT COUNT(*) AS c FROM vassals').c, 1);
+    clock += VASSAL.ms + 1000;
+    await call('GET', '/state', null, D);
+    assert.equal(get('SELECT COUNT(*) AS c FROM vassals').c, 0, 'na 3 dagen vrij');
+  } finally {
+    Date.now = realNow;
+  }
+});
