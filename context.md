@@ -187,6 +187,15 @@ registratie; oude spelers kregen een vast willekeurig volk.
     - Stad: meertjes met vloeiende oevers (`lakeImage`), fijne sprietjes over de grond bij inzoomen (`drawGroundDetail`,
       op gsm pas vanaf zoom 1,8). Poorttorens worden gecachet (`gatePart`): `A.box` met textuur is duur, nooit per beeld.
 
+23. **Stad nog mooier** ("10 keer zo mooi"): `towndress.js` = aankleding van de stad. Eén grondafbeelding (kasseistraten
+    met stoeprand vanaf tijdperk 2, paadjes van elke deur naar de straat via BFS, erven, moestuintjes, zachte donkere voet,
+    vervaagde slagschaduwen) die mee in `groundLayer` gaat (één `drawSub` per beeld), en losse spullen op vrije tegels
+    (lantaarns met gloed 's nachts, put, banken, fruitbomen, struiken, bloembedden, tonnen, kisten, hooi, karren,
+    houtstapels, hekjes, vogelverschrikkers), afhankelijk van het gebouw ernaast. Alles deterministisch, opnieuw gemaakt
+    als `dressKey` verandert. Kleine gebouwen 1,12× groter (`bScale`), huizen in 3 tinten (`buildingSprite(…, id)`) en met
+    eigen details per volk (`houseCiv`). Warme sfeer + vignet overdag (`FX.grade`, niet op gsm).
+    Let op: spullen-afbeeldingen hebben per soort een krappe omkadering en een resolutie volgens de zoom (anders traag).
+
 ## 8. Bekende beperkingen en ideeën
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
