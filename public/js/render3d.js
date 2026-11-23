@@ -74,6 +74,11 @@ export class Scene {
     const bb = ax === 'x' ? [a0, c1 - r, cz - r, a1, c1 + r, cz + r] : [c1 - r, a0, cz - r, c1 + r, a1, cz + r];
     return this.add({ t: 4, ax, c1, cz, r, a0, a1, bb }, mat);
   }
+  // capsule (staaf met ronde uiteinden) tussen twee punten: armen, benen, speren, stelen
+  cap(a, b, r, mat) {
+    const bb = [Math.min(a[0], b[0]) - r, Math.min(a[1], b[1]) - r, Math.min(a[2], b[2]) - r, Math.max(a[0], b[0]) + r, Math.max(a[1], b[1]) + r, Math.max(a[2], b[2]) + r];
+    return this.add({ t: 5, a, b, r, bb }, mat);
+  }
   cyl(cx, cy, r, z0, z1, mat) { return this.add({ t: 1, cx, cy, r, z0, z1, bb: [cx - r, cy - r, z0, cx + r, cy + r, z1] }, mat); }
   cone(cx, cy, r, z0, z1, mat) { return this.add({ t: 2, cx, cy, r, z0, z1, bb: [cx - r, cy - r, z0, cx + r, cy + r, z1] }, mat); }
   // ellipsoïde; zmin knipt de onderkant af (koepel)
@@ -154,6 +159,37 @@ function hitPrim(p, ox, oy, oz, dx, dy, dz, tmax, out) {
       return t;
     }
     return -1;
+  }
+  if (p.t === 5) { // capsule (formule van Inigo Quilez)
+    const dl = Math.hypot(dx, dy, dz); const rx = dx / dl; const ry = dy / dl; const rz = dz / dl;
+    const [ax, ay, az] = p.a; const [bx, by, bz] = p.b;
+    const bax = bx - ax; const bay = by - ay; const baz = bz - az;
+    const oax = ox - ax; const oay = oy - ay; const oaz = oz - az;
+    const baba = bax * bax + bay * bay + baz * baz; const bard = bax * rx + bay * ry + baz * rz; const baoa = bax * oax + bay * oay + baz * oaz;
+    const rdoa = rx * oax + ry * oay + rz * oaz; const oaoa = oax * oax + oay * oay + oaz * oaz;
+    const A2 = baba - bard * bard; const B2 = baba * rdoa - baoa * bard; const C2 = baba * oaoa - baoa * baoa - p.r * p.r * baba;
+    let t = -1;
+    const h = B2 * B2 - A2 * C2;
+    if (h >= 0 && Math.abs(A2) > 1e-12) {
+      t = (-B2 - Math.sqrt(h)) / A2;
+      const y = baoa + t * bard;
+      if (!(y > 0 && y < baba)) {
+        const ocx = y <= 0 ? oax : ox - bx; const ocy = y <= 0 ? oay : oy - by; const ocz = y <= 0 ? oaz : oz - bz;
+        const b2 = rx * ocx + ry * ocy + rz * ocz; const c2 = ocx * ocx + ocy * ocy + ocz * ocz - p.r * p.r;
+        const h2 = b2 * b2 - c2;
+        t = h2 > 0 ? -b2 - Math.sqrt(h2) : -1;
+      }
+    } else if (Math.abs(A2) <= 1e-12) return -1;
+    if (t <= EPS) return -1;
+    const td = t / dl; // terug naar de schaal van de oorspronkelijke richting
+    if (td > tmax) return -1;
+    if (out) {
+      const px = ox + rx * t - ax; const py = oy + ry * t - ay; const pz = oz + rz * t - az;
+      const k = Math.max(0, Math.min(1, (px * bax + py * bay + pz * baz) / baba));
+      const nx = px - bax * k; const ny = py - bay * k; const nz = pz - baz * k; const l = Math.hypot(nx, ny, nz) || 1;
+      out[0] = nx / l; out[1] = ny / l; out[2] = nz / l;
+    }
+    return td;
   }
   if (p.t === 4) { // liggende cilinder: assen omwisselen zodat de as langs 'a' ligt
     const X = p.ax === 'x';
@@ -336,7 +372,7 @@ const MAT = {
     alb[0] = base[0] * k; alb[1] = base[1] * k; alb[2] = base[2] * k;
     return 1;
   },
-  plain(m) { const c = m.c || [0.6, 0.6, 0.6]; alb[0] = c[0]; alb[1] = c[1]; alb[2] = c[2]; return 1; },
+  plain(m) { const c = m.c || [0.6, 0.6, 0.6]; alb[0] = c[0]; alb[1] = c[1]; alb[2] = c[2]; return m.shiny ? 2 : 1; },
   brick(m, p, n, u, v) { // leemstenen: kleine blokjes, warm van kleur
     return MAT.stone({ c: m.c || [0.74, 0.58, 0.4], row: 0.045, bw: 0.09 }, p, n, u, v);
   },
@@ -416,6 +452,7 @@ export function render(scene, scale = 2, opts = {}) {
   const ZT = zTop + 0.5;
   const nrm = [0, 0, 0]; const pt = [0, 0, 0];
   const AO_N = opts.ao === undefined ? 5 : opts.ao;
+  const FILL = opts.fill === undefined ? 0.16 : opts.fill;
   const dirs = [];
   for (let k = 0; k < AO_N; k++) { const a = (k / AO_N) * Math.PI * 2 + 0.4; dirs.push([Math.cos(a), Math.sin(a)]); }
   const shade = (px, py, pz, n, mat, prim, out) => {
@@ -457,8 +494,10 @@ export function render(scene, scale = 2, opts = {}) {
     if (pz < 0.08) ao *= 0.7 + 0.3 * (pz / 0.08);
     const sky = 0.55 + 0.45 * n[2];
     const bounce = (1 - n[2]) * 0.5;
+    // zacht invullicht vanuit de kijker, zodat de kant naar de speler niet te donker wordt
+    const fill = FILL * Math.max(0, n[0] * VX + n[1] * VY + n[2] * VZ) * ao;
     for (let c = 0; c < 3; c++) {
-      out[c] = alb[c] * (SUN_COL[c] * sun * 1.05 + (SKY_COL[c] * sky + GROUND_COL[c] * bounce) * ao);
+      out[c] = alb[c] * (SUN_COL[c] * sun * 1.05 + (SKY_COL[c] * sky + GROUND_COL[c] * bounce) * ao + fill);
     }
     if (kind === 2) { // glans van glas
       const hx = SUN[0] + VX; const hy = SUN[1] + VY; const hz = SUN[2] + VZ; const hl = Math.hypot(hx, hy, hz);

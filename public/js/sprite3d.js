@@ -11,12 +11,26 @@ let ready = 0;
 const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4);
 // eenmaal gerenderde gebouwen bewaren in de browser (Cache Storage), zodat dat maar één keer gebeurt.
 // Verhoog VERSION als de modellen of de renderer veranderen.
-const VERSION = 1;
+const VERSION = 3;
 const STORE = 'rvs-3d-v' + VERSION;
 const hasStore = typeof caches !== 'undefined' && typeof window !== 'undefined' && window.isSecureContext;
 const urlOf = (key) => `/__3d/${VERSION}/${SCALE}/${encodeURIComponent(key)}`;
 
+// figuren krijgen een zachte donkere rand (beter leesbaar op het gras)
+function outlined(cv) {
+  const o = document.createElement('canvas');
+  o.width = cv.width; o.height = cv.height;
+  const g = o.getContext('2d');
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) g.drawImage(cv, dx, dy);
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = 'rgba(24,16,8,0.55)'; g.fillRect(0, 0, o.width, o.height);
+  g.globalCompositeOperation = 'source-over';
+  g.drawImage(cv, 0, 0);
+  return o;
+}
+
 function finish(key, cv, meta) {
+  if (key.startsWith('f|')) cv = outlined(cv);
   cache.set(key, { cv, w: cv.width / SCALE, h: cv.height / SCALE, ax: -meta.ox, ay: -meta.oy, lights: meta.lights.map(([x, y]) => [x, y, 1]), anchors: meta.anchors, d3: true });
   ready++;
 }
@@ -47,22 +61,31 @@ function toStore(key, cv, meta) {
 // oude versies opruimen
 if (hasStore) caches.keys().then((ks) => ks.filter((k) => k.startsWith('rvs-3d-') && k !== STORE).forEach((k) => caches.delete(k))).catch(() => {});
 
+// een paar werkers naast elkaar (gebouwen en figuren tegelijk), elk met hun eigen wachtrij
+const POOL = typeof navigator !== 'undefined' ? Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1)) : 1;
+let workers = [];
+let nextW = 0;
+function onMsg(e) {
+  const m = e.data;
+  pending.delete(m.id);
+  if (m.error) { console.warn('3D-model mislukt', m.id, m.error); cache.set(m.id, false); return; }
+  const cv = document.createElement('canvas');
+  cv.width = m.w; cv.height = m.h;
+  cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.buffer), m.w, m.h), 0, 0);
+  const meta = { ox: m.ox, oy: m.oy, lights: m.lights, anchors: m.anchors };
+  finish(m.id, cv, meta);
+  toStore(m.id, cv, meta);
+}
 function ensureWorker() {
-  if (worker || failed) return;
+  if (workers.length || failed) return;
   try {
-    worker = new Worker(new URL('./render-worker.js', import.meta.url), { type: 'module' });
-    worker.onmessage = (e) => {
-      const m = e.data;
-      pending.delete(m.id);
-      if (m.error) { console.warn('3D-gebouw mislukt', m.id, m.error); cache.set(m.id, false); return; }
-      const cv = document.createElement('canvas');
-      cv.width = m.w; cv.height = m.h;
-      cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.buffer), m.w, m.h), 0, 0);
-      const meta = { ox: m.ox, oy: m.oy, lights: m.lights, anchors: m.anchors };
-      finish(m.id, cv, meta);
-      toStore(m.id, cv, meta);
-    };
-    worker.onerror = () => { failed = true; worker = null; };
+    for (let i = 0; i < POOL; i++) {
+      const w = new Worker(new URL('./render-worker.js', import.meta.url), { type: 'module' });
+      w.onmessage = onMsg;
+      w.onerror = () => { failed = true; workers = []; worker = null; };
+      workers.push(w);
+    }
+    worker = workers[0];
   } catch {
     failed = true;
   }
@@ -91,7 +114,8 @@ function request(key, job) {
   pending.add(key);
   fromStore(key).then((hit) => {
     if (hit) { pending.delete(key); return; }
-    worker.postMessage({ id: key, scale: SCALE, low: LOW, ...job });
+    const w = workers[nextW++ % workers.length];
+    if (w) w.postMessage({ id: key, scale: SCALE, low: LOW, ...job });
   });
 }
 
@@ -105,5 +129,19 @@ export function getWall(seg, level, hPx) {
   if (s) return s;
   if (s === false) return null;
   request(key, { wall: { dx, dy, h, level, tower: !!seg.tower } });
+  return null;
+}
+
+// figuur (mens of ruiter) in 3D; L = de opties van de getekende figuur, mode = idle/walk/work, f = beeld 0..7
+const FIG_KEYS = ['body', 'leg', 'armor', 'skin', 'helmet', 'hat', 'weapon', 'tool', 'carry', 'team', 'barb', 'look', 'horse'];
+export function getFig(kind, o, mode, f) {
+  if (!enabled() || o.thumb) return null;
+  const L = {};
+  let key = `f|${kind}|${mode}${f}`;
+  for (const k of FIG_KEYS) { const v = o[k]; if (v !== undefined && v !== null && v !== false && v !== '') { L[k] = v; key += `|${k}=${v}`; } }
+  const s = cache.get(key);
+  if (s) return s;
+  if (s === false) return null;
+  request(key, { fig: { kind, L, mode, f } });
   return null;
 }
