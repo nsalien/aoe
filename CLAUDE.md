@@ -91,6 +91,16 @@ Daarom:
   Het einde (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override` (zelfde buit, rapporten en punten).
   **Oefenslag** (`/battle/practice`, `startPractice`, `target_kind = 'practice'`): meteen 30 tegen 30 tegen de computer, in een
   ommuurd oefendorp of in je eigen stad; `finishBattle` toont enkel de uitslag (geen verliezen, buit of rapport).
+- **Computerspelers (bots)**: gewone spelers met `players.bot = 1` en een eigen stad, in eigen clans (teams met enkel bots;
+  `/register` zet een mens nooit in een botclan). Aantal en niveau staan in `world.bots` / `world.bot_level` (beheer).
+  Geen achtergrondtaak (de cron-worker draait niet zonder tokenrecht): na een gewoon verzoek komt telkens één bot aan de beurt
+  (`botTick` in `functions/lib/bots.js`, via `waitUntil`, enkel als het verzoek ≤ 18 query's gebruikte; `players.bot_next` + index).
+  Een bot haalt gemiste tijd in stappen in (30–90 min, hooguit 3 per beurt) met telkens een beslissing van het brein
+  (`functions/lib/botbrain.js`, puur, gebruikt de gewone acties uit `sim.js`: dorpelingen, huizen, werkplekken, tijdperken,
+  muurring op ring 1 met 4 poorten, torens, leger). Pas als hij bij is, beslist hij over zijn leger (`military`): versterking naar
+  een clanlid dat aangevallen wordt (en terughalen), karavanen naar een clanlid dat spaart, spelers aanvallen na hun vrede als
+  `resolveBattle` voorspelt dat hij wint (gezamenlijk doel per clan in `config` `clan:<team>`, wachttijd per doelwit voor alle bots
+  `prey:<stad>`), anders roverskampen. Zijn geheugen staat in `towns.state.bot`. `ensureBots` maakt/verwijdert bots (± om de 10 min).
 - Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en
   in de tabel `config` bewaard; inschrijvingen in `push_subs` (enkel echte meldingsdiensten, `validPushEndpoint`).
   `notifyDue()` stuurt ±2 min voor een aanval aankomt een melding met geluid (aanvaller + verdediger) en ±1 min vooraf een stille
