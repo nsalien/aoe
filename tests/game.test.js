@@ -1141,3 +1141,72 @@ test('moed: wie zwaar verliest, slaat op de vlucht, luistert niet meer en hergro
   assert.equal(st.over, 1);
   assert.ok(battleOutcome(st).attLeft.spear > 0, 'wie vlucht, overleeft');
 });
+
+// ---------- computerspelers (bots) ----------
+import { ensureBots, botTick } from '../functions/lib/bots.js';
+import { botEconomy, wallPlan } from '../functions/lib/botbrain.js';
+import { age } from '../public/shared/sim.js';
+import { getWorld } from '../functions/lib/game.js';
+
+test('bots: het brein bouwt een stad uit (tijdperken, muur met poorten, leger) met de gewone regels', () => {
+  const s = newTownState(0, 'greek'); ensureTerritory(s, 4242);
+  for (let t = 1800000; t <= 3 * 86400000; t += 1800000) { advance(s, t, 1); botEconomy(s, 1, { lvl: 2, peace: t < 86400000 }); }
+  assert.ok(age(s) >= 3, `tijdperk ${age(s)} na 3 dagen`);
+  assert.ok(totalVillagers(s) >= 45);
+  const { walls, gates } = wallPlan();
+  assert.equal(gates.length, 8, '4 poorten van 2 tegels');
+  assert.equal(s.walls.length, walls.length, 'de hele muurring staat');
+  assert.equal(s.gates.length, 8);
+  assert.ok(Object.values(s.units).reduce((a, b) => a + b, 0) >= 10, 'een leger');
+  for (const r of Object.keys(s.res)) assert.ok(s.res[r] >= 0, 'nooit onder nul');
+});
+
+test('bots: eigen clans, een speler komt nooit bij de bots, ze halen gemiste tijd in en vallen pas na de vrede aan', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body) => {
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers: { 'content-type': 'application/json', 'x-admin-key': 'k' }, body: body && JSON.stringify(body) }), env });
+    return res.json();
+  };
+  assert.equal((await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 2, bots: 4, botLevel: 2, seed: 99 })).ok, true);
+  const sql = (q, ...v) => db.raw.prepare(q).all(...v);
+  const bots = sql('SELECT p.id, p.team_id FROM players p WHERE p.bot = 1');
+  assert.equal(bots.length, 4);
+  assert.equal(new Set(bots.map((b) => b.team_id)).size, 2, 'twee clans van twee bots');
+  await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
+  const anna = sql("SELECT p.id, p.team_id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Anna'")[0];
+  assert.ok(!bots.some((b) => b.team_id === anna.team_id), 'Anna zit niet in een botclan');
+  // het seizoen loopt al 2,5 dag; Anna begon net (nog vrede)
+  const now = Date.now();
+  db.raw.prepare('UPDATE world SET start_at = ?').run(now - 2.5 * 86400000);
+  db.raw.prepare("UPDATE players SET created_at = ? WHERE bot = 1").run(now - 2.5 * 86400000);
+  db.raw.prepare("UPDATE towns SET state = json_set(state, '$.t', ?) WHERE player_id IN (SELECT id FROM players WHERE bot = 1)").run(now - 2.5 * 86400000);
+  db.raw.prepare("UPDATE players SET created_at = ? WHERE id = ?").run(now - 3600000, anna.id);
+  let world = await getWorld(db);
+  for (let k = 0; k < 120; k++) { await botTick(db, world, now + k); world = await getWorld(db); }
+  for (const b of sql('SELECT t.state FROM players p JOIN towns t ON t.player_id = p.id WHERE p.bot = 1')) {
+    const s = JSON.parse(b.state);
+    assert.ok(now - s.t < 10 * 60000, 'ingehaald');
+    assert.ok(age(s) >= 2, `tijdperk ${age(s)}`);
+  }
+  const att = () => sql("SELECT COUNT(*) AS c FROM marches m JOIN players p ON p.id = m.player_id WHERE p.bot = 1 AND m.kind = 'attack' AND m.target_kind = 'town' AND m.target_id = ?", anna.tid)[0].c;
+  assert.equal(att(), 0, 'niet aanvallen tijdens de vrede');
+  // de vrede van Anna is voorbij: na een tijdje komt er een aanval
+  db.raw.prepare("UPDATE players SET created_at = ? WHERE id = ?").run(now - 2 * 86400000, anna.id);
+  db.raw.prepare("UPDATE players SET bot_next = 0 WHERE bot = 1").run();
+  let t = now;
+  for (let k = 0; k < 80 && !att(); k++) { t += 5 * 60000; db.raw.prepare("UPDATE players SET bot_next = 0 WHERE bot = 1").run(); await botTick(db, world, t); }
+  assert.ok(att() >= 1, 'een bot valt Anna aan na haar vrede');
+  // een clanlid wordt aangevallen: de ander stuurt versterking
+  const [b1, b2] = sql('SELECT p.id, p.team_id, t.id AS tid, t.x, t.y FROM players p JOIN towns t ON t.player_id = p.id WHERE p.bot = 1 ORDER BY p.id');
+  db.raw.prepare(`INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, target_team, to_x, to_y, units, depart_at, arrive_at, status)
+    VALUES (?, ?, 'attack', ?, 0, 0, 'town', ?, ?, ?, ?, '{"sword":40}', ?, ?, 'out')`).run(anna.id, anna.team_id, anna.tid, b1.tid, b1.team_id, b1.x, b1.y, t, t + 6 * 3600000);
+  db.raw.prepare("UPDATE towns SET state = json_set(state, '$.units', json('{\"spear\":20,\"archer\":10}')) WHERE id = (SELECT id FROM towns WHERE player_id = ?)").run(b2.id);
+  for (let k = 0; k < 8; k++) { t += 60000; db.raw.prepare("UPDATE players SET bot_next = 0 WHERE id = ?").run(b2.id); await botTick(db, world, t); }
+  const sup = sql("SELECT units FROM marches WHERE player_id = ? AND kind = 'support' AND target_id = ?", b2.id, b1.tid);
+  assert.equal(sup.length, 1, 'versterking voor het clanlid');
+  // minder bots gevraagd: de overtollige verdwijnen
+  db.raw.prepare('UPDATE world SET bots = 2').run();
+  await ensureBots(db, await getWorld(db), t);
+  assert.equal(sql('SELECT COUNT(*) AS c FROM players WHERE bot = 1')[0].c, 2);
+});

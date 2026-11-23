@@ -61,7 +61,7 @@ export async function loadTown(db, id) {
   return row;
 }
 
-async function saveTown(db, town) {
+export async function saveTown(db, town) {
   const r = await db.prepare('UPDATE towns SET state = ?, version = version + 1 WHERE id = ? AND version = ?')
     .bind(JSON.stringify(town.state), town.id, town.version).run();
   if (!r.meta.changes) throw new ConflictError();
