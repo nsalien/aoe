@@ -20,17 +20,24 @@ const onRoad = (gx, gy) => Math.abs(gx - MID) < 0.62 || Math.abs(gy - MID) < 0.6
 const inPlaza = (gx, gy) => Math.hypot(gx - MID, gy - MID) < PLAZA + 0.2;
 
 // ---------- spullen als kleine afbeeldingen ----------
-const PS = 3; // resolutie van de spullen
+// per soort een krappe omkadering (wereldpixels rond de voet) en een resolutie die past bij de zoom
+const BOXES = {
+  lamp: [-6, -36, 13, 5], well: [-16, -36, 17, 7], bush: [-12, -15, 13, 5], flowers: [-11, -10, 11, 6],
+  fruit: [-15, -34, 17, 6], barrels: [-9, -19, 11, 5], crates: [-12, -24, 14, 6], hay: [-12, -26, 17, 6],
+  cart: [-22, -18, 16, 7], bench: [-10, -15, 11, 5], logs: [-17, -14, 13, 8], scare: [-8, -25, 8, 4],
+  fencex: [-24, -20, 26, 10], fencey: [-26, -20, 24, 10],
+};
 const BOX = [-26, -58, 26, 10];
 const propCache = new Map();
+const resFor = (sc) => (sc <= 1.1 ? 1 : sc <= 1.7 ? 1.6 : sc <= 2.6 ? 2.4 : 3.2);
 
-function propSprite(kind, v) {
-  const key = `${kind}|${v}`;
+function propSprite(kind, v, PS) {
+  const key = `${kind}|${v}|${PS}`;
   let cv = propCache.get(key);
   if (cv) return cv;
-  const [x0, y0, x1, y1] = BOX;
+  const [x0, y0, x1, y1] = BOXES[kind] || BOX;
   cv = document.createElement('canvas');
-  cv.width = (x1 - x0) * PS; cv.height = (y1 - y0) * PS;
+  cv.width = Math.ceil((x1 - x0) * PS); cv.height = Math.ceil((y1 - y0) * PS);
   const c = cv.getContext('2d');
   c.scale(PS, PS); c.translate(-x0, -y0);
   c.lineCap = 'round'; c.lineJoin = 'round';
@@ -49,10 +56,11 @@ function propSprite(kind, v) {
 }
 
 export function drawProp(ctx, p) {
-  const cv = propSprite(p.kind, p.v || 0);
-  const [x0, y0, x1, y1] = BOX;
-  const w = toWorld(p.gx, p.gy);
+  const m = ctx.getTransform();
   const s = p.s || 1;
+  const cv = propSprite(p.kind, p.v || 0, resFor(Math.hypot(m.a, m.b) * s));
+  const [x0, y0, x1, y1] = BOXES[p.kind] || BOX;
+  const w = toWorld(p.gx, p.gy);
   ctx.drawImage(cv, w.x + x0 * s, w.y + y0 * s, (x1 - x0) * s, (y1 - y0) * s);
 }
 
