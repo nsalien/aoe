@@ -38,10 +38,32 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
 - Grondstoffen: voedsel, hout, steen, goud. Start: 300/300/150/100, 6 dorpelingen (3 voedsel, 3 hout).
 - Dorpelingen werken op **werkplekken** (stadscentrum + boerderij/houthakkerskamp/steengroeve/goudmijn per niveau).
   Opslag (stadscentrum + opslagplaats) begrenst je voorraad; een deel is verborgen voor plunderaars.
-- **4 tijdperken**: Vuursteen → Brons → IJzer → Kroon (stadscentrum verbeteren; IJzer = kasteel).
-- **Bouwers**: 2 tegelijk, 3 vanaf het IJzertijdperk (`maxBuilds`).
+- **5 tijdperken** (gevraagd: "5 tijdperken met namen, upgrades per tijdperk en een paar nieuwe gebouwen"):
+  Vuursteen → Brons → IJzer → **Gilden** → **Kroon** (stadscentrum verbeteren; IJzer = kasteel). Vroeger was Kroon het 4e;
+  wie in tijdperk 4 zat, ziet nu "Gilden". Een actieve speler haalt de Kroon rond dag 11–16 van 28.
+- **Niveau N vraagt tijdperk N** (`levelAge`): bijna alle gebouwen gaan tot niveau 5 (vroeger 3). Uitzondering: de Academie
+  (`levelAges` [3, 4, 5]). Niveaus 4–5 zijn zichtbaar (vaandels, gouden piek en voetband; huizen een aanbouw en een torentje).
+- **Bouwers**: 2 tegelijk, 3 vanaf het IJzertijdperk, +1 met een bouwloods (`maxBuilds`); de bouwloods bouwt ook 5%/niveau sneller (`buildTime`).
 - **Gebouwen**: stadscentrum, huis, boerderij, houthakkerskamp, steengroeve, goudmijn, opslagplaats, kazerne, stadsmuur
-  (tijdperk 1); schietbaan, stal, smidse, markt, wachttoren (2); belegwerkplaats (3); monument (4, punten).
+  (tijdperk 1); schietbaan, stal, smidse, markt, wachttoren, **molen** (+5% voedsel/niv.) (2); belegwerkplaats, **Academie** (3);
+  monument, **gildehuis** (+3% alles/niv.), **bouwloods** (4); **Adelshof** (edelmannen), **kathedraal** (trouw +1/u per niveau,
+  600 punten/niv.) (5). Productiebonussen: `boost()` in `sim.js`.
+- **Smidse**: +5% aanval/verdediging per niveau én het uitzicht van alle soldaten (`gearOf`: leer en brons, ijzer en maliën
+  vanaf niveau 3, plaatharnas op 5).
+- **Academie** (gevraagd: "onderzoek naar betere wapens, zichtbaar per upgrade"): `TECHS` in `rules.js`, 4 soorten
+  (voetvolk, schutters, ruiterij, stad) × 3 rijen. Geen ruwe kracht maar vaardigheden: schildmuur, krijgsdrill, strijdkreet,
+  vuurpijlen, taxusboog, pijlenregen, hoefijzers, lansen, flankrit, kokende pek, torenkruisbogen, ijzerbeslag. Eén onderzoek
+  tegelijk (`s.research`, klaar in `advance()`), voorgoed (`s.tech`). Werkt in de live slag (`st.tk`, `TK()` in
+  `fieldbattle.js`) en als kleine bonus in de automatische slag (`auto` → `techMods` in `battle.js`). Zichtbaar: `troops.js`
+  (groot schild, gouden pluim, vuurpijlen, lange boog, kleed, lans, ...) en de Academie zelf (variant = afgewerkte soorten).
+- **Edelman, trouw en vazallen** (gevraagd: "edelmannen zoals Tribal Wars, maar toegankelijk; ook bij andere spelers"):
+  edelman in het Adelshof (één per niveau, één tegelijk in opleiding). Trouw 0–100 (`s.loy`, herstelt 2/u + kathedraal).
+  Een gewonnen aanval met een levende edelman: −25 per edelman (`applyNobles` in `functions/lib/vassal.js`). Bij 0 is de stad
+  3 dagen **vazal** (tabel `vassals` + `s.vas`): schatting (20% van de productie om de 6 u, karavaan `kind = 'tribute'`),
+  heer en vazal vallen elkaar niet aan (maar helpen mag), de heer krijgt 20% van de punten van de vazal, een bot-vazal stuurt
+  zijn heer versterking. Vrij: na 3 dagen, met losgeld (`/vassal/ransom`), of als een clanlid de heer verslaat. Daarna 24 u
+  beschermd. Max. 2 vazallen; niet tegen steden met < 45% van je punten. Sterke bots gebruiken edelmannen (vanaf ± week 3).
+  Niemand verliest zijn stad (één stad per speler blijft).
 - **Afbreken**: elk gebouw behalve het stadscentrum; een kwart van de kosten terug (de helft van een lopende bouw).
   Niet als er nog getraind wordt. Werkers boven de nieuwe plaatsen worden vrij.
 - **Vondsten**: af en toe een schaap/eik/rotsblokken/goud rond je stad; een dorpeling oogst ze (`BONUS`).
@@ -119,7 +141,8 @@ goede balans t.o.v. de echte spelers, wat mindere en wat sterkere bots"): elke b
 tot een doelscore t.o.v. de actieve echte spelers (zwak ±70% van de mediaan, gemiddeld de mediaan, sterk zo goed als de beste);
 bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraak. Een speler die stopt, laten ze met rust.
 
-**Punten**: opbouwpunten (gebouwen, dorpelingen, troepen; monument +1500/niveau) + gevechtspunten.
+**Punten**: opbouwpunten (gebouwen, onderzoek, dorpelingen, troepen; monument +1500/niveau, kathedraal +600/niveau)
++ 20% van de punten van je vazallen + gevechtspunten.
 
 ## 4. Werkwijze en omgeving
 
@@ -251,6 +274,14 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
 28. **Balans van de bots** (zie §3): `BOT_TIERS`/`botTarget` in `botbrain.js`, `humanRef` in `bots.js`, migratie `0006`.
     Simulatie (5 dagen: een actieve, een gewone en een gestopte speler + 4 bots): sterk ±880 tegen de beste speler 843,
     gemiddeld ±760 tegen de mediaan 732, zwak ±430; de gestopte speler werd nooit aangevallen, de gewone 5 keer.
+
+29. **Vijf tijdperken, nieuwe gebouwen, Academie, edelmannen en vazallen** (zie §3). Regels in `rules.js`/`sim.js`,
+    vazallen in `functions/lib/vassal.js` + migratie `0007`, 3D-modellen in `models3d.js` (molen, Academie met varianten,
+    gildehuis met trapgevel, bouwloods met kraan, Adelshof, kathedraal; paleizen per volk op stadscentrum niveau 5),
+    getekende versies in `art.js`, troepen in `troops.js` + `figures.js`/`figmodels.js`, vuurpijlen en kokende pek in
+    `siegeview.js`. Tests: tijdperken, productie, bouwloods, onderzoek, automatische en live slag, edelman en een hele
+    vazalcyclus via de echte routes (onderwerpen, schatting, geen aanvallen, ranglijst, bevrijding, bescherming, losgeld, na 3 dagen vrij).
+    Tempo (botbrein, zeer actief): IJzer dag 2,6, Gilden dag 6,3, Kroon dag 11,2.
 
 ## 8. Bekende beperkingen en ideeën
 
