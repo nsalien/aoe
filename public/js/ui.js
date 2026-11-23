@@ -95,9 +95,9 @@ export function unitThumb(unit, team = '#3f7fd9') {
   cv.width = 88; cv.height = 88;
   const ctx = cv.getContext('2d');
   ctx.scale(2, 2);
-  const o = { s: 2.1, team };
+  const o = { s: 2.1, team, thumb: true };
   const big = { elephant: 1.0, chariot: 1.4, camel: 1.12, yabusame: 1.24 };
-  if (FIG.uniqueUnit(ctx, unit, 22, 42, { s: big[unit] || 2.1, team })) {
+  if (FIG.uniqueUnit(ctx, unit, 22, 42, { s: big[unit] || 2.1, team, thumb: true })) {
     const url = cv.toDataURL(); thumbs.set(key, url); return url;
   }
   switch (unit) {
@@ -105,9 +105,9 @@ export function unitThumb(unit, team = '#3f7fd9') {
     case 'spear': A.person(ctx, 20, 40, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
     case 'sword': A.person(ctx, 22, 40, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
     case 'archer': A.person(ctx, 20, 40, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
-    case 'scout': A.horseman(ctx, 20, 40, { s: 1.6, team, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b' }); break;
-    case 'rider': A.horseman(ctx, 20, 40, { s: 1.6, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' }); break;
-    case 'knight': A.horseman(ctx, 20, 40, { s: 1.6, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530' }); break;
+    case 'scout': A.horseman(ctx, 20, 40, { s: 1.6, team, thumb: true, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b' }); break;
+    case 'rider': A.horseman(ctx, 20, 40, { s: 1.6, team, thumb: true, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' }); break;
+    case 'knight': A.horseman(ctx, 20, 40, { s: 1.6, team, thumb: true, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530' }); break;
     case 'ram': A.ram(ctx, 21, 34, 1.5); break;
     case 'stonethrower': A.stoneThrower(ctx, 22, 38, 1.5); break;
     default:
