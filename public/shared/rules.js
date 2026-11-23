@@ -411,7 +411,7 @@ export const TECHS = {
   volley: { line: 'rng', row: 3, name: 'Pijlenregen', cost: T3, time: 10 * 3600, auto: { atk: { rng: 0.15 } },
     desc: 'Schutters schieten 15% sneller.' },
   horseshoes: { line: 'cav', row: 1, name: 'Hoefijzers', cost: { food: 1000, wood: 300, gold: 900 }, time: 2 * 3600, auto: {},
-    desc: 'Ruiterij is 10% sneller: op de wereldkaart, in je gebied en in de slag.' },
+    desc: 'Ruiterij is 10% sneller: op de wereldkaart en in de slag.' },
   lances: { line: 'cav', row: 2, name: 'Lansen', cost: T2, time: 5 * 3600, auto: { atk: { cav: 0.1 } },
     desc: 'De stormloop van je ruiterij is 25% sterker.' },
   flank: { line: 'cav', row: 3, name: 'Flankrit', cost: T3, time: 10 * 3600, auto: { atk: { cav: 0.1 } },

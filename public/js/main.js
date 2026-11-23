@@ -418,6 +418,7 @@ function computeLive(force) {
     Object.entries(s.queues).map(([k, q]) => `${k}${q.length}:${q[0].done}`).join(','),
     s.buildings.map((b) => b.level).join(''),
     JSON.stringify(s.units), JSON.stringify(s.villagers), s.rally,
+    s.research ? s.research.id : '', Object.keys(s.tech || {}).join(','), Math.floor(s.loy ?? 100), s.vas ? s.vas.until : '',
     (s.nodes || []).map((n) => `${n.id}${n.claimed ? 'c' : ''}`).join(','),
     (s.harvests || []).map((h) => h.id).join(','),
     (s.field || []).map((g) => `${g.id}${g.pending ? 'p' : ''}${g.work ? g.work.type : ''}${g.order ? g.order.type : ''}`).join(','),
@@ -1208,6 +1209,14 @@ const actions = {
     const n = Math.floor(Number(i && i.value) || 0);
     if (n < 1) { toast('Kies een aantal.', 'err'); return; }
     act('/train', { unit: el.dataset.unit, count: n }, 'Training gestart');
+  },
+  research(el) {
+    act('/research', { id: el.dataset.id }, 'Onderzoek gestart');
+  },
+  async ransom() {
+    if (!confirm('Losgeld betalen? Je bent meteen vrij.')) return;
+    const r = await act('/vassal/ransom', {}, 'Losgeld betaald: je bent weer vrij!');
+    if (r) refresh();
   },
   trade() {
     act('/trade', { give: $('#tr-give').value, get: $('#tr-get').value, amount: Math.floor(Number($('#tr-amount').value) || 0) }, 'Ruil voltooid');
