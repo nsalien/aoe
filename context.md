@@ -176,6 +176,17 @@ registratie; oude spelers kregen een vast willekeurig volk.
 21. Poorten 2 tegels breed (gevraagd door de gebruiker); oude poorten automatisch verbreed. In een belegering valt een
     poort in zijn geheel. Oefenslag: de computer krijgt een kleur die duidelijk verschilt van de speler.
 
+22. **Veel grafischer** (gevraagd: "troepen, gebouwen, terrein, kaart veel grafischer en gedetailleerder"):
+    - Wereldkaart (`worldmap.js`): vloeiend landschap i.p.v. blokjes. `worldgen.fieldAt` geeft hoogte/vocht op elk punt
+      (tegels blijven identiek), het reliëf wordt kolom per kolom getekend (voxel space) met licht, slagschaduw van bergen,
+      sneeuw, stranden, schuim, dichte bossen, akkers en wegen (A*) rond steden. Eén keer gebakken (±0,5–1 s).
+    - Gebouwen (`art.js`): gekapte stenen, planken, kalk met bakstenen, bolle dakpannen met mos, donkere omlijning
+      (gebouw apart getekend, dan `outline()`; de aangestampte grond eronder krijgt geen rand).
+    - Troepen (`figures.js`): volume (licht/schaduw per sprite), mantel/pluim in teamkleur, laarzen, schouderstukken,
+      paardendeken. In het spel `FIG_K` = 1,15× groter; kaartjes in het menu geven `thumb: true` mee (blijven gelijk).
+    - Stad: meertjes met vloeiende oevers (`lakeImage`), fijne sprietjes over de grond bij inzoomen (`drawGroundDetail`,
+      op gsm pas vanaf zoom 1,8). Poorttorens worden gecachet (`gatePart`): `A.box` met textuur is duur, nooit per beeld.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.

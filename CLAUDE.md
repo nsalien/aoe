@@ -95,6 +95,8 @@ Daarom:
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.
 - `public/js/art.js` — procedurele tekeningen (gebouwen, mensen, bomen; geen afbeeldingsbestanden).
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
+  `worldmap.js` bakt de wereldkaart (hoogteveld uit `worldgen.fieldAt`, kolom per kolom getekend, bossen, akkers, wegen).
+  Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.
 - `public/js/ui.js` — HTML-sjablonen; `icons.js` — SVG-iconen (gebruik deze, geen emoji); `main.js` — spelverloop in de browser.
 
 ## Android-app
