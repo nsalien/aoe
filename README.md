@@ -3,9 +3,10 @@
 Een browser-strategiespel in de stijl van klassieke "bouw je rijk"-games, gemaakt om met een kleine groep vrienden
 te spelen over **vier weken**:
 
-- **3 weken vredestijd** — iedereen bouwt zijn economie op, traint troepen en verslaat roverskampen.
-  Spelers kunnen elkaar nog niet aanvallen.
-- **1 week oorlog** — nu mag je vijandelijke steden aanvallen, verkennen en plunderen.
+- **24 uur vrede per speler** — de eerste 24 uur na je start bouw je je economie op, train je troepen en versla je
+  roverskampen. Niemand kan je aanvallen en jij kan zelf geen spelers aanvallen.
+- **Daarna oorlog** — vanaf dan mag je op eender welk moment vijandelijke steden aanvallen, verkennen en plunderen,
+  tot het einde van het seizoen. Wie later begint, krijgt ook 24 uur vrede.
 - **Automatische bondgenoten** — wie zich inschrijft, wordt automatisch aan een team gekoppeld
   (standaard teams van 2). Bondgenoten starten naast elkaar, kunnen elkaar niet aanvallen,
   maar wel troepen en grondstoffen sturen en chatten.
@@ -96,8 +97,8 @@ Na ±2 minuten staat het spel op **https://rijken-van-de-vallei.pages.dev**.
 | Instelling | Standaard | Uitleg |
 |---|---|---|
 | Startmoment | nu | Vóór de start kunnen spelers zich al inschrijven ("lobby"). |
-| Vredestijd | 21 dagen | Geen aanvallen tussen spelers. |
-| Oorlog | 7 dagen | Daarna is het seizoen voorbij en ligt de eindstand vast. |
+| Vrede per speler | 24 uur | Vanaf de start van een speler (of van het seizoen): geen aanvallen van of op die speler. |
+| Lengte seizoen | 28 dagen | Daarna is het seizoen voorbij en ligt de eindstand vast. |
 | Spelsnelheid | 1 | Hoger = alles (bouwen, productie, marsen) gaat sneller. Handig om te testen. |
 | Spelers per team | 2 | Bepaalt hoeveel bondgenoten er automatisch gekoppeld worden. |
 | Deelnamecode | — | Optioneel: enkel wie de code kent, kan zich inschrijven. |
@@ -129,7 +130,7 @@ npm run dev                           # http://localhost:8788
 npm test                              # spelregels testen
 ```
 
-Ga naar `http://localhost:8788/admin.html`, maak een wereld met bv. **snelheid 100** en **0,05 dagen vrede**,
+Ga naar `http://localhost:8788/admin.html`, maak een wereld met bv. **snelheid 100** en **0,1 uur vrede**,
 en registreer een paar spelers in verschillende browservensters (of privévensters) om het samenspel te testen.
 
 ## Binnen de gratis limieten blijven
@@ -155,7 +156,7 @@ dus een aanpassing geldt meteen overal. Voer daarna `npm test` uit.
 
 Indicatie bij snelheid 1 voor een zeer actieve speler die enkel op economie speelt: tijdperk 2 na ±1,5 dag,
 tijdperk 3 na ±3,5 dagen, tijdperk 4 na ±7,5 dagen, en een volledig monument rond dag 14.
-Wie ook een leger opbouwt of minder vaak inlogt, doet er langer over — dat past bij drie weken vrede.
+Wie ook een leger opbouwt of minder vaak inlogt, doet er langer over. Na 24 uur vrede kan je aangevallen worden: bouw dus tijdig een muur en een leger.
 
 ## Hoe zit het in elkaar?
 

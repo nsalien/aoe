@@ -134,5 +134,5 @@ npm run dev                      # http://localhost:8788  (beheer: /admin.html)
 npm test
 ```
 
-Maak via `/admin.html` een testwereld met bv. snelheid 100 en 0,05 dagen vrede.
+Maak via `/admin.html` een testwereld met bv. snelheid 100 en 0,1 uur vrede per speler.
 Playwright en Chromium zijn in cloudsessies voorgeïnstalleerd: maak screenshots om grafische wijzigingen te controleren.
