@@ -11,8 +11,10 @@ zodat een nieuwe sessie meteen verder kan. Werk het bij als je iets belangrijks 
 **Rijken van de Vallei** is een isometrisch browser-strategiespel in de stijl van Age of Empires, voor een kleine
 vriendengroep. Live op https://rijken-van-de-vallei.pages.dev (Cloudflare Pages + Pages Functions + D1, gratis plan).
 
-- Een **seizoen** = vredestijd (standaard 21 dagen) + oorlogsweek (7 dagen). In de vredestijd bouw je je economie op
-  en versla je rovers en barbaren; spelers aanvallen kan pas in de oorlogsweek. Daarna een eindstand.
+- Een **seizoen** duurt standaard 28 dagen (`world.war_ms`), daarna een eindstand. **Vrede is per speler**: de eerste
+  24 uur na zijn start (`world.prep_ms`; wie zich vóór de start inschreef: vanaf de start) kan niemand hem aanvallen en
+  kan hij zelf geen spelers aanvallen. Daarna kan iedereen eender wanneer aanvallen. Rovers en barbaren altijd.
+  (Vroeger: 3 weken vrede voor iedereen + 1 oorlogsweek; migratie `0004` zette het lopende seizoen om, zelfde einddatum.)
 - Spelers worden automatisch in **teams** gekoppeld (standaard 2 per team, tot 8 teams). Bondgenoten starten naast
   elkaar, kunnen elkaar troepen (versterking) en grondstoffen (karavanen via de markt) sturen en chatten.
 - Twee weergaven: **je stad** (met je eigen gebied eromheen) en de **wereldkaart** (56×56, steden + roverskampen).
@@ -74,8 +76,11 @@ registratie; oude spelers kregen een vast willekeurig volk.
   meer schade/levens per niveau; gesloopt = een niveau minder.
 
 **Wereldkaart en aanvallen**
-- Roverskampen (niveau 1–5; altijd aan te vallen, ook in vredestijd) en steden. Legers marcheren in echte tijd
+- Roverskampen (niveau 1–5; altijd aan te vallen, ook tijdens je vrede) en steden. Legers marcheren in echte tijd
   (`marches`), komen aan, vechten, keren terug met buit. Verkenners verkennen.
+- **Vrede** (`peaceEnd`/`peaceBlock` in `functions/lib/game.js`): een aanval of verkenning op een speler mag pas
+  **aankomen** als de vrede van beide spelers voorbij is (vertrekken mag al eerder). `/state` geeft `me.peaceEnd`,
+  `/map` per stad `peaceEnd`; de balk bovenaan toont "Vrede · nog …", op de kaart staat "· vrede" bij de stad.
 - Tik je een stad of kamp aan, dan zie je **"Onderweg hierheen"**: elke mars ernaartoe met klokuur en aftelling.
 - **Wat er gebeurt als een aanval aankomt** (`resolveMarch` → `maybeOfferBattle` in `functions/lib/game.js`):
   1. Er draait geen server op de achtergrond: een aankomst wordt verwerkt bij het eerstvolgende verzoek van **eender
@@ -200,6 +205,10 @@ registratie; oude spelers kregen een vast willekeurig volk.
     troepen zijn nu vooraf gerenderde 3D-modellen uit een eigen straalvolger (`render3d.js`, `models3d.js`, `figmodels.js`,
     `sprite3d.js`, `render-worker.js`). Eigen ontwerpen, geen kopie van AoE. Ruwweg 15–150 ms per gebouw en ±20 ms per
     figuurbeeld in een worker; daarna bewaard in de browser. Lichtrichting = die van de schaduwen in de stad.
+
+25. **Vrede per speler** (gevraagd: "vrede maar 24 uur nadat iemand begint, geen 3 weken; daarna eender wanneer
+    aanvallen"). Geen gezamenlijke vredestijd meer (fase is enkel nog `lobby`/`war`/`ended`). Beheer: "Vrede per speler
+    (uren)" en "Lengte seizoen (dagen)".
 
 ## 8. Bekende beperkingen en ideeën
 
