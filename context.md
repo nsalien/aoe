@@ -114,7 +114,10 @@ Ze bouwen hun stad uit zoals een actieve speler (± tijdperk 2 na 1 dag, 3 na 2,
 torens, trainen een leger, plunderen roverskampen en vallen spelers aan zodra hun vrede voorbij is en ze denken te winnen
 (normaal: per bot hooguit om de ±6 uur, en elke stad krijgt ±9 speluren rust na een aanval van een bot; een clan valt soms
 samen aan). Clanleden sturen elkaar versterking bij een aanval en grondstoffen als iemand spaart voor een nieuw tijdperk.
-Op de kaart, bij een stad en in de ranglijst staat "computer".
+Op de kaart, bij een stad en in de ranglijst staat "computer" met hun sterkte. **Balans** (gevraagd: "bots te sterk; zorg voor een
+goede balans t.o.v. de echte spelers, wat mindere en wat sterkere bots"): elke bot is zwak, gemiddeld of sterk en groeit enkel
+tot een doelscore t.o.v. de actieve echte spelers (zwak ±70% van de mediaan, gemiddeld de mediaan, sterk zo goed als de beste);
+bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraak. Een speler die stopt, laten ze met rust.
 
 **Punten**: opbouwpunten (gebouwen, dorpelingen, troepen; monument +1500/niveau) + gevechtspunten.
 
@@ -244,6 +247,10 @@ Op de kaart, bij een stad en in de ranglijst staat "computer".
     (4 dagen met een nepklok via de echte routes: groei, aanvallen op een speler, versterking, karavanen, kampen) en het
     inhalen van 3,2 dagen in een lopende wereld (±90 beurten, ±30 min met één speler online; beurt ≤ 4,4 ms en ≤ 14 query's).
     Tip: `node:sqlite` in het geheugen + alle migraties + `handle()` met een eigen `Date.now` = een snelle proefwereld.
+
+28. **Balans van de bots** (zie §3): `BOT_TIERS`/`botTarget` in `botbrain.js`, `humanRef` in `bots.js`, migratie `0006`.
+    Simulatie (5 dagen: een actieve, een gewone en een gestopte speler + 4 bots): sterk ±880 tegen de beste speler 843,
+    gemiddeld ±760 tegen de mediaan 732, zwak ±430; de gestopte speler werd nooit aangevallen, de gewone 5 keer.
 
 ## 8. Bekende beperkingen en ideeën
 

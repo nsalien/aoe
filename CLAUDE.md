@@ -101,6 +101,12 @@ Daarom:
   een clanlid dat aangevallen wordt (en terughalen), karavanen naar een clanlid dat spaart, spelers aanvallen na hun vrede als
   `resolveBattle` voorspelt dat hij wint (gezamenlijk doel per clan in `config` `clan:<team>`, wachttijd per doelwit voor alle bots
   `prey:<stad>`), anders roverskampen. Zijn geheugen staat in `towns.state.bot`. `ensureBots` maakt/verwijdert bots (± om de 10 min).
+  **Balans met de echte spelers**: elke bot heeft een sterkte (`bot.tier`: zwak, gemiddeld, sterk; vaste mix `TIER_ORDER`, ook binnen
+  een clan) en een doelscore (`botTarget`) t.o.v. de scores van de actieve echte spelers (`humanRef` → `world.bot_ref`, om de 10 min):
+  zwak ±70% van de mediaan, gemiddeld de mediaan, sterk minstens de beste speler, maal het niveau (0,8 / 1 / 1,2). Boven zijn doel
+  rust een bot (bouwt niet verder, ook geen nieuw tijdperk dat hem ver boven zijn doel brengt). Hij valt geen stad aan met minder
+  dan 45% van zijn eigen score, tenzij die hem de laatste dag aanviel (`bot.foe`). Bots van voor de balans (`bot.v` ≠ 2) die meer
+  dan 1,5× hun doel hadden, begonnen opnieuw.
 - Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en
   in de tabel `config` bewaard; inschrijvingen in `push_subs` (enkel echte meldingsdiensten, `validPushEndpoint`).
   `notifyDue()` stuurt ±2 min voor een aanval aankomt een melding met geluid (aanvaller + verdediger) en ±1 min vooraf een stille
