@@ -233,7 +233,8 @@ route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
     advance(s, t, world.speed);
     return {
       id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id, civ: s.civ,
-      online: !r.bot && now - r.last_seen < 5 * 60000, bot: !!r.bot, peaceEnd: peaceEnd(world, r.created_at), ...publicSummary(s),
+      online: !r.bot && now - r.last_seen < 5 * 60000, bot: !!r.bot, botTier: r.bot && s.bot ? s.bot.tier || null : null,
+      peaceEnd: peaceEnd(world, r.created_at), ...publicSummary(s),
     };
   });
   const camps = (await db.prepare('SELECT id, x, y, level, state FROM camps').all()).results.map((c) => {
@@ -279,7 +280,7 @@ route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
     ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     const build = townScore(s);
-    return { name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts, bot: !!r.bot };
+    return { name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts, bot: !!r.bot, botTier: r.bot && s.bot ? s.bot.tier || null : null };
   }).sort((a, b) => b.score - a.score);
   const teamScores = teams.map((tm) => ({
     ...tm,

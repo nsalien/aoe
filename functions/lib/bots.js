@@ -8,12 +8,12 @@
 //   - roverskampen plunderen
 import { RES, UNITS, ARMY_UNITS, MARKET, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, campUnits } from '../../public/shared/rules.js';
 import {
-  newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age,
+  newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age, townScore,
 } from '../../public/shared/sim.js';
 import { resolveBattle, slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import { phaseOf, gameTime, peaceEnd, peaceBlock, loadTown, saveTown, travelMs, worldTimes, ConflictError } from './game.js';
-import { botEconomy, botLevel, armyValue, botStyle, savingFor } from './botbrain.js';
+import { botEconomy, botLevel, armyValue, botStyle, savingFor, BOT_TIERS, tierOf, botTarget } from './botbrain.js';
 
 export const BOT_MAX = 12;
 // namen van computerspelers en hun steden
@@ -58,7 +58,8 @@ async function createBot(db, world, now) {
   // een bot begint bij de start van het seizoen en haalt de gemiste tijd zelf in
   const civ = CIV_IDS[Math.floor(Math.random() * CIV_IDS.length)];
   const state = newTownState(world.start_at, civ);
-  state.bot = {};
+  const n = (await db.prepare('SELECT COUNT(*) AS c FROM players WHERE bot = 1').first()).c;
+  state.bot = { tier: tierOf(n), v: 2 };
   const p = await db.prepare('INSERT INTO players (name, pass_hash, salt, team_id, created_at, last_seen, bot, bot_next) VALUES (?, ?, ?, ?, ?, 0, 1, ?)')
     .bind(pick[0], '-', '-', team.id, world.start_at, now).run();
   await db.prepare('INSERT INTO towns (player_id, name, x, y, state) VALUES (?, ?, ?, ?, ?)')
@@ -77,6 +78,20 @@ async function removeBots(db, n) {
       db.prepare('DELETE FROM players WHERE id = ?').bind(r.id),
     ]);
   }
+}
+
+// Referentie voor de balans: scores van de echte spelers die de laatste 3 dagen speelden (anders alle spelers;
+// zonder spelers een groeicurve). med = mediaan, hi = de beste.
+export async function humanRef(db, world, now) {
+  const rows = (await db.prepare('SELECT t.state, p.last_seen FROM towns t JOIN players p ON p.id = t.player_id WHERE p.bot = 0').all()).results;
+  const days = Math.max(0, ((now - world.start_at) / 86400000) * (world.speed || 1));
+  let list = rows.filter((r) => now - r.last_seen < 3 * 86400000);
+  if (!list.length) list = rows;
+  const sc = list.map((r) => townScore(JSON.parse(r.state))).sort((a, b) => a - b);
+  if (!sc.length) { const c = Math.round(30 + 45 * days); return { med: c, hi: c, n: 0, at: now }; }
+  const m = sc.length >> 1;
+  const med = sc.length % 2 ? sc[m] : (sc[m - 1] + sc[m]) / 2;
+  return { med: Math.round(med), hi: sc[sc.length - 1], n: sc.length, at: now };
 }
 
 // zoveel bots als de wereld vraagt (hooguit 'max' nieuwe per keer)
@@ -109,6 +124,9 @@ export async function botTick(db, world, now) {
     const u = await db.prepare('UPDATE world SET bot_check = ? WHERE id = 1 AND bot_check = ?').bind(now, world.bot_check || 0).run();
     world.bot_check = now;
     if (u.meta.changes) {
+      const ref = await humanRef(db, world, now);
+      world.bot_ref = JSON.stringify(ref);
+      await db.prepare('UPDATE world SET bot_ref = ? WHERE id = 1').bind(world.bot_ref).run();
       const made = await ensureBots(db, world, now);
       // nog bots te maken: binnen de minuut opnieuw kijken
       if (made) await db.prepare('UPDATE world SET bot_check = ? WHERE id = 1').bind(now - 9 * 60000).run();
@@ -124,18 +142,35 @@ export async function botTick(db, world, now) {
   const town = await loadTown(db, row.tid);
   if (!town) return null;
   ensureTerritory(town.state, town.id);
-  const s = town.state;
-  const mem = s.bot || (s.bot = {});
+  let s = town.state;
+  let mem = s.bot || (s.bot = {});
   const speed = world.speed || 1;
   const L = botLevel(world.bot_level);
   const T = gameTime(world, now);
   const pe = peaceEnd(world, row.created_at);
   const did = [];
-  // gemiste tijd inhalen: in stappen, met telkens een beslissing (zoals een speler die af en toe kijkt)
+  // sterkte (zwak, gemiddeld of sterk) en doelscore t.o.v. de echte spelers
+  if (!BOT_TIERS[mem.tier]) mem.tier = tierOf((await db.prepare('SELECT COUNT(*) AS c FROM players WHERE bot = 1 AND id < ?').bind(row.id).first()).c);
+  let ref = world.bot_ref ? JSON.parse(world.bot_ref) : null;
+  if (!ref) { ref = await humanRef(db, world, now); world.bot_ref = JSON.stringify(ref); await db.prepare('UPDATE world SET bot_ref = ? WHERE id = 1').bind(world.bot_ref).run(); }
+  const target = botTarget(mem.tier, ref, world.bot_level);
+  // bots van voor de balans die veel te sterk werden: opnieuw beginnen (ze groeien dan tot hun doel)
+  if (mem.v !== 2) {
+    if (townScore(s) > target * 1.5) {
+      const keep = { tier: mem.tier, v: 2 };
+      town.state = newTownState(world.start_at, s.civ);
+      ensureTerritory(town.state, town.id);
+      s = town.state; mem = s.bot = keep;
+      did.push('opnieuw begonnen (te sterk)');
+    } else mem.v = 2;
+  }
+  // gemiste tijd inhalen: in stappen, met telkens een beslissing (zoals een speler die af en toe kijkt). Ligt hij boven
+  // zijn doelscore, dan rust hij (bouwt niet verder) tot de echte spelers bijbenen.
   const style = botStyle(town.id);
+  const grow = () => townScore(s) < target;
   for (let k = 0; k < STEPS && s.t < T - SLACK; k++) {
     advance(s, Math.min(T, s.t + stepFor(T - s.t)), speed);
-    did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: s.t < pe, awayPop: mem.awayPop || 0, away: mem.away, style }));
+    if (grow()) did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: s.t < pe, awayPop: mem.awayPop || 0, away: mem.away, style, cap: target }));
   }
   const caught = s.t >= T - SLACK;
   let plan = null;
@@ -143,15 +178,19 @@ export async function botTick(db, world, now) {
     advance(s, T, speed);
     // wie komt eraan (aanvallen op de clan) en welke troepen zijn er niet
     const incoming = (await db.prepare(
-      "SELECT id, target_id, to_x, to_y, arrive_at FROM marches WHERE target_team = ? AND kind = 'attack' AND target_kind = 'town' AND status = 'out' AND arrive_at > ?",
+      "SELECT id, from_town, target_id, to_x, to_y, arrive_at FROM marches WHERE target_team = ? AND kind = 'attack' AND target_kind = 'town' AND status = 'out' AND arrive_at > ?",
     ).bind(row.team_id, now).all()).results;
     const marchRows = (await db.prepare('SELECT units FROM marches WHERE player_id = ?').bind(row.id).all()).results;
     const support = (await db.prepare('SELECT id, host_town, units FROM support WHERE player_id = ?').bind(row.id).all()).results;
     const { away, pop } = unitsOf([...marchRows, ...support]);
     mem.away = away; mem.awayPop = pop;
     const threat = incoming.some((m) => m.target_id === town.id);
-    did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: now < pe, threat, away, awayPop: pop, style }));
-    plan = await military(db, world, row, town, now, { incoming, support, L, pe, speed });
+    // wie hem aanvalt, mag hij een dag lang terugpakken (ook als die veel zwakker is)
+    mem.foe = mem.foe || {};
+    for (const m of incoming) if (m.target_id === town.id) mem.foe[m.from_town] = now + 24 * 3600000;
+    for (const id of Object.keys(mem.foe)) if (now > mem.foe[id]) delete mem.foe[id];
+    if (grow() || threat) did.push(...botEconomy(s, speed, { lvl: world.bot_level, peace: now < pe, threat, away, awayPop: pop, style, cap: target }));
+    plan = await military(db, world, row, town, now, { incoming, support, L, pe, speed, tier: BOT_TIERS[mem.tier] });
     did.push(...plan.log);
   }
   try {
@@ -172,7 +211,7 @@ export async function botTick(db, world, now) {
   // bijgewerkt: over een paar minuten weer; nog achter: meteen opnieuw aan de beurt
   const next = caught ? now + L.act * 60000 + ((row.id * 7919) % 60000) : now;
   await db.prepare('UPDATE players SET bot_next = ? WHERE id = ?').bind(next, row.id).run();
-  return { bot: row.name, caught, did, marches: plan ? plan.marches.length : 0 };
+  return { bot: row.name, caught, did, marches: plan ? plan.marches.length : 0, tier: mem.tier, target, score: townScore(s) };
 }
 
 async function insertMarch(db, bot, town, m, now) {
@@ -212,7 +251,9 @@ function take(s, units) { for (const [k, n] of Object.entries(units)) { s.units[
 async function military(db, world, bot, town, now, ctx) {
   const s = town.state; const mem = s.bot;
   const { L, speed } = ctx;
+  const tier = ctx.tier || BOT_TIERS.gemiddeld;
   const H = 3600000 / speed; // één speluur in echte tijd
+  const myScore = townScore(s);
   const out = { marches: [], recalls: [], clan: null, log: [] };
   const home = { x: town.x, y: town.y };
   const onMe = ctx.incoming.filter((m) => m.target_id === town.id);
@@ -277,7 +318,7 @@ async function military(db, world, bot, town, now, ctx) {
   const { warEnd } = worldTimes(world);
   const smithy = bLevel(s, 'smithy');
   const sim = (ts) => resolveBattle({
-    attUnits: send, attSmithy: smithy, groups: [{ key: 'home', units: scale(ts.units, L.edge) }], defSmithy: bLevel(ts, 'smithy'),
+    attUnits: send, attSmithy: smithy, groups: [{ key: 'home', units: scale(ts.units, L.edge * tier.edge) }], defSmithy: bLevel(ts, 'smithy'),
     wall: effectiveWall(ts), towerDef: towerDefense(ts), baseDef: townBaseDef(ts),
   });
   if (now >= (mem.nextAtt || 0)) {
@@ -298,6 +339,8 @@ async function military(db, world, bot, town, now, ctx) {
       if (now + dur > warEnd || peaceBlock(world, bot.created_at, t.created_at, now, now + dur)) continue;
       const ts = JSON.parse(t.state);
       ensureTerritory(ts, t.id);
+      // geen jacht op veel zwakkere steden (minder dan 45% van zijn eigen score), tenzij die hem eerst aanviel
+      if (townScore(ts) < myScore * 0.45 && !((mem.foe || {})[t.id] > now)) continue;
       const r = sim(ts);
       if (!r.attWins) continue;
       let loot = 0; const prot = protectAmount(ts);
@@ -309,7 +352,7 @@ async function military(db, world, bot, town, now, ctx) {
       take(s, send);
       out.marches.push({ kind: 'attack', tkind: 'town', target: { id: best.t.id, x: best.t.x, y: best.t.y, team: best.t.team_id }, units: send, dur: best.dur });
       mem.hit[best.t.id] = now + 10 * H; // niet steeds dezelfde stad
-      mem.nextAtt = now + L.attackHours * H * (0.75 + ((now / 1000) % 50) / 100);
+      mem.nextAtt = now + L.attackHours * tier.attack * H * (0.75 + ((now / 1000) % 50) / 100);
       out.clan = { t: best.t.id, until: now + H };
       out.prey = { id: best.t.id, until: now + L.prey * H };
       out.log.push(`aanval op stad ${best.t.id}`);
@@ -319,14 +362,14 @@ async function military(db, world, bot, town, now, ctx) {
   }
   // 5. geen stad aangevallen: een roverskamp plunderen (om de paar uur)
   if (now >= (mem.nextCamp || 0)) {
-    mem.nextCamp = now + L.campHours * H;
+    mem.nextCamp = now + L.campHours * tier.attack * H;
     const camps = (await db.prepare('SELECT id, x, y, level, state FROM camps').all()).results;
     let best = null;
     for (const c of camps) {
       const cs = JSON.parse(c.state);
       const units = cs.refresh_at && now >= cs.refresh_at ? campUnits(c.level) : cs.units;
       if (!countUnits(units)) continue;
-      const r = resolveBattle({ attUnits: send, attSmithy: smithy, groups: [{ key: 'camp', units: scale(units, L.edge) }], baseDef: 20 * c.level });
+      const r = resolveBattle({ attUnits: send, attSmithy: smithy, groups: [{ key: 'camp', units: scale(units, L.edge * tier.edge) }], baseDef: 20 * c.level });
       if (!r.attWins) continue;
       const dur = travelMs(world, home, c, slowestSpeed(send));
       const score = c.level / (1 + dur / H);

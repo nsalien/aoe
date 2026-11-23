@@ -1145,7 +1145,7 @@ test('moed: wie zwaar verliest, slaat op de vlucht, luistert niet meer en hergro
 // ---------- computerspelers (bots) ----------
 import { ensureBots, botTick } from '../functions/lib/bots.js';
 import { botEconomy, wallPlan } from '../functions/lib/botbrain.js';
-import { age } from '../public/shared/sim.js';
+import { age, ensureTerritory as ensureTerr2 } from '../public/shared/sim.js';
 import { getWorld } from '../functions/lib/game.js';
 
 test('bots: het brein bouwt een stad uit (tijdperken, muur met poorten, leger) met de gewone regels', () => {
@@ -1176,26 +1176,41 @@ test('bots: eigen clans, een speler komt nooit bij de bots, ze halen gemiste tij
   await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
   const anna = sql("SELECT p.id, p.team_id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Anna'")[0];
   assert.ok(!bots.some((b) => b.team_id === anna.team_id), 'Anna zit niet in een botclan');
-  // het seizoen loopt al 2,5 dag; Anna begon net (nog vrede)
+  // het seizoen loopt al 2,5 dag; Anna speelt actief (een uitgebouwde stad, zonder leger) maar heeft nog vrede
   const now = Date.now();
-  db.raw.prepare('UPDATE world SET start_at = ?').run(now - 2.5 * 86400000);
+  const as = newTownState(now - 2.5 * 86400000, 'greek'); ensureTerritory(as, anna.tid);
+  for (let t = now - 2.5 * 86400000 + 3 * 3600000; t <= now; t += 3 * 3600000) { advance(as, t, 1); botEconomy(as, 1, { lvl: 2 }); }
+  // geen leger, muur of torens: een makkelijke prooi zodra haar vrede voorbij is
+  as.units = {}; as.queues = {}; as.walls = []; as.gates = []; as.builds = [];
+  as.buildings = as.buildings.filter((b) => b.type !== 'tower'); as.buildings.find((b) => b.type === 'wall').level = 0;
+  db.raw.prepare('UPDATE towns SET state = ? WHERE id = ?').run(JSON.stringify(as), anna.tid);
+  db.raw.prepare('UPDATE world SET start_at = ?, bot_ref = NULL').run(now - 2.5 * 86400000);
   db.raw.prepare("UPDATE players SET created_at = ? WHERE bot = 1").run(now - 2.5 * 86400000);
   db.raw.prepare("UPDATE towns SET state = json_set(state, '$.t', ?) WHERE player_id IN (SELECT id FROM players WHERE bot = 1)").run(now - 2.5 * 86400000);
   db.raw.prepare("UPDATE players SET created_at = ? WHERE id = ?").run(now - 3600000, anna.id);
   let world = await getWorld(db);
-  for (let k = 0; k < 120; k++) { await botTick(db, world, now + k); world = await getWorld(db); }
+  for (let k = 0; k < 160; k++) { await botTick(db, world, now + k); world = await getWorld(db); }
+  // in balans met Anna: zwakke bots onder haar score, sterke bots ongeveer op haar niveau (nooit ver erboven)
+  const annaScore = townScore(as);
+  const ref = JSON.parse(world.bot_ref);
+  assert.equal(ref.med, annaScore, 'referentie = de echte speler');
+  const byTier = {};
   for (const b of sql('SELECT t.state FROM players p JOIN towns t ON t.player_id = p.id WHERE p.bot = 1')) {
     const s = JSON.parse(b.state);
     assert.ok(now - s.t < 10 * 60000, 'ingehaald');
-    assert.ok(age(s) >= 2, `tijdperk ${age(s)}`);
+    (byTier[s.bot.tier] = byTier[s.bot.tier] || []).push(townScore(s));
+    assert.ok(townScore(s) <= annaScore * 1.45, `${s.bot.tier}: ${townScore(s)} tegen Anna ${annaScore}`);
+    assert.ok(townScore(s) >= annaScore * 0.5, `${s.bot.tier}: groeit mee (${townScore(s)} tegen Anna ${annaScore})`);
   }
+  assert.deepEqual(Object.keys(byTier).sort(), ['gemiddeld', 'sterk', 'zwak'], 'een mix van zwakke en sterke bots');
+  assert.ok(Math.max(...byTier.zwak) < Math.min(...byTier.sterk), 'zwak is zwakker dan sterk');
   const att = () => sql("SELECT COUNT(*) AS c FROM marches m JOIN players p ON p.id = m.player_id WHERE p.bot = 1 AND m.kind = 'attack' AND m.target_kind = 'town' AND m.target_id = ?", anna.tid)[0].c;
   assert.equal(att(), 0, 'niet aanvallen tijdens de vrede');
   // de vrede van Anna is voorbij: na een tijdje komt er een aanval
   db.raw.prepare("UPDATE players SET created_at = ? WHERE id = ?").run(now - 2 * 86400000, anna.id);
   db.raw.prepare("UPDATE players SET bot_next = 0 WHERE bot = 1").run();
   let t = now;
-  for (let k = 0; k < 80 && !att(); k++) { t += 5 * 60000; db.raw.prepare("UPDATE players SET bot_next = 0 WHERE bot = 1").run(); await botTick(db, world, t); }
+  for (let k = 0; k < 80 && !att(); k++) { t += 6 * 60000; for (let j = 0; j < 5; j++) await botTick(db, world, t + j); }
   assert.ok(att() >= 1, 'een bot valt Anna aan na haar vrede');
   // een clanlid wordt aangevallen: de ander stuurt versterking
   const [b1, b2] = sql('SELECT p.id, p.team_id, t.id AS tid, t.x, t.y FROM players p JOIN towns t ON t.player_id = p.id WHERE p.bot = 1 ORDER BY p.id');
@@ -1209,4 +1224,42 @@ test('bots: eigen clans, een speler komt nooit bij de bots, ze halen gemiste tij
   db.raw.prepare('UPDATE world SET bots = 2').run();
   await ensureBots(db, await getWorld(db), t);
   assert.equal(sql('SELECT COUNT(*) AS c FROM players WHERE bot = 1')[0].c, 2);
+});
+
+test('bots: geen jacht op veel zwakkere spelers (tenzij wraak), en te sterke bots van vroeger beginnen opnieuw', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body) => (await handle({ request: new Request(`http://x/api${path}`, { method, headers: { 'content-type': 'application/json', 'x-admin-key': 'k' }, body: body && JSON.stringify(body) }), env })).json();
+  await call('POST', '/admin/reset', { peaceHours: 0, teamSize: 1, bots: 1, botLevel: 2, seed: 7 });
+  await call('POST', '/register', { name: 'Bram', password: 'geheim123', civ: 'greek' });
+  const sql = (q, ...v) => db.raw.prepare(q).all(...v);
+  const now = Date.now();
+  const bot = sql('SELECT p.id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.bot = 1')[0];
+  const bram = sql("SELECT p.id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Bram'")[0];
+  // een bot van vroeger, veel sterker dan de echte speler: begint opnieuw
+  const big = newTownState(now - 3 * 86400000, 'persia'); ensureTerritory(big, bot.tid);
+  for (let t = now - 3 * 86400000 + 1800000; t <= now; t += 1800000) { advance(big, t, 1); botEconomy(big, 1, { lvl: 3 }); }
+  big.bot = { tier: 'sterk' };
+  db.raw.prepare('UPDATE towns SET state = ? WHERE id = ?').run(JSON.stringify(big), bot.tid);
+  db.raw.prepare('UPDATE world SET start_at = ?, bot_ref = NULL').run(now - 3 * 86400000);
+  const world = await getWorld(db);
+  let r = null;
+  for (let k = 0; k < 4 && !(r && r.did); k++) r = await botTick(db, world, now + k); // de eerste beurt kan de periodieke controle zijn
+  assert.ok(r.did.includes('opnieuw begonnen (te sterk)'), JSON.stringify(r.did.slice(0, 3)));
+  assert.ok(r.score < townScore(big) / 2);
+  // een sterke bot met een groot leger valt de kleine Bram niet aan...
+  const st = JSON.parse(sql('SELECT state FROM towns WHERE id = ?', bot.tid)[0].state);
+  Object.assign(st, { t: now, buildings: big.buildings, villagers: big.villagers, units: { sword: 40, archer: 30, knight: 10 } });
+  st.bot = { tier: 'sterk', v: 2 };
+  db.raw.prepare('UPDATE towns SET state = ? WHERE id = ?').run(JSON.stringify(st), bot.tid);
+  const attacks = () => sql("SELECT COUNT(*) AS c FROM marches WHERE player_id = ? AND kind = 'attack' AND target_kind = 'town'", bot.id)[0].c;
+  for (let k = 1; k <= 3; k++) { db.raw.prepare('UPDATE players SET bot_next = 0 WHERE id = ?').run(bot.id); await botTick(db, world, now + k * 60000); }
+  assert.equal(attacks(), 0, 'geen jacht op een veel zwakkere speler');
+  // ...tenzij Bram hem eerst aanviel: dan pakt hij hem terug
+  db.raw.prepare(`INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, target_team, to_x, to_y, units, depart_at, arrive_at, status)
+    SELECT ?, p.team_id, 'attack', ?, 0, 0, 'town', ?, b.team_id, 0, 0, '{"spear":1}', ?, ?, 'out' FROM players p, players b WHERE p.id = ? AND b.id = ?`).run(bram.id, bram.tid, bot.tid, now, now + 3600000, bram.id, bot.id);
+  db.raw.prepare('UPDATE players SET bot_next = 0 WHERE id = ?').run(bot.id); await botTick(db, world, now + 5 * 60000);
+  db.raw.prepare("DELETE FROM marches WHERE player_id = ?").run(bram.id);
+  for (let k = 1; k <= 12 && !attacks(); k++) { db.raw.prepare('UPDATE players SET bot_next = 0 WHERE id = ?').run(bot.id); await botTick(db, world, now + 5 * 60000 + k * 10 * 60000); }
+  assert.ok(attacks() >= 1, 'wraak op wie hem aanviel');
 });

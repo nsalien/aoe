@@ -9,11 +9,11 @@
 //   4. militaire gebouwen, smidse, markt, wachttorens, een muur met vier poorten, later een monument
 //   5. een leger trainen dat past bij zijn grootte en moeilijkheid
 // Gebouwen komen op een vast patroon: straten door het midden (naar de poorten) en ring 1 vrij voor de muur.
-import { RES, BUILDINGS, UNITS, AGE_UP, CIVS, WALL_TILE, GATE, TOWN_GRID, levelAge } from '../../public/shared/rules.js';
+import { RES, BUILDINGS, UNITS, AGE_UP, CIVS, WALL_TILE, GATE, TOWN_GRID, levelAge, costValue } from '../../public/shared/rules.js';
 import {
   GameError, age, slots, popCap, capacity, homePop, totalVillagers, homeVillagers, bLevel, findType, canAfford,
   checkUpgrade, doBuild, doUpgrade, checkTrain, doTrain, doAssign, canPlaceAt, maxBuilds, doPlaceWalls,
-  doPlaceGate, gateList, marketRate, doTrade, unitsPop, tooBig,
+  doPlaceGate, gateList, marketRate, doTrade, unitsPop, tooBig, townScore,
 } from '../../public/shared/sim.js';
 import { ringOf, ringForAge, tileIndex } from '../../public/shared/territory.js';
 
@@ -25,6 +25,26 @@ export const BOT_LEVELS = {
   2: { name: 'Normaal', army: 0.6, attackHours: 6, reserve: 0.4, edge: 1.25, act: 5, prey: 9, campHours: 4 },
   3: { name: 'Sterk', army: 0.9, attackHours: 4, reserve: 0.3, edge: 1.05, act: 3, prey: 5, campHours: 3 },
 };
+// Sterkte van een bot t.o.v. de echte spelers. Een vaste mix (ook binnen een clan): zwakke, gemiddelde en sterke bots.
+// f = doelscore als deel van de mediaan van de echte spelers (sterk: minstens zo goed als de beste speler),
+// attack = wachttijd tussen aanvallen (x), edge = zoveel zekerder van de winst moet hij zijn (x)
+export const BOT_TIERS = {
+  zwak: { name: 'zwak', f: 0.7, attack: 1.6, edge: 1.3 },
+  gemiddeld: { name: 'gemiddeld', f: 1.0, attack: 1.0, edge: 1.0 },
+  sterk: { name: 'sterk', f: 1.15, attack: 0.8, edge: 0.95 },
+};
+export const TIER_ORDER = ['zwak', 'sterk', 'gemiddeld', 'zwak', 'gemiddeld', 'sterk'];
+export const tierOf = (n) => TIER_ORDER[((n % TIER_ORDER.length) + TIER_ORDER.length) % TIER_ORDER.length];
+const LEVEL_SCALE = { 1: 0.8, 2: 1, 3: 1.2 };
+
+// doelscore van een bot: ref = { med, hi } (scores van de echte spelers), level = niveau van de wereld (1-3)
+export function botTarget(tier, ref, level) {
+  const T = BOT_TIERS[tier] || BOT_TIERS.gemiddeld;
+  const med = Math.max(0, ref.med || 0); const hi = Math.max(med, ref.hi || 0);
+  const v = (tier === 'sterk' ? Math.max(med * T.f, hi) : med * T.f) * (LEVEL_SCALE[level] || 1);
+  return Math.max(30, Math.round(v));
+}
+
 // karakter van een bot (vast per stad): wat meer of minder leger, wat sneller of trager naar een nieuw tijdperk
 export function botStyle(seed) {
   const h = (Math.imul(seed | 0, 2654435761) >>> 0) / 4294967296;
@@ -204,7 +224,9 @@ export function botEconomy(s, speed = 1, opt = {}) {
   const tc = s.buildings.find((b) => b.type === 'tc');
   const ageing = busy(s, tc.id);
   const style = opt.style || { army: 1, age: 0 };
-  const goal = !ageing && a < 4 && vill >= AGE_AT[a] + style.age ? AGE_UP[a + 1].cost : null;
+  // cap = doelscore (balans met de echte spelers): niet naar een nieuw tijdperk als hij daarmee ver boven zijn doel komt
+  const ageOk = a < 4 && (!opt.cap || townScore(s) + costValue(AGE_UP[a + 1].cost) / 50 <= opt.cap * 1.2);
+  const goal = !ageing && ageOk && vill >= AGE_AT[a] + style.age ? AGE_UP[a + 1].cost : null;
   const goalOk = goal && canAfford(s.res, goal);
   const saving = goal && !goalOk && !opt.threat;
 
