@@ -94,6 +94,12 @@ Daarom:
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.
 - `public/js/art.js` — procedurele tekeningen (gebouwen, mensen, bomen; geen afbeeldingsbestanden).
+- **3D-look** (zoals vooraf gerenderde sprites in klassieke RTS-spellen): `render3d.js` is een kleine straalvolger
+  (vormen: convexe veelvlakken, cilinders, kegels, ellipsoïden, capsules; procedurele materialen; zon, slagschaduw,
+  omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
+  ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`), bewaart ze
+  in Cache Storage (verhoog `VERSION` als modellen veranderen) en geeft `null` tot ze klaar zijn: dan tekent het spel de
+  oude versie uit `art.js`/`figures.js`. De akker, dieren, kameel/strijdwagen/olifant en rammen zijn nog getekend.
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
   `worldmap.js` bakt de wereldkaart (hoogteveld uit `worldgen.fieldAt`, kolom per kolom getekend, bossen, akkers, wegen).
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.
