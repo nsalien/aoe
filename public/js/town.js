@@ -1775,10 +1775,10 @@ export class TownView {
     return this.dress;
   }
 
-  groundLayer(light) {
+  groundLayer(light, dress = null) {
     const len = 0.75 + Math.min(0.7, Math.abs(light.hour - 13) / 8);
     const alpha = 0.26 * (1 - light.dark * 0.75);
-    const key = `${this.treeKey}|${Math.round(len * 10)}|${Math.round(alpha * 40)}`;
+    const key = `${this.treeKey}|${Math.round(len * 10)}|${Math.round(alpha * 40)}|${dress ? dress.key : '-'}`;
     const L = this.groundComp;
     if (L && L.key === key) return L.cv;
     const gnd = this.ground;
@@ -1801,6 +1801,10 @@ export class TownView {
       }
       g.fillStyle = `rgba(20,32,8,${Math.round(alpha * 40) / 40})`;
       g.fill('nonzero');
+    }
+    if (dress) {
+      g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
+      g.drawImage(dress.cv, dress.x, dress.y, dress.W, dress.H);
     }
     this.groundComp = { cv, key };
     return cv;
@@ -1907,12 +1911,17 @@ export class TownView {
     cam.apply(ctx);
     const gnd = this.ground;
     const vis = this.viewRect(2);
-    drawSub(ctx, this.groundLayer(this.light), BAKE, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H, vis);
+    const s = this.state;
+    const wall = s.buildings.find((b) => b.type === 'wall');
+    const wallLevel = wall ? Math.max(wall.level, (s.walls || []).length || (s.gates || []).length ? 1 : 0) : 0;
+    const segs = this.wallSegments(wallLevel);
+    // aankleding (straten, paadjes, tuintjes, zachte schaduwen) zit mee in de grondafbeelding; in een slag gewone schaduwen
+    const dress = this.battleMode ? null : this.townDress(segs, wallLevel, light);
+    drawSub(ctx, this.groundLayer(this.light, dress), BAKE, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H, vis);
     this.drawGroundDetail(ctx, vis);
     this.drawPond(ctx, t);
     this.drawLakes(ctx, t);
 
-    const s = this.state;
     const v = this.viewRect();
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
     this.treeMip = cam.zoom * cam.dpr < 0.95;
@@ -1922,13 +1931,7 @@ export class TownView {
     if (this.wallMode) this.drawWallPreview(ctx);
     if (this.gateMode) this.drawGatePreview(ctx);
     this.drawWallSel(ctx, t);
-    const wall = s.buildings.find((b) => b.type === 'wall');
-    const wallLevel = wall ? Math.max(wall.level, (s.walls || []).length || (s.gates || []).length ? 1 : 0) : 0;
-    const segs = this.wallSegments(wallLevel);
-    // aankleding (straten, paadjes, tuintjes, zachte schaduwen) als één afbeelding; in een slag gewone schaduwen
-    const dress = this.battleMode ? null : this.townDress(segs, wallLevel, light);
-    if (dress) drawSub(ctx, dress.cv, dress.scale, dress.x, dress.y, dress.W, dress.H, vis);
-    else this.drawShadows(ctx, segs, wallLevel, light, vis);
+    if (!dress) this.drawShadows(ctx, segs, wallLevel, light, vis);
 
     const items = [];
     const nodes = s.nodes || [];
@@ -2031,7 +2034,7 @@ export class TownView {
     if (!this.battleMode) this.drawFog(ctx, vis);
 
     // licht en donker
-    FX.grade(ctx, this.canvas.width, this.canvas.height, light);
+    if (!FX.LOW_POWER) FX.grade(ctx, this.canvas.width, this.canvas.height, light);
     FX.applyLight(ctx, this.canvas.width, this.canvas.height, light);
     cam.apply(ctx);
     if (night > 0.05) this.drawNightLights(ctx, t, night, segs, wallLevel);
