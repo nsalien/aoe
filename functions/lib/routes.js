@@ -191,12 +191,14 @@ route('GET', '/state', { auth: true }, async (ctx) => {
      WHERE m.team_id = ? OR m.target_team = ?`,
   ).bind(player.team_id, player.team_id).all()).results.map((m) => {
     const own = m.team_id === player.team_id;
+    // versterking, karavanen en schatting naar ons (bv. van een vazal uit een andere clan) zijn vriendelijk
+    const friendly = own || (['support', 'trade', 'tribute'].includes(m.kind) && m.target_team === player.team_id);
     return {
-      id: m.id, kind: m.kind, status: m.status, own: m.player_id === player.id, ally: own,
+      id: m.id, kind: m.kind, status: m.status, own: m.player_id === player.id, ally: friendly,
       player: m.player_name, from: { id: m.from_town, name: m.from_name, x: m.from_x, y: m.from_y },
       to: { kind: m.target_kind, id: m.target_id, name: m.to_name, x: m.to_x, y: m.to_y },
       targetTeam: m.target_team, teamId: m.team_id,
-      units: own ? JSON.parse(m.units) : null, res: own ? JSON.parse(m.res) : null,
+      units: friendly ? JSON.parse(m.units) : null, res: friendly ? JSON.parse(m.res) : null,
       departAt: m.depart_at, arriveAt: m.arrive_at, pref: m.player_id === player.id ? m.pref_mode || null : null,
     };
   });
