@@ -5,6 +5,7 @@ import * as FIG from './figures.js';
 import { TownView } from './town.js';
 import { isoFns } from './iso.js';
 import { UNITS } from '../shared/rules.js';
+import { soldierOpts, lookOf } from './troops.js';
 import { tileOf } from '../shared/territory.js';
 import { FB, nav, inZone, cellOf, isRangedK, mobile, role, aliveN } from '../shared/fieldbattle.js';
 
@@ -335,6 +336,17 @@ export class SiegeView extends TownView {
     }
   }
 
+  // uitzicht van de troepen van een kant: smidse (st.ma / st.md) en onderzoek (st.tk)
+  sideLook(side) {
+    const st = this.bv.state;
+    if (!this._looks || this._looksOf !== st.t0) {
+      this._looksOf = st.t0;
+      const sm = (m) => Math.round(((m || 1) - 1) / 0.05);
+      this._looks = [lookOf(sm(st.ma), st.tk && st.tk[0]), lookOf(sm(st.md), st.tk && st.tk[1])];
+    }
+    return this._looks[side];
+  }
+
   figure(ctx, u, x, y, t, moving, dir, team) {
     const k = u.k;
     const o = { s: 1.05, team, phase: t * 0.012 + u.id, walking: moving };
@@ -344,13 +356,10 @@ export class SiegeView extends TownView {
     else if (k === 'barbarian') A.person(ctx, x, y, { ...o, body: u.id % 2 ? '#4f3a2a' : '#5b4636', weapon: u.id % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.id % 3), team: null });
     else if (k === 'villager') A.person(ctx, x, y, { ...o, s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe' });
     else if (!FIG.uniqueUnit(ctx, k, x, y, o)) {
-      switch (k) {
-        case 'spear': A.person(ctx, x, y, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
-        case 'sword': A.person(ctx, x, y, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
-        case 'archer': A.person(ctx, x, y, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
-        case 'scout': A.horseman(ctx, x, y, { s: 0.8, team, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b', walking: moving, phase: o.phase }); break;
-        case 'rider': A.horseman(ctx, x, y, { s: 0.85, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear', horse: '#7b4f2c', walking: moving, phase: o.phase }); break;
-        case 'knight': A.horseman(ctx, x, y, { s: 0.9, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530', walking: moving, phase: o.phase }); break;
+      const look = soldierOpts(k, this.sideLook(u.s));
+      if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: moving, phase: o.phase });
+      else if (look) A.person(ctx, x, y, { ...o, ...look });
+      else switch (k) {
         case 'ram': {
           A.ram(ctx, x, y, 1.35);
           // vlaggetje in de kleur van zijn kant op het dak
@@ -385,7 +394,12 @@ export class SiegeView extends TownView {
           const ang = Math.atan2((by - ay) - Math.cos(f * Math.PI) * arc * Math.PI, b.x - a.x);
           ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
           if (u.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill(); }
-          else {
+          else if (u.k !== 'tower' && st.tk && st.tk[u.s] && st.tk[u.s].firearrows) { // vuurpijl: brandende punt met een spoor
+            ctx.strokeStyle = 'rgba(255,140,40,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(2, 0); ctx.stroke();
+            ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
+            ctx.fillStyle = 'rgba(255,200,80,0.9)'; ctx.beginPath(); ctx.ellipse(5, 0, 3.6, 2.2, 0, 0, TAU); ctx.fill();
+            ctx.fillStyle = '#ff6a1a'; ctx.beginPath(); ctx.ellipse(4, 0, 2.2, 1.3, 0, 0, TAU); ctx.fill();
+          } else {
             ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
             ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(6.5, 0); ctx.lineTo(4.2, -1.4); ctx.lineTo(4.2, 1.4); ctx.fill();
           }
@@ -400,6 +414,18 @@ export class SiegeView extends TownView {
         ctx.fillStyle = bv.side === 1 ? '#62d44c' : '#e2452f'; ctx.fillRect(c.x - bw / 2, c.y - 107, bw * frac, 3);
         if (frac < 0.5) A.smoke(ctx, c.x + 4, c.y - 80, t, u.id, 0.8);
       }
+    }
+    // kokende pek: net gegoten over wie aan de poort staat
+    for (const w of st.walls) {
+      if (!w.g || !w.pt || w.hp <= 0) continue;
+      const age = bt - w.pt;
+      if (age < 0 || age > 1400) continue;
+      const c = toWorld(w.i + 0.5, w.j + 0.5); const top = c.y - this.wallZ() - 14;
+      const f = age / 1400;
+      ctx.fillStyle = `rgba(40,28,16,${0.75 * (1 - f)})`;
+      for (let k = 0; k < 4; k++) { const dx = (k - 1.5) * 4; ctx.beginPath(); ctx.ellipse(c.x + dx, top + 6 + f * 26 + k * 2, 2.2, 3.4, 0, 0, TAU); ctx.fill(); }
+      ctx.fillStyle = `rgba(255,150,50,${0.5 * (1 - f)})`; ctx.beginPath(); ctx.ellipse(c.x, c.y + 4, 16 * (0.6 + f), 6 * (0.6 + f), 0, 0, TAU); ctx.fill();
+      A.smoke(ctx, c.x, top, t, w.i * 31 + w.j, 0.7);
     }
     // beschadigde muren en poorten
     for (const w of st.walls) {

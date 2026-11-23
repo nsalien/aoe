@@ -3,7 +3,8 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE, techTier } from '../shared/rules.js';
+import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
@@ -979,6 +980,20 @@ export class TownView {
     return out;
   }
 
+  // uitzicht van de eigen troepen (smidse en Academie), even bewaard
+  troopLook() {
+    const st = this.state;
+    const k = `${bLevel(st, 'smithy')}|${Object.keys(st.tech || {}).join(',')}`;
+    if (this._lookKey !== k) { this._lookKey = k; this._look = lookOf(bLevel(st, 'smithy'), st.tech); }
+    return this._look;
+  }
+
+  // welke soorten onderzoek er klaar zijn (voor het uitzicht van de Academie)
+  academyVariant() {
+    const t = this.state.tech || {};
+    return (techTier(t, 'inf') ? 1 : 0) | (techTier(t, 'rng') ? 2 : 0) | (techTier(t, 'cav') ? 4 : 0) | (techTier(t, 'town') ? 8 : 0);
+  }
+
   drawSoldier(ctx, s, x, y, t) {
     const team = this.team;
     const bob = s.walking ? 0 : Math.sin(t * 0.004 + s.gx * 3 + s.gy * 5) * 0.3;
@@ -991,16 +1006,12 @@ export class TownView {
     }
     if (s.kind === 'stonethrower') { A.stoneThrower(ctx, x, y, 0.8, t); return; }
     if (FIG.uniqueUnit(ctx, s.kind, x, y + bob, o)) return;
-    switch (s.kind) {
-      case 'spear': A.person(ctx, x, y + bob, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
-      case 'sword': A.person(ctx, x, y + bob, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
-      case 'archer': A.person(ctx, x, y + bob, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
-      case 'scout': A.horseman(ctx, x, y, { s: 0.8, team, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b', walking: o.walking, phase: o.phase }); break;
-      case 'rider': A.horseman(ctx, x, y, { s: 0.85, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear', horse: '#7b4f2c', walking: o.walking, phase: o.phase }); break;
-      case 'knight': A.horseman(ctx, x, y, { s: 0.9, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530', walking: o.walking, phase: o.phase }); break;
-      case 'ram': A.ram(ctx, x, y, 0.9); break;
-      default: A.person(ctx, x, y, o);
-    }
+    if (s.kind === 'ram') { A.ram(ctx, x, y, 0.9); return; }
+    // uitrusting volgens de smidse en het onderzoek van de Academie
+    const look = soldierOpts(s.kind, this.troopLook());
+    if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: o.walking, phase: o.phase });
+    else if (look) A.person(ctx, x, y + bob, { ...o, ...look });
+    else A.person(ctx, x, y, o);
   }
 
   // waar is de dorpeling die een vondst gaat halen? (heen, werken, terug met de buit)
@@ -2806,7 +2817,7 @@ export class TownView {
     for (const b of s.buildings) {
       if (!isPlaced(b) || b.level === 0) continue;
       const c = this.footprintCenter(b);
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null);
       const spr = s3 || A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id);
       const k = s3 ? 1 : bScale(b);
       for (const [lx, ly, r] of spr.lights || []) {
@@ -2830,7 +2841,7 @@ export class TownView {
       FX.drawGlow(ctx, px, py, 22, FX.FIRE, night * (0.75 + Math.sin(t * 0.015 + px) * 0.15));
     }
     // kampvuur van de barbaren en groepen in het veld
-    if (s.terr && this.terr.camp && campAlive(s, this.now) && this.isExplored(this.terr.camp.x, this.terr.camp.y)) {
+    if (s.terr && s.terr.camp && this.terr.camp && campAlive(s, this.now) && this.isExplored(this.terr.camp.x, this.terr.camp.y)) {
       const p = toWorld(this.terr.camp.x, this.terr.camp.y);
       FX.drawGlow(ctx, p.x - 6, p.y - 2, 46, FX.FIRE, night * (0.8 + Math.sin(t * 0.013) * 0.15));
     }
@@ -2925,7 +2936,7 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null);
       if (s3) A.drawSprite(ctx, s3, c.x, c.y, 1);
       else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id), c.x, c.y, bScale(b));
       if (s3) this.drawOverlay3d(ctx, b, c, t, s3); else this.drawOverlay(ctx, b, c, t);

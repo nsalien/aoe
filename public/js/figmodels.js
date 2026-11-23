@@ -65,13 +65,21 @@ function head(s, L, hz, skin) {
     s.cap([0.03, -0.012, hz + 0.03], [0.035, -0.03, hz + 0.075], 0.004, metal('#e0b23a'));
     return;
   }
+  if (L.look === 'noble') { // edelman: gouden kroon
+    s.ell(-0.006, 0, hz + 0.01, 0.039, 0.037, 0.034, plain(hair), hz - 0.005);
+    s.cyl(0, 0, 0.04, hz + 0.02, hz + 0.042, { k: 'gold' });
+    for (let k = 0; k < 6; k++) { const an = (k / 6) * TAU; s.cone(Math.cos(an) * 0.036, Math.sin(an) * 0.036, 0.01, hz + 0.042, hz + 0.065, { k: 'gold' }); }
+    s.ell(0.04, 0, hz + 0.032, 0.006, 0.006, 0.006, plain('#c0392b', true));
+    return;
+  }
   if (L.look === 'lionguard') { s.cyl(0, 0, 0.037, hz, hz + 0.075, cloth('#244e8f')); s.cyl(0, 0, 0.039, hz + 0.004, hz + 0.014, metal('#e0b23a')); return; }
   if (L.look === 'immortal') { s.cyl(0, 0, 0.038, hz + 0.005, hz + 0.05, cloth('#e8dcc0')); s.cyl(0, 0, 0.04, hz + 0.02, hz + 0.03, cloth('#1f9a9a')); return; }
   if (L.look === 'peltast') { s.ell(0, 0, hz + 0.012, 0.039, 0.037, 0.038, cloth('#7a5129')); return; }
   if (L.helmet) {
     s.ell(0, 0, hz + 0.006, 0.041, 0.039, 0.04, metal(L.helmet), hz - 0.004);
     s.cap([0.04, 0, hz + 0.01], [0.044, 0, hz - 0.022], 0.005, metal(shade(L.helmet, -0.15)));
-    if (L.armor && L.team) { s.ell(-0.01, 0, hz + 0.05, 0.045, 0.008, 0.022, cloth(L.team)); }
+    if (L.team && (L.armor || (L.kit || '').includes('P'))) s.ell(-0.01, 0, hz + 0.05, 0.045, 0.008, 0.022, cloth(L.team));
+    if ((L.kit || '').includes('P')) s.ell(-0.02, 0, hz + 0.075, 0.05, 0.007, 0.018, { k: 'gold' }); // krijgsdrill: gouden pluim
     return;
   }
   if (L.hat && L.weapon === 'bow') { s.ell(-0.004, 0, hz + 0.004, 0.043, 0.041, 0.046, cloth(L.hat), hz - 0.03); return; }
@@ -117,11 +125,12 @@ export function person(s, L, mode, f, seated = null) {
   s.ell(0, 0, hipZ + 0.075, 0.048, 0.06, 0.1, cloth(body));
   if (!seated) s.ell(0, 0, hipZ + 0.005, 0.054, 0.062, 0.045, cloth(shade(body, -0.1)));
   s.ell(0, 0, hipZ + 0.03, 0.05, 0.061, 0.012, plain('#3e2a18'));
-  if (L.armor) s.ell(0.006, 0, hipZ + 0.09, 0.047, 0.059, 0.07, metal('#b2bac4'));
+  if (L.armor) s.ell(0.006, 0, hipZ + 0.09, L.plate ? 0.05 : 0.047, L.plate ? 0.062 : 0.059, L.plate ? 0.075 : 0.07, metal(L.plate ? '#dfe4ea' : '#b2bac4'));
+  if (L.look === 'noble') { s.ell(-0.035, 0, hipZ + 0.06, 0.018, 0.065, 0.1, cloth('#5b2a7a')); s.ell(0.006, 0, hipZ + 0.03, 0.05, 0.062, 0.012, { k: 'gold' }); }
   if (L.look === 'hoplite') s.ell(0.006, 0, hipZ + 0.09, 0.048, 0.06, 0.07, metal('#c8963e'));
   if (L.look === 'samurai') s.ell(0.006, 0, hipZ + 0.08, 0.05, 0.062, 0.085, plain('#7a1f1f', true));
   if (L.team && !L.barb && L.weapon && L.weapon !== 'tool') s.ell(0.036, 0, hipZ + 0.08, 0.016, 0.03, 0.085, cloth(L.team));
-  if (L.armor) for (const side of [1, -1]) s.ell(0, side * 0.062, shZ, 0.026, 0.02, 0.018, metal('#9aa3ad'));
+  if (L.armor) for (const side of [1, -1]) s.ell(0, side * 0.062, shZ, L.plate ? 0.032 : 0.026, L.plate ? 0.026 : 0.02, L.plate ? 0.022 : 0.018, metal(L.plate ? '#cfd6de' : '#9aa3ad'));
   s.cap([0, 0, shZ], [0.004, 0, shZ + 0.03], 0.016, plain(shade(skin, -0.1)));
   head(s, L, hz, skin);
   // armen
@@ -135,22 +144,38 @@ export function person(s, L, mode, f, seated = null) {
     arm(s, shL, 0.6, sleeve, skin, 0.9);
     const big = L.look === 'hoplite';
     const sc = L.look === 'hoplite' ? '#c8963e' : L.look === 'lionguard' ? '#2c5fae' : L.look === 'immortal' ? '#a07a46' : L.look === 'peltast' ? '#8a6238' : L.team || '#8a6238';
-    const rz = L.weapon === 'sword' && !L.look ? 0.085 : big ? 0.09 : 0.07;
-    s.ell(0.04, 0.092, hipZ + 0.1, big ? 0.085 : 0.065, 0.012, rz, plain(sc, true));
-    s.ell(0.04, 0.1, hipZ + 0.1, 0.014, 0.008, 0.014, metal('#c9a23a'));
+    const kit = L.kit || '';
+    const wide = kit.includes('S') && !L.look; // schildmuur: een groter schild met een ijzeren rand
+    const rz = (L.weapon === 'sword' && !L.look ? 0.085 : big ? 0.09 : 0.07) * (wide ? 1.3 : 1);
+    const rw = (big ? 0.085 : 0.065) * (wide ? 1.15 : 1);
+    if (wide || kit.includes('G')) s.ell(0.04, 0.088, hipZ + 0.1, rw + 0.006, 0.01, rz + 0.006, kit.includes('G') ? { k: 'gold' } : metal('#8e959f'));
+    s.ell(0.04, 0.092, hipZ + 0.1, rw, 0.012, rz, plain(sc, true));
+    s.ell(0.04, 0.1, hipZ + 0.1, 0.014, 0.008, 0.014, kit.includes('G') ? { k: 'gold' } : metal('#c9a23a'));
   } else if (L.weapon === 'bow') {
     const hand = arm(s, shL, 1.45, sleeve, skin, 0.05);
     // boog: drie stukjes in een boog voor de hand
     const c = add(hand, [0.012, 0, 0]);
-    const p = [[0.0, 0, 0.13], [0.03, 0, 0.06], [0.035, 0, 0], [0.03, 0, -0.06], [0.0, 0, -0.13]];
-    for (let k = 0; k < 4; k++) s.cap(add(c, p[k]), add(c, p[k + 1]), 0.006, wood('#6b4523'));
+    const kit = L.kit || ''; const bl = kit.includes('L') ? 1.4 : 1; // taxusboog: langer
+    const p = [[0.0, 0, 0.13 * bl], [0.03, 0, 0.06 * bl], [0.035, 0, 0], [0.03, 0, -0.06 * bl], [0.0, 0, -0.13 * bl]];
+    for (let k = 0; k < 4; k++) s.cap(add(c, p[k]), add(c, p[k + 1]), 0.006, wood(kit.includes('L') ? '#4a2e18' : '#6b4523'));
     s.cap(add(c, p[0]), add(c, p[4]), 0.002, plain('#eee6d0'));
-    s.cyl(-0.05, 0.02, 0.018, hipZ + 0.06, hipZ + 0.2, wood('#6b4523')); // pijlkoker
+    for (const q of kit.includes('Q') ? [0, 1] : [0]) { // pijlkoker (pijlenregen: twee)
+      const qy = 0.02 - q * 0.04;
+      s.cyl(-0.05 - q * 0.01, qy, 0.018, hipZ + 0.06, hipZ + 0.2, wood(q ? '#5a3a1e' : '#6b4523'));
+      if (kit.includes('F')) s.ell(-0.05 - q * 0.01, qy, hipZ + 0.215, 0.016, 0.016, 0.018, plain('#ff8a1e', true)); // vuurpijlen
+      else s.ell(-0.05 - q * 0.01, qy, hipZ + 0.21, 0.012, 0.012, 0.01, plain('#d24a3a'));
+    }
   } else {
     arm(s, shL, leftAng, sleeve, skin, carry === 'wood' ? 0.2 : 0.35);
   }
   // rechts: wapen of gereedschap
-  if (L.weapon === 'spear' || L.look === 'hoplite' || L.look === 'lionguard' || L.look === 'immortal') {
+  if (L.weapon === 'lance') { // lans met wimpel, schuin naar voren
+    const hand = arm(s, shR, 0.9, sleeve, skin, 0.5);
+    const tip = add(hand, [0.34, 0, 0.18]);
+    s.cap(add(hand, [-0.1, 0, -0.05]), tip, 0.008, wood('#7a5129'));
+    s.ell(tip[0] + 0.02, tip[1], tip[2] + 0.01, 0.025, 0.006, 0.008, metal('#d5dbe2'));
+    if (L.team) s.ell(tip[0] - 0.05, tip[1] + 0.012, tip[2] - 0.05, 0.035, 0.004, 0.014, cloth(L.team));
+  } else if (L.weapon === 'spear' || L.look === 'hoplite' || L.look === 'lionguard' || L.look === 'immortal') {
     const hand = arm(s, shR, walk ? 0.45 + sw * 0.1 : 0.5, sleeve, skin, 0.9);
     s.cap([hand[0] + 0.012, hand[1], 0.02], [hand[0] + 0.04, hand[1], seated ? hipZ + 0.62 : 0.76], 0.007, wood('#7a5129'));
     s.ell(hand[0] + 0.041, hand[1], (seated ? hipZ + 0.62 : 0.76) + 0.025, 0.008, 0.006, 0.03, metal('#d5dbe2'));
@@ -198,10 +223,13 @@ export function horse(s, L, mode, f) {
   s.cap([0.2, 0.012, bz + 0.19], [0.2, 0.015, bz + 0.225], 0.008, plain(dark));
   s.cap([0.11, 0, bz + 0.06], [0.2, 0, bz + 0.2], 0.018, plain(dark)); // manen
   s.cap([-0.17, 0, bz + 0.03], [-0.24, 0, bz - 0.12 + (walk ? Math.sin(a) * 0.01 : 0)], 0.018, plain(dark));
+  const hk = L.kit || '';
   if (L.armor && L.team) {
     s.ell(0, 0, bz - 0.01, 0.19, 0.082, 0.085, cloth(L.team), bz - 0.1);
     s.cyl(0, 0, 0.001, 0, 0.001, plain('#000')); // (houdt de lijst niet leeg)
-  }
+  } else if (hk.includes('B') && L.team) s.ell(-0.02, 0, bz + 0.01, 0.11, 0.079, 0.075, cloth(L.team), bz - 0.05); // hoefijzers: kleed
+  if (hk.includes('H') && L.team) s.cap([0.2, 0, bz + 0.21], [0.15, 0, bz + 0.3], 0.014, cloth(L.team)); // flankrit: pluim
+  if (L.armor && L.plate) s.ell(0.24, 0, bz + 0.15, 0.045, 0.04, 0.05, metal('#c3cad3')); // halsstuk
   s.ell(-0.01, 0, bz + 0.075, 0.06, 0.07, 0.02, plain('#5a3a1e'));
   // ruiter
   person(s, { ...L, horse: undefined }, 'idle', 0, bz + 0.05);
