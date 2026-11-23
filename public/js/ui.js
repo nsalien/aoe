@@ -968,10 +968,21 @@ export function helpHtml(w, peaceEnd) {
     <h3>Veldslagen: zelf besturen of automatisch</h3>
     <p>Komt je leger aan bij een stad of roverskamp terwijl jij (of de verdediger) online bent, dan kies je: <b>zelf besturen</b> of <b>automatisch</b>.
     Wie niets kiest of offline is, laat de slag automatisch verlopen. Is de verdediger online, dan krijgt hij een melding en mag hij zijn stad zelf verdedigen.</p>
-    <ul><li>Klik op je troepen of sleep een kader; <b>dubbelklik</b> kiest alle troepen van die soort. Op een gsm tik je, en veeg je om rond te kijken.</li>
-    <li>Klik daarna op de <b>grond</b> om te lopen (ze houden daar hun plek) of op een <b>vijand, toren of muur</b> om die aan te vallen. <b>Stormloop</b> stuurt ze op de dichtstbijzijnde vijand af.</li>
-    <li>Tactieken: stuur speerdragers op ruiters, laat schutters achter je voetvolk, sloop torens met rammen of stenenwerpers, zoek een gat in de muur.
-    Als aanvaller kan je je op elk moment <b>terugtrekken</b>; na 4 minuten trekt je leger zich vanzelf terug.</li>
+    <p>Je vecht met <b>regimenten</b>, zoals in Rome: Total War: elk kaartje onderaan en elk vaandel boven het slagveld is één eenheid die samen loopt en samen vecht.</p>
+    <ul><li><b>Kiezen</b>: tik op een kaartje, een vaandel of een soldaat (dan kies je zijn hele regiment). Twee keer tikken = alle regimenten van die soort,
+    lang drukken = je hele leger. Met Shift of Ctrl voeg je er een toe. Op een gsm veeg je om rond te kijken.</li>
+    <li><b>Bevelen</b>: tik (of klik rechts) op de <b>grond</b> om er in formatie heen te lopen, op een <b>vijand</b> om dat regiment aan te vallen, op een <b>muur of poort</b> om een bres te slaan.
+    Meerdere regimenten stellen zich op in slagorde: voetvolk vooraan, schutters erachter, ruiters op de flanken.
+    <b>Stormloop</b> = op de dichtstbijzijnde vijand af, <b>Halt</b> = blijven staan en in formatie gaan.</li>
+    <li><b>Lijn trekken</b>: sleep met de rechtermuisknop (op een gsm: knop <b>Lijn</b>, dan met je vinger). Daar komen ze te staan, zo breed als de lijn, met het front naar de vijand.
+    De groene stippen tonen waar elke soldaat komt te staan.</li>
+    <li><b>Formaties</b> (knoppen onderaan, of de toetsen 1 tot 5): <b>Linie</b> (breed, veel soldaten tegelijk in het gevecht), <b>Blok</b> (minder schade, moeilijk te flankeren, iets trager),
+    <b>Wig</b> (harde stormloop, vooral voor ruiters), <b>Los</b> (veel minder last van pijlen en torens) en <b>Kring</b> (niet te flankeren, sterk tegen ruiters, traag).</li>
+    <li><b>Flanken en stormlopen</b>: wie een regiment van opzij of in de rug aanvalt, doet meer schade en breekt zijn moed. De eerste klap na een aanloop is extra hard.</li>
+    <li><b>Moed</b>: het gouden balkje onder je vaandel. Een regiment dat zwaar verliest of omsingeld wordt, <b>slaat op de vlucht</b> (witte vlag) en luistert even niet;
+    na wat rust hergroepeert het. Slaat een heel leger op de vlucht, dan is de slag verloren.</li>
+    <li>Tactieken: stuur speerdragers op ruiters, laat schutters achter je voetvolk, val met ruiters in de flank, sloop torens met rammen of stenenwerpers, zoek een gat in de muur.
+    Als aanvaller kan je je op elk moment <b>terugtrekken</b>; na 10 minuten trekt je leger zich vanzelf terug.</li>
     <li><b>Wachttorens</b> (vanaf het Tijdperk van het Brons) schieten op de dichtstbijzijnde vijand. Hogere niveaus doen meer schade en hebben meer levens. Een gesloopte toren verliest een niveau.</li>
     <li><b>Muren</b> houden aanvallers tegen tot ze een bres slaan; verdedigers kunnen er net overheen vechten. Een open muur heeft een poort in het midden.</li></ul>
     <h3>Gevechten</h3>

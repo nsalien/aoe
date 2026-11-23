@@ -12,6 +12,10 @@ export class Camera {
     this.onHover = null;
     this.onRightClick = null;
     this.onLongPress = null; // ingedrukt houden zonder te slepen
+    // slepen met de rechtermuisknop (of met één vinger als lineMode aan staat): een lijn trekken in plaats van schuiven
+    // onRightDrag(fase 'move' | 'end' | 'cancel', sx0, sy0, sx, sy)
+    this.onRightDrag = null;
+    this.lineMode = false;
     this.pointers = new Map();
     this.dragging = false;
     this.enabled = true;
@@ -72,6 +76,7 @@ export class Camera {
       e.preventDefault();
       // op een gsm opent lang drukken soms een contextmenu: dat is geen rechtsklik
       if (this.lastType && this.lastType !== 'mouse') return;
+      if (this.onRightDrag) return; // rechtsklik en rechts slepen worden bij het loslaten afgehandeld
       const p = this._pos(e);
       if (this.onRightClick) this.onRightClick(p.x, p.y);
     });
@@ -86,6 +91,12 @@ export class Camera {
       c.setPointerCapture(e.pointerId);
       const p = this._pos(e);
       this.lastType = e.pointerType;
+      // lijn trekken: rechtermuisknop, of één vinger/linkerknop in de lijnstand
+      if (this.onRightDrag && !this.rdrag && this.pointers.size === 0 && (e.button === 2 || (this.lineMode && e.button === 0))) {
+        this.rdrag = { id: e.pointerId, sx: p.x, sy: p.y, moved: false, right: e.button === 2 };
+        clearTimeout(this.lpTimer);
+        return;
+      }
       this.pointers.set(e.pointerId, { ...p, sx: p.x, sy: p.y, touch: e.pointerType !== 'mouse' });
       clearTimeout(this.lpTimer);
       this.longPressed = false;
@@ -109,6 +120,12 @@ export class Camera {
     });
     c.addEventListener('pointermove', (e) => {
       const p = this._pos(e);
+      if (this.rdrag && this.rdrag.id === e.pointerId) {
+        const r = this.rdrag;
+        if (!r.moved && Math.hypot(p.x - r.sx, p.y - r.sy) > 8) r.moved = true;
+        if (r.moved) this.onRightDrag('move', r.sx, r.sy, p.x, p.y);
+        return;
+      }
       if (!this.pointers.has(e.pointerId)) {
         if (this.onHover && e.pointerType === 'mouse') this.onHover(p.x, p.y);
         return;
@@ -134,6 +151,15 @@ export class Camera {
       if (this.onHover && e.pointerType === 'mouse') this.onHover(p.x, p.y);
     });
     const up = (e) => {
+      if (this.rdrag && this.rdrag.id === e.pointerId) {
+        const r = this.rdrag; this.rdrag = null;
+        const p = this._pos(e);
+        if (e.type !== 'pointerup') { this.onRightDrag('cancel', r.sx, r.sy, p.x, p.y); return; }
+        if (r.moved) this.onRightDrag('end', r.sx, r.sy, p.x, p.y);
+        else if (r.right) { if (this.onRightClick) this.onRightClick(p.x, p.y); }
+        else { this.onRightDrag('cancel', r.sx, r.sy, p.x, p.y); if (this.onClick) this.onClick(p.x, p.y, e); }
+        return;
+      }
       if (!this.pointers.has(e.pointerId)) return;
       const p = this._pos(e);
       const wasDrag = this.dragging;
