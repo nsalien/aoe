@@ -5,7 +5,7 @@ import {
   destroySession, validateName, validatePassword,
 } from './auth.js';
 import {
-  getWorld, phaseOf, worldTimes, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop,
+  getWorld, phaseOf, worldTimes, peaceEnd, peaceBlock, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop,
   battleView, setBattleMode, battleOrder, myBattles, startPractice,
   freshCampState,
 } from './game.js';
@@ -205,7 +205,7 @@ route('GET', '/state', { auth: true }, async (ctx) => {
   for (const s of mySupport) away += unitsPop(s.units);
   return json({
     now, world: worldInfo(world, now),
-    me: { id: player.id, name: player.name, teamId: player.team_id, killPts: player.kill_pts },
+    me: { id: player.id, name: player.name, teamId: player.team_id, killPts: player.kill_pts, peaceEnd: peaceEnd(world, player.created_at) },
     team: team && { id: team.id, name: team.name, color: team.color },
     town: { id: townRow.id, name: townRow.name, x: townRow.x, y: townRow.y, state },
     awayPop: away, marches, supportHere, mySupport, unseenReports: unseen.c, battles,
@@ -216,14 +216,14 @@ route('GET', '/state', { auth: true }, async (ctx) => {
 route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
   const t = gameTime(world, now);
   const towns = (await db.prepare(
-    'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.team_id, p.last_seen FROM towns t JOIN players p ON p.id = t.player_id',
+    'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.team_id, p.last_seen, p.created_at FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results.map((r) => {
     const s = JSON.parse(r.state);
     ensureTerritory(s, r.id);
     advance(s, t, world.speed);
     return {
       id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id, civ: s.civ,
-      online: now - r.last_seen < 5 * 60000, ...publicSummary(s),
+      online: now - r.last_seen < 5 * 60000, peaceEnd: peaceEnd(world, r.created_at), ...publicSummary(s),
     };
   });
   const camps = (await db.prepare('SELECT id, x, y, level, state FROM camps').all()).results.map((c) => {
@@ -395,7 +395,6 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   const kind = String(body.kind);
   if (!['attack', 'scout', 'support', 'trade'].includes(kind)) throw new GameError('Ongeldige opdracht.');
-  const phase = phaseOf(world, now);
   const { warEnd } = worldTimes(world);
   const home = await db.prepare('SELECT id, x, y FROM towns WHERE player_id = ?').bind(player.id).first();
 
@@ -406,7 +405,7 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
     if (kind !== 'attack' && kind !== 'scout') throw new GameError('Rovers kan je enkel aanvallen of verkennen.');
     target = await db.prepare('SELECT id, x, y FROM camps WHERE id = ?').bind(int(body.targetId)).first();
   } else {
-    target = await db.prepare('SELECT t.id, t.x, t.y, p.team_id FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
+    target = await db.prepare('SELECT t.id, t.x, t.y, p.team_id, p.created_at FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
       .bind(int(body.targetId)).first();
     if (target) targetTeam = target.team_id;
   }
@@ -415,9 +414,6 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
   const ally = tkind === 'town' && targetTeam === player.team_id;
   if ((kind === 'attack' || kind === 'scout') && ally) throw new GameError('Je kan geen bondgenoten aanvallen.');
   if ((kind === 'support' || kind === 'trade') && !ally) throw new GameError('Dat kan enkel bij bondgenoten.');
-  if ((kind === 'attack' || kind === 'scout') && tkind === 'town' && phase !== 'war') {
-    throw new GameError('Spelers aanvallen kan pas tijdens de oorlogsweek. Rovers mag je altijd aanvallen!');
-  }
 
   const units = {};
   const res = {};
@@ -432,6 +428,10 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
   const speed = kind === 'trade' ? MARKET.merchantSpeed : slowestSpeed(units);
   const dur = travelMs(world, home, target, speed);
   if ((kind === 'attack' || kind === 'scout') && now + dur > warEnd) throw new GameError('Je leger zou pas na het einde van het seizoen aankomen.');
+  if ((kind === 'attack' || kind === 'scout') && tkind === 'town') {
+    const why = peaceBlock(world, player.created_at, target.created_at, now, now + dur);
+    if (why) throw new GameError(why);
+  }
 
   await mutateTown(db, world, home.id, now, (s) => {
     if (kind === 'trade') {
@@ -604,19 +604,21 @@ function readTimes(body, w) {
     if (!Number.isFinite(t)) throw new GameError('Ongeldige startdatum.');
     out.start_at = t;
   }
-  if (body.prepDays !== undefined && body.prepDays !== '') out.prep_ms = Math.round(Number(body.prepDays) * 86400000);
-  if (body.warDays !== undefined && body.warDays !== '') out.war_ms = Math.round(Number(body.warDays) * 86400000);
+  // prep_ms = vrede per speler vanaf zijn start, war_ms = lengte van het hele seizoen
+  if (body.peaceHours !== undefined && body.peaceHours !== '') out.prep_ms = Math.round(Number(body.peaceHours) * 3600000);
+  if (body.seasonDays !== undefined && body.seasonDays !== '') out.war_ms = Math.round(Number(body.seasonDays) * 86400000);
   if (body.speed !== undefined && body.speed !== '') out.speed = Math.min(1000, Math.max(0.1, Number(body.speed)));
   if (body.teamSize !== undefined && body.teamSize !== '') out.team_size = Math.min(8, Math.max(1, int(body.teamSize)));
   if (body.joinCode !== undefined) out.join_code = String(body.joinCode).trim() || null;
-  for (const k of ['prep_ms', 'war_ms', 'speed']) if (k in out && !(out[k] > 0)) throw new GameError(`Ongeldige waarde voor ${k}.`);
+  if ('prep_ms' in out && !(out.prep_ms >= 0)) throw new GameError('Ongeldige waarde voor de vrede.');
+  for (const k of ['war_ms', 'speed']) if (k in out && !(out[k] > 0)) throw new GameError(`Ongeldige waarde voor ${k}.`);
   return { ...w, ...out };
 }
 
 route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const body = await readJson(request);
   const w = readTimes(body, {
-    start_at: now, prep_ms: 21 * 86400000, war_ms: 7 * 86400000, speed: 1, team_size: 2, join_code: null,
+    start_at: now, prep_ms: 24 * 3600000, war_ms: 28 * 86400000, speed: 1, team_size: 2, join_code: null,
   });
   const seed = int(body.seed) || Math.floor(Math.random() * 1e9);
   const size = WORLD_SIZE;
