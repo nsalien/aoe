@@ -108,6 +108,14 @@ registratie; oude spelers kregen een vast willekeurig volk.
      schade. **Moed**: wie zwaar verliest of omsingeld wordt, vlucht (witte vlag) en hergroepeert na rust; vlucht een heel
      leger, dan is de slag verloren. Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
 
+**Computerspelers (bots)** (gevraagd: "bots die als echte spelers hun stad uitbouwen en je na je 24 uur vrede aanvallen,
+in eigen clans die samenwerken"): standaard 4 bots in clans van 2 (beheer: aantal 0–12 en niveau makkelijk/normaal/sterk).
+Ze bouwen hun stad uit zoals een actieve speler (± tijdperk 2 na 1 dag, 3 na 2,5 dagen), zetten een muur met 4 poorten en
+torens, trainen een leger, plunderen roverskampen en vallen spelers aan zodra hun vrede voorbij is en ze denken te winnen
+(normaal: per bot hooguit om de ±6 uur, en elke stad krijgt ±9 speluren rust na een aanval van een bot; een clan valt soms
+samen aan). Clanleden sturen elkaar versterking bij een aanval en grondstoffen als iemand spaart voor een nieuw tijdperk.
+Op de kaart, bij een stad en in de ranglijst staat "computer".
+
 **Punten**: opbouwpunten (gebouwen, dorpelingen, troepen; monument +1500/niveau) + gevechtspunten.
 
 ## 4. Werkwijze en omgeving
@@ -132,6 +140,8 @@ registratie; oude spelers kregen een vast willekeurig volk.
   `marches.arrive_at` vlak in de toekomst, laat beide pagina's peilen (`visibilitychange`) en kies 'Zelf besturen'. Meet per beeld
   de verplaatsing (sprongen) en vergelijk beide schermen. Wereldsnelheid hoog zetten werkt niet: dan overvallen barbaren alles.
 - Een oefenslag blijft 30 s lopen nadat je ze verlaat: gebruik voor elke test een nieuwe speler.
+- Bots testen: zet `world.start_at` (en `players.created_at`/`towns.state.t` van de bots) in het verleden en roep `botTick` vaak op
+  (of laat een speler `/api/state` peilen); `players.bot_next = 0` maakt een bot meteen weer aan de beurt.
 - Lokaal spel: `npm run db:init:local` en `npx wrangler pages dev --port 8788`.
 - Browsertests met Playwright (scripts in je scratchpad, niet in de repo):
   - `const { chromium } = createRequire(import.meta.url)('playwright')` (ESM-import vindt het niet).
@@ -229,6 +239,11 @@ registratie; oude spelers kregen een vast willekeurig volk.
     waar een regiment komt te staan, formatieknoppen, minder schokjes bij elke peiling (oude en nieuwe stand op hetzelfde moment
     vergeleken), kleinere antwoorden (`have`). Getest: computer tegen computer (open, ommuurd, kamp, groot leger), pc en gsm
     (rechtop/liggend, aanraakscherm, trage processor), twee spelers met 300–450 ms vertraging (verschil < 0,3 tegel, geen sprongen).
+
+27. **Computerspelers (bots)**: `botbrain.js` (economie) en `bots.js` (beurten, leger, clan). Getest met een hele wereld in Node
+    (4 dagen met een nepklok via de echte routes: groei, aanvallen op een speler, versterking, karavanen, kampen) en het
+    inhalen van 3,2 dagen in een lopende wereld (±90 beurten, ±30 min met één speler online; beurt ≤ 4,4 ms en ≤ 14 query's).
+    Tip: `node:sqlite` in het geheugen + alle migraties + `handle()` met een eigen `Date.now` = een snelle proefwereld.
 
 ## 8. Bekende beperkingen en ideeën
 

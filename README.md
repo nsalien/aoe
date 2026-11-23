@@ -99,6 +99,7 @@ Na ±2 minuten staat het spel op **https://rijken-van-de-vallei.pages.dev**.
 | Startmoment | nu | Vóór de start kunnen spelers zich al inschrijven ("lobby"). |
 | Vrede per speler | 24 uur | Vanaf de start van een speler (of van het seizoen): geen aanvallen van of op die speler. |
 | Lengte seizoen | 28 dagen | Daarna is het seizoen voorbij en ligt de eindstand vast. |
+| Computerspelers | 4, normaal | Bots die hun stad uitbouwen, samenwerken in eigen clans en spelers aanvallen na hun vrede. |
 | Spelsnelheid | 1 | Hoger = alles (bouwen, productie, marsen) gaat sneller. Handig om te testen. |
 | Spelers per team | 2 | Bepaalt hoeveel bondgenoten er automatisch gekoppeld worden. |
 | Deelnamecode | — | Optioneel: enkel wie de code kent, kan zich inschrijven. |
