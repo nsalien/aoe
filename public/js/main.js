@@ -309,7 +309,7 @@ function applyState(data, first = false) {
   handleBattles(data, first);
   // inkomende aanvallen
   for (const m of data.marches) {
-    if (!m.ally && m.status === 'out' && !app.knownHostile.has(m.id)) {
+    if (!m.ally && m.status === 'out' && (m.kind === 'attack' || m.kind === 'scout') && !app.knownHostile.has(m.id)) {
       app.knownHostile.add(m.id);
       if (!first) toast(`${m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err', 'swords');
     }

@@ -191,7 +191,7 @@ export class WorldView {
       const pos = this.marchPos(m, now);
       if (!pos) continue;
       items.push({ d: pos.gx + pos.gy, kind: 'march', o: m, pos });
-      if (emit && m.kind !== 'trade') {
+      if (emit && m.kind !== 'trade' && m.kind !== 'tribute') {
         const w = toWorld(pos.gx, pos.gy);
         this.particles.dust(w.x - pos.dir * 8, w.y - this.hAt(pos.gx, pos.gy) + 1, 1);
       }
@@ -280,7 +280,7 @@ export class WorldView {
     ctx.save();
     ctx.translate(w.x, y);
     if (pos.dir < 0) ctx.scale(-1, 1);
-    if (m.kind === 'trade') {
+    if (m.kind === 'trade' || m.kind === 'tribute') {
       ctx.fillStyle = '#7a5129'; ctx.fillRect(-6, -9, 12, 6);
       ctx.fillStyle = '#e6c45a'; ctx.beginPath(); ctx.ellipse(0, -9, 5, 2.5, 0, Math.PI, 0); ctx.fill();
       ctx.fillStyle = '#3a2716'; ctx.beginPath(); ctx.arc(-4, -2.5, 2.4, 0, 7); ctx.arc(4, -2.5, 2.4, 0, 7); ctx.fill();
