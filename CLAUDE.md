@@ -164,6 +164,12 @@ Daarom:
   (gewone eerst), hooguit `MAX_HI` scherpe beelden in het geheugen. Figuren krijgen anti-aliasing (`aa`) in `render()`.
   `render3d.js` versnelt exact met lijsten per vorm (`buildAccel`: schaduw, omgevingsschaduw, schermvak per beeldlijn).
   Materialen voor figuren: `cloth`, `leather`, `mail` (maliën), `plain`/`metal`/`gold`.
+  **Aanvallen**: figuren hebben de modus `atk` (8 beelden, beeld 0 = het moment van de slag of het schot): zwaard
+  (`SWORD_ARM`/`SWORD_ROT`), speer en lans (`SPEAR_X`, stoten), boog (`BOW_DRAW`: pijl uit de koker, op de pees, spannen,
+  loslaten), werpspeer, bijl; ruiters doen het op het paard. Geef `attack` (fase 0..1 in de cyclus) mee aan `A.person`,
+  `A.horseman` of `FIG.uniqueUnit`; `modeOf` in `figures.js` kiest dan `atk`. De fase komt uit de laatste slag en de
+  `rate` van de eenheid: in de belegering `u.at` (`siegeview.js`), in je gebied `lastSwing` (`drawFighter` in `town.js`).
+  Wie een doelwit heeft maar nog wacht, staat in de aanslag (`attackReady`). `hasAttackAnim` = welke eenheden dit kunnen.
 - **Grond van de stad** (`town.js` + `groundhd.js`): `bakeGround` bereidt alles voor en maakt een tekenfunctie
   `paintGround(g, R, S)` (g in wereldcoördinaten op schaal S, R = uitsnede in wereldpixels). Daarmee wordt de grond één keer
   op `BAKE` gebakken (uitgezoomd); ingezoomd tekent `drawGroundHD` het zichtbare deel in stukken op schermresolutie
