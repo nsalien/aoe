@@ -18,10 +18,12 @@ const hasStore = typeof caches !== 'undefined' && typeof window !== 'undefined' 
 const urlOf = (key) => `/__3d/${VERSION}/${SCALE}/${encodeURIComponent(key)}`;
 
 // Figuren in meerdere resoluties: eerst de gewone (SCALE), bij inzoomen een scherpere (HI). Zolang de scherpe niet
-// klaar is, tekent het spel de beste die er al is. Scherpe beelden nemen veel geheugen: hooguit MAX_HI tegelijk.
+// klaar is, tekent het spel de beste die er al is. Scherpe beelden nemen veel geheugen: hooguit HI_BUDGET pixels.
 const HI = [4, 6].filter((x) => x > SCALE + 0.5);
-const MAX_HI = LOW ? 140 : 360;
+// geheugen voor scherpe beelden, in pixels (gebouwen op 6x zijn groot): de langst niet gebruikte gaan eerst weg
+const HI_BUDGET = (LOW ? 12 : 28) * 1e6;
 const hiKeys = new Set();
+let hiPx = 0;
 
 // figuren krijgen een zachte donkere rand (beter leesbaar op het gras); even dik bij elke resolutie
 function outlined(cv, scale) {
@@ -44,7 +46,14 @@ function finish(key, cv, meta) {
   cache.set(key, { cv, w: cv.width / sc, h: cv.height / sc, ax: -meta.ox, ay: -meta.oy, lights: meta.lights.map(([x, y]) => [x, y, 1]), anchors: meta.anchors, d3: true });
   if (key.includes('@')) {
     hiKeys.add(key);
-    if (hiKeys.size > MAX_HI) { const old = hiKeys.values().next().value; hiKeys.delete(old); cache.delete(old); }
+    hiPx += cv.width * cv.height;
+    while (hiPx > HI_BUDGET && hiKeys.size > 1) {
+      const old = hiKeys.values().next().value;
+      hiKeys.delete(old);
+      const o = cache.get(old);
+      if (o && o.cv) hiPx -= o.cv.width * o.cv.height;
+      cache.delete(old);
+    }
   }
   ready++;
 }
@@ -112,15 +121,11 @@ export const has = (type) => HAS_3D.has(type) && enabled();
 export const readyCount = () => ready;
 
 // v: variant voor gebouwen die er anders uitzien volgens de stad (Academie: welke soorten onderzoek klaar zijn)
-export function get(type, level, civ, id = 0, v = null) {
+// need = schermpixels per wereldpixel: bij inzoomen een scherpere versie (zoals bij de figuren)
+export function get(type, level, civ, id = 0, v = null, need = 0) {
   if (!has(type) || level < 1) return null;
   const variant = type === 'house' ? Math.abs(id) % 3 : v || 0;
-  const key = `${type}|${level}|${civ || ''}|${variant}`;
-  const s = cache.get(key);
-  if (s) return s;
-  if (s === false) return null;
-  request(key, { type, level, civ, variant });
-  return null;
+  return tiered(`${type}|${level}|${civ || ''}|${variant}`, { type, level, civ, variant }, need);
 }
 
 // Wachtrij: gebouwen en gewone figuren eerst (pri 0), scherpe figuren daarna (pri 1). Hooguit 2 opdrachten per werker
@@ -158,16 +163,11 @@ function request(key, job, scale = SCALE, pri = 0) {
 }
 
 // stuk stadsmuur: anker = midden van het stuk op de grond
-export function getWall(seg, level, hPx) {
+export function getWall(seg, level, hPx, need = 0) {
   if (!enabled()) return null;
   const dx = Math.round((seg.x1 - seg.x0) * 100) / 100; const dy = Math.round((seg.y1 - seg.y0) * 100) / 100;
   const h = Math.round((hPx / 39.19) * 100) / 100;
-  const key = `wall|${level}|${dx}|${dy}|${h}|${seg.tower ? 1 : 0}`;
-  const s = cache.get(key);
-  if (s) return s;
-  if (s === false) return null;
-  request(key, { wall: { dx, dy, h, level, tower: !!seg.tower } });
-  return null;
+  return tiered(`wall|${level}|${dx}|${dy}|${h}|${seg.tower ? 1 : 0}`, { wall: { dx, dy, h, level, tower: !!seg.tower } }, need);
 }
 
 // figuur (mens of ruiter) in 3D; L = de opties van de getekende figuur, mode = idle/walk/work, f = beeld 0..7
@@ -191,6 +191,7 @@ function tiered(key, job, need) {
   const hk = `${key}@${tier}`;
   const h = cache.get(hk);
   if (h) { hiKeys.delete(hk); hiKeys.add(hk); return h; }
+  if (h === false) return s || null;
   if (h === undefined && s) request(hk, job, tier, 1);
   for (let i = HI.indexOf(tier) - 1; i >= 0; i--) { const lo = cache.get(`${key}@${HI[i]}`); if (lo) return lo; }
   return s || null;
