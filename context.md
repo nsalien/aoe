@@ -331,6 +331,12 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     meer wilde bloemen in groepjes, grasplukjes met echte sprieten, extra fijn gras van dichtbij, stenen met mos, kiezels
     op de vijveroever, struiken en varens met echte blaadjes.
 
+37. **Aanvalsbewegingen** (gevraagd: "bij gevechten zie je ze hun wapens niet gebruiken; speren moeten steken, zwaarden
+    slaan, bogen aanspannen en schieten"). Nieuwe modus `atk` voor de 3D-figuren (en een eenvoudige 2D-terugval), in de
+    maat van de echte slagen: zwaard omhoog achter het hoofd en neer, speer terugtrekken en stoten (schild omhoog), boog:
+    pijl uit de koker, op de pees, spannen en loslaten op het moment van het schot, lans neer en stoten, werpspeer, bijl;
+    wijde stand in het gevecht. Getest in een oefenslag op pc en gsm (ook schutters op de muur).
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
