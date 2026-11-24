@@ -16,6 +16,8 @@ export class Camera {
     // in plaats van de kaart te verschuiven (zo verplaats je een gebouw)
     this.onHoldDrag = null;
     this.holdDrag = false;
+    // onGrab(sx, sy) bij het neerdrukken: geeft het true, dan gaat het slepen meteen naar onHoldDrag (bv. een gebouw verschuiven)
+    this.onGrab = null;
     // slepen met de rechtermuisknop (of met één vinger als lineMode aan staat): een lijn trekken in plaats van schuiven
     // onRightDrag(fase 'move' | 'end' | 'cancel', sx0, sy0, sx, sy)
     this.onRightDrag = null;
@@ -106,6 +108,7 @@ export class Camera {
       this.longPressed = false;
       if (this.pointers.size === 1) {
         this.dragging = false; this.startCam = { x: this.x, y: this.y };
+        if (this.onGrab && this.onHoldDrag && e.button !== 2 && this.onGrab(p.x, p.y)) { this.holdDrag = true; return; }
         if (this.onLongPress && e.button !== 2) {
           const id = e.pointerId;
           this.lpTimer = setTimeout(() => {
