@@ -76,6 +76,11 @@ Daarom:
   Routes: `routeTo(s, from, to)` (A* over de tegels: water en muren blokkeren, poorten zijn doorgang; daarna enkel de bochten
   als tussenstops in `g.via`, `fieldArrive` loopt verder). Gebruikt door groepen (`travel`) én de dorpelingen in de stad.
   Gebouwen afbreken: `doDemolish` (deel van de kosten terug, zie `DEMOLISH` in `rules.js`).
+  Gebouwen verplaatsen (gratis): `checkMove`/`doMove` (`canPlaceAt(..., ignoreId)`; stadscentrum en muren niet), route `/move`.
+  In de stad: ingedrukt houden op een gebouw = oppakken (`longPress` geeft true → `cam.onHoldDrag` in `iso.js` stuurt het
+  slepen naar `holdDrag`), loslaten = neerzetten (`dropMove` → `onMove`); de knop Verplaatsen in het gebouwpaneel doet hetzelfde
+  met de muis (`startMove(b, true)`, klikken zet neer). `main.js` (`moveBuilding`) voert de verplaatsing meteen uit en zet ze
+  terug als de server weigert.
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
   (binnen `FIELD.aggro` van het barbarenkamp) en het einde van een gevecht. De browser tekent het verloop met `runFight(f, nu)`.
