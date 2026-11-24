@@ -31,9 +31,11 @@ const cache = new Map();
 const MAX_SPRITES = 2400;
 
 // resolutie van de sprite afstemmen op hoe groot de figuur nu op het scherm staat
+// hoeveel schermpixels per wereldpixel krijgt een figuur met grootte s nu (zoom x pixeldichtheid x s)
+const needOf = (ctx, s) => { const m = ctx.getTransform(); return Math.hypot(m.a, m.b) * s; };
+
 function resFor(ctx, s) {
-  const m = ctx.getTransform();
-  const sc = Math.hypot(m.a, m.b) * s;
+  const sc = needOf(ctx, s);
   return sc <= 1.3 ? 1.3 : sc <= 2 ? 2 : sc <= 3 ? 3 : sc <= 4.5 ? 4.5 : 6.5;
 }
 
@@ -439,7 +441,7 @@ export function person(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 0.4 * s, y, 4.4 * s, 1.9 * s, 0, 0, TAU); ctx.fill();
   const mode = o.working ? 'work' : o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
-  const f3 = S3.getFig('p', o, mode, f);
+  const f3 = S3.getFig('p', o, mode, f, needOf(ctx, s));
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   const key = `p|${mode}${f}|${R}|${o.body || ''}|${o.leg || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.tool || ''}|${o.carry || ''}|${o.team || ''}|${o.barb ? 1 : 0}|${o.plate ? 1 : 0}|${o.kit || ''}|${o.look || ''}`;
@@ -601,7 +603,7 @@ export function horseman(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 0.8 * s, y, 9 * s, 2.6 * s, 0, 0, TAU); ctx.fill();
   const mode = o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
-  const f3 = S3.getFig('h', o, mode, f);
+  const f3 = S3.getFig('h', o, mode, f, needOf(ctx, s));
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   const key = `h|${mode}${f}|${R}|${o.body || ''}|${o.horse || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.team || ''}|${o.look || ''}|${o.plate ? 1 : 0}|${o.kit || ''}`;
@@ -820,7 +822,7 @@ export function elite(ctx, x, y, o = {}) {
   const mode = o.walking ? 'walk' : 'idle';
   const f = mode === 'idle' ? 0 : frameOf(o.phase);
   const lk = LOOK[o.look] || {};
-  const f3 = S3.getFig('p', { body: lk.body, leg: lk.leg, look: o.look, team: o.team, skin: o.skin || (o.look === 'samurai' ? 1 : o.look === 'immortal' || o.look === 'lionguard' ? 2 : 0), thumb: o.thumb }, mode, f);
+  const f3 = S3.getFig('p', { body: lk.body, leg: lk.leg, look: o.look, team: o.team, skin: o.skin || (o.look === 'samurai' ? 1 : o.look === 'immortal' || o.look === 'lionguard' ? 2 : 0), thumb: o.thumb }, mode, f, needOf(ctx, s));
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   blit(ctx, sprite(`e|${o.look}|${mode}${f}|${R}|${o.team || ''}|${o.skin || 0}`, R, P_BOX, (c) => drawElite(c, o, mode, f), [-4.8, 4.4]), P_BOX, x, y, s);

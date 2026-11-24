@@ -7,10 +7,10 @@ self.onmessage = (e) => {
   const { id, type, level, civ, variant, scale, wall, low, fig } = e.data;
   try {
     const sc = fig ? figureScene(fig.kind, fig.L, fig.mode, fig.f) : wall ? wallScene(wall) : build(type, level, civ, variant);
-    const r = render(sc, scale, fig || wall ? { ground: false, ao: fig ? 3 : low ? 3 : 5, fill: fig ? 0.5 : 0.16 } : { apron: sc.apron, ao: low ? 3 : 5 });
+    const r = render(sc, scale, fig || wall ? { ground: false, ao: fig ? 3 : low ? 3 : 5, fill: fig ? 0.5 : 0.16, aa: !!fig } : { apron: sc.apron, ao: low ? 3 : 5 });
     const anchors = {};
     for (const k of Object.keys(sc.anchors || {})) { const [x, y, z] = sc.anchors[k]; anchors[k] = [(x - y) * 32, (x + y) * 16 - z * ZPX]; }
-    self.postMessage({ id, w: r.w, h: r.h, ox: r.ox, oy: r.oy, data: r.data, lights: r.lights, anchors }, [r.data.buffer]);
+    self.postMessage({ id, scale, w: r.w, h: r.h, ox: r.ox, oy: r.oy, data: r.data, lights: r.lights, anchors }, [r.data.buffer]);
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err) });
   }
