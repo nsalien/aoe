@@ -301,6 +301,12 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
 32. **Idee: haven, boten en eilanden** — uitgewerkt in `docs/idee-haven.md`, **nog niet gebouwd** (wacht op de keuzes
     van de gebruiker, zie de open vragen onderaan dat bestand).
 
+33. **Omgeving even mooi als de gebouwen** (feedback met screenshot: "mooie houthakkershut, maar de stronken ernaast
+    zijn alles behalve mooi; ook de kar en tonnen naast de mijn"): alle aankleding, rotsen, goud, stronken, bomen, schapen,
+    everzwijnen en het barbarenkamp zijn nu 3D-modellen in dezelfde stijl (`propmodels.js`), met slagschaduw, gladde randen
+    en scherpe versies bij inzoomen. Renderer: anti-aliasing met grondschaduw, materialen `leaf`, `bark`, `water`.
+    Nog getekend: de akker, het water/de vijver, kameel/strijdwagen/olifant en rammen.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
