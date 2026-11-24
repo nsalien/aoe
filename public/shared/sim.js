@@ -546,28 +546,6 @@ export function doPlaceGate(s, i, j) {
   s.gates.push(...idxs);
 }
 
-// Moet een groep van 'from' naar 'to' door de stadsmuur? Dan via de dichtstbijzijnde poort: [voor de poort, achter de poort].
-export function gateRoute(s, from, to) {
-  if (!(s.gates || []).length) return null;
-  const walls = wallSet(s);
-  const inside = insideSet(s, walls);
-  if (!inside) return null;
-  const key = (p) => `${Math.floor(p.x)},${Math.floor(p.y)}`;
-  const a = inside.has(key(from)); const b = inside.has(key(to));
-  if (a === b) return null;
-  let best = null;
-  for (const g of gateList(s)) {
-    const p1 = g.ax === 'x' ? { x: g.cx, y: g.cy - 0.9 } : { x: g.cx - 0.9, y: g.cy };
-    const p2 = g.ax === 'x' ? { x: g.cx, y: g.cy + 0.9 } : { x: g.cx + 0.9, y: g.cy };
-    const in1 = inside.has(key(p1));
-    const pin = in1 ? p1 : p2; const pout = in1 ? p2 : p1;
-    const [first, second] = a ? [pin, pout] : [pout, pin];
-    const d = Math.hypot(first.x - from.x, first.y - from.y) + 1.8 + Math.hypot(to.x - second.x, to.y - second.y);
-    if (!best || d < best.d) best = { d, via: [first, second] };
-  }
-  return best ? best.via : null;
-}
-
 // muurwaarde in gevechten: volledig als de stad dicht is, anders maar een stukje
 export function effectiveWall(s) {
   const L = bLevel(s, 'wall');
@@ -837,11 +815,172 @@ function setPath(g, from, to, t, pace = null) {
   g.pending = true;
 }
 
-// lopen van 'from' naar 'dest', zo nodig via een poort (dan eerst naar de poort, daarna verder)
+// ---------- routes in je gebied ----------
+// Niemand loopt over water of door een muur; een poort is een doorgang (de deuren gaan open). Een route = A* over de
+// tegels (8 richtingen, geen hoeken afsnijden langs een hindernis), daarna zo weinig mogelijk tussenstops waar je
+// rechtdoor kan. Puur en deterministisch (zelfde uitkomst in browser en server); geen Math.hypot.
+let blockCache = null;
+function blockGrid(s) {
+  const key = `${s.terr.seed}|${(s.walls || []).join()}|${(s.gates || []).join()}`;
+  if (blockCache && blockCache.key === key) return blockCache.b;
+  const tiles = territory(s.terr.seed).tiles;
+  const b = new Uint8Array(T_W * T_W);
+  for (let k = 0; k < b.length; k++) if (tiles[k] === TILE.WATER) b[k] = 1;
+  for (const w of s.walls || []) if (w >= 0 && w < b.length) b[w] = 1;
+  for (const w of s.gates || []) if (w >= 0 && w < b.length) b[w] = 0;
+  blockCache = { key, b };
+  return b;
+}
+const blockedAt = (b, i, j) => !inTerr(i, j) || b[tileIndex(i, j)] === 1;
+
+// raakt het lijnstuk een geblokkeerde tegel? (elke tegel waar het door gaat; precies door een hoek = beide buren)
+// skip = tegel die mag (waar de groep nu staat, ook als daar intussen een muur kwam)
+function segFree(b, x0, y0, x1, y1, skip = -1) {
+  let i = Math.floor(x0); let j = Math.floor(y0);
+  const ie = Math.floor(x1); const je = Math.floor(y1);
+  const dx = x1 - x0; const dy = y1 - y0;
+  const si = dx > 0 ? 1 : dx < 0 ? -1 : 0; const sj = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+  const tdx = si ? si / dx : Infinity; const tdy = sj ? sj / dy : Infinity;
+  let tx = si ? ((si > 0 ? i + 1 : i) - x0) / dx : Infinity;
+  let ty = sj ? ((sj > 0 ? j + 1 : j) - y0) / dy : Infinity;
+  const bad = (a, c) => blockedAt(b, a, c) && !(inTerr(a, c) && tileIndex(a, c) === skip);
+  for (let n = 0; n < 4 * T_W; n++) {
+    if (bad(i, j)) return false;
+    if (i === ie && j === je) return true;
+    if (tx < ty - 1e-9) { i += si; tx += tdx; } else if (ty < tx - 1e-9) { j += sj; ty += tdy; } else {
+      if (bad(i + si, j) || bad(i, j + sj)) return false;
+      i += si; j += sj; tx += tdx; ty += tdy;
+    }
+  }
+  return true;
+}
+
+// rechtdoor van a naar c, met wat ruimte opzij (niet rakelings langs een muur of de oever)
+function clearLine(b, a, c, skip) {
+  if (!segFree(b, a.x, a.y, c.x, c.y, skip)) return false;
+  const dx = c.x - a.x; const dy = c.y - a.y; const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.7) return true;
+  const ux = dx / len; const uy = dy / len; const px = -uy * 0.22; const py = ux * 0.22;
+  const ax = a.x + ux * 0.35; const ay = a.y + uy * 0.35; const cx = c.x - ux * 0.35; const cy = c.y - uy * 0.35;
+  return segFree(b, ax + px, ay + py, cx + px, cy + py, skip) && segFree(b, ax - px, ay - py, cx - px, cy - py, skip);
+}
+
+const SQ2 = 1.4142135623730951;
+const DIRS8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, SQ2], [1, -1, SQ2], [-1, 1, SQ2], [-1, -1, SQ2]];
+function octile(i, j, gi, gj) { const a = Math.abs(i - gi); const c = Math.abs(j - gj); return Math.max(a, c) + (SQ2 - 1) * Math.min(a, c); }
+
+// A* van tegel (si, sj) naar (gi, gj); lukt dat niet (ingesloten), dan naar de bereikbare tegel die er het dichtst bij ligt.
+// Vaste werkgeheugens (typed arrays) en een eigen hoop: snel genoeg voor een heel leger in één verzoek op de server.
+const AN = T_W * T_W;
+const A_G = new Float64Array(AN); const A_CAME = new Int32Array(AN); const A_DONE = new Uint8Array(AN);
+const H_F = new Float64Array(AN * 8); const H_H = new Float64Array(AN * 8); const H_K = new Int32Array(AN * 8);
+let hn = 0;
+function hLess(a, c) { return H_F[a] < H_F[c] || (H_F[a] === H_F[c] && (H_H[a] < H_H[c] || (H_H[a] === H_H[c] && H_K[a] < H_K[c]))); }
+function hSwap(a, c) {
+  let x = H_F[a]; H_F[a] = H_F[c]; H_F[c] = x;
+  x = H_H[a]; H_H[a] = H_H[c]; H_H[c] = x;
+  const y = H_K[a]; H_K[a] = H_K[c]; H_K[c] = y;
+}
+function hPush(f, h, k) {
+  let c = hn++; H_F[c] = f; H_H[c] = h; H_K[c] = k;
+  while (c > 0) { const p = (c - 1) >> 1; if (!hLess(c, p)) break; hSwap(c, p); c = p; }
+}
+function hPop() {
+  const k = H_K[0]; hn--;
+  if (hn > 0) {
+    H_F[0] = H_F[hn]; H_H[0] = H_H[hn]; H_K[0] = H_K[hn];
+    let c = 0;
+    for (;;) { const l = 2 * c + 1; const r = l + 1; let m = c; if (l < hn && hLess(l, m)) m = l; if (r < hn && hLess(r, m)) m = r; if (m === c) break; hSwap(c, m); c = m; }
+  }
+  return k;
+}
+// ligt het doel op water of een muur: de dichtstbijzijnde vrije tegel (ringen eromheen, vaste volgorde)
+function freeNear(b, gi, gj) {
+  if (!blockedAt(b, gi, gj)) return [gi, gj];
+  for (let r = 1; r < T_W; r++) {
+    let best = null; let bd = Infinity;
+    for (let dj = -r; dj <= r; dj++) {
+      for (let di = -r; di <= r; di++) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== r || blockedAt(b, gi + di, gj + dj)) continue;
+        const d = di * di + dj * dj;
+        if (d < bd) { bd = d; best = [gi + di, gj + dj]; }
+      }
+    }
+    if (best) return best;
+  }
+  return [gi, gj];
+}
+function aStar(b, si, sj, gi0, gj0) {
+  const [gi, gj] = freeNear(b, Math.max(T_MIN, Math.min(T_MAX - 1, gi0)), Math.max(T_MIN, Math.min(T_MAX - 1, gj0)));
+  A_G.fill(Infinity); A_CAME.fill(-1); A_DONE.fill(0); hn = 0;
+  const start = tileIndex(si, sj); const goal = tileIndex(gi, gj);
+  A_G[start] = 0;
+  const h0 = octile(si, sj, gi, gj);
+  hPush(h0, h0, start);
+  let best = start; let bestH = h0;
+  while (hn > 0) {
+    const k = hPop();
+    if (A_DONE[k]) continue;
+    A_DONE[k] = 1;
+    const i = (k % T_W) + T_MIN; const j = ((k - (k % T_W)) / T_W) + T_MIN;
+    const h = octile(i, j, gi, gj);
+    if (h < bestH || (h === bestH && A_G[k] < A_G[best])) { best = k; bestH = h; }
+    if (k === goal) break;
+    for (let d = 0; d < 8; d++) {
+      const D = DIRS8[d]; const di = D[0]; const dj = D[1];
+      const ni = i + di; const nj = j + dj;
+      if (blockedAt(b, ni, nj)) continue;
+      if (di && dj && (blockedAt(b, i + di, j) || blockedAt(b, i, j + dj))) continue;
+      const nk = tileIndex(ni, nj);
+      const ng = A_G[k] + D[2];
+      if (A_DONE[nk] || ng >= A_G[nk]) continue;
+      if (hn >= H_K.length) continue; // kan niet: elke tegel komt hooguit 8 keer in de hoop
+      A_G[nk] = ng; A_CAME[nk] = k;
+      const nh = octile(ni, nj, gi, gj);
+      hPush(ng + nh, nh, nk);
+    }
+  }
+  const path = [];
+  for (let k = best; k !== -1; k = A_CAME[k]) path.push(k);
+  path.reverse();
+  return { path, reached: best === tileIndex(Math.max(T_MIN, Math.min(T_MAX - 1, gi0)), Math.max(T_MIN, Math.min(T_MAX - 1, gj0))) };
+}
+
+// De route van 'from' naar 'to': een lijst tussenstops (zonder 'from'), de laatste is het eindpunt. Ligt 'to' in het water
+// of is het niet te bereiken, dan eindigt de route zo dicht mogelijk erbij.
+export function routeTo(s, from, to) {
+  if (!s.terr) return [{ x: to.x, y: to.y }];
+  const b = blockGrid(s);
+  const si = Math.floor(from.x); const sj = Math.floor(from.y);
+  const skip = inTerr(si, sj) ? tileIndex(si, sj) : -1;
+  if (clearLine(b, from, to, skip)) return [{ x: to.x, y: to.y }];
+  const { path, reached } = aStar(b, si, sj, Math.floor(to.x), Math.floor(to.y));
+  let end = { x: to.x, y: to.y };
+  if (!reached) {
+    const t = tileOf(path[path.length - 1]);
+    end = { x: Math.min(t.i + 0.8, Math.max(t.i + 0.2, to.x)), y: Math.min(t.j + 0.8, Math.max(t.j + 0.2, to.y)) };
+  }
+  // tegelmiddens van de route (zonder de begintegel), het eindpunt in plaats van het laatste midden
+  const pts = path.slice(1).map((k) => { const t = tileOf(k); return { x: t.i + 0.5, y: t.j + 0.5 }; });
+  if (pts.length) pts[pts.length - 1] = end; else pts.push(end);
+  // zo ver mogelijk rechtdoor: enkel de bochten blijven over
+  const out = [];
+  let a = from; let i = 0;
+  while (i < pts.length) {
+    let k = i;
+    for (let m = pts.length - 1; m > i; m--) if (clearLine(b, a, pts[m], a === from ? skip : -1)) { k = m; break; }
+    out.push(pts[k]); a = pts[k]; i = k + 1;
+  }
+  return out.map((p) => ({ x: Math.round(p.x * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 }));
+}
+
+// lopen van 'from' naar 'dest' langs een route rond water en muren (door een poort naar buiten of binnen)
 function travel(s, g, from, dest, t, pace = null) {
-  const via = gateRoute(s, from, dest);
   if (pace) g.pace = pace; else delete g.pace;
-  if (via) { g.via = [via[1], { x: dest.x, y: dest.y }]; setPath(g, from, via[0], t, pace); } else { delete g.via; setPath(g, from, dest, t, pace); }
+  const pts = routeTo(s, from, dest);
+  const first = pts.shift();
+  if (pts.length) g.via = pts; else delete g.via;
+  setPath(g, from, first, t, pace);
 }
 
 function goHome(s, g, t) {
