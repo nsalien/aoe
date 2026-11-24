@@ -392,18 +392,9 @@ export class SiegeView extends TownView {
           const arc = Math.min(50, Math.hypot(b.x - a.x, by - ay) * 0.25);
           const x = a.x + (b.x - a.x) * f; const y = ay + (by - ay) * f - Math.sin(f * Math.PI) * arc;
           const ang = Math.atan2((by - ay) - Math.cos(f * Math.PI) * arc * Math.PI, b.x - a.x);
-          ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
-          if (u.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill(); }
-          else if (u.k !== 'tower' && st.tk && st.tk[u.s] && st.tk[u.s].firearrows) { // vuurpijl: brandende punt met een spoor
-            ctx.strokeStyle = 'rgba(255,140,40,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(2, 0); ctx.stroke();
-            ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
-            ctx.fillStyle = 'rgba(255,200,80,0.9)'; ctx.beginPath(); ctx.ellipse(5, 0, 3.6, 2.2, 0, 0, TAU); ctx.fill();
-            ctx.fillStyle = '#ff6a1a'; ctx.beginPath(); ctx.ellipse(4, 0, 2.2, 1.3, 0, 0, TAU); ctx.fill();
-          } else {
-            ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
-            ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(6.5, 0); ctx.lineTo(4.2, -1.4); ctx.lineTo(4.2, 1.4); ctx.fill();
-          }
-          ctx.restore();
+          // vuurpijl: brandende punt met een spoor. Bij uitzoomen (gsm) groter, zodat je de pijlen blijft zien.
+          const kind = u.k === 'stonethrower' ? 'stone' : u.k !== 'tower' && st.tk && st.tk[u.s] && st.tk[u.s].firearrows ? 'fire' : 'arrow';
+          A.shot(ctx, x, y, ang, Math.max(1, 1 / this.cam.zoom), kind);
         }
       }
       // torens: levensbalk
