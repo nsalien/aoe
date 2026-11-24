@@ -146,7 +146,14 @@ Daarom:
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
   ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`), bewaart ze
   in Cache Storage (verhoog `VERSION` als modellen veranderen) en geeft `null` tot ze klaar zijn: dan tekent het spel de
-  oude versie uit `art.js`/`figures.js`. De akker, dieren, kameel/strijdwagen/olifant en rammen zijn nog getekend.
+  oude versie uit `art.js`/`figures.js`. De akker, kameel/strijdwagen/olifant en rammen zijn nog getekend.
+  **Aankleding in 3D** (`propmodels.js`, `S3.getProp(kind, v, need)`, tekenen met `A.prop3d(ctx, kind, v, x, y, s)`):
+  spullen uit `towndress.js` (lantaarn, put, struik, bloemen, fruitboom, tonnen, kisten, hooi, kar, bank, houtstapel,
+  vogelverschrikker, hekjes), rotsen (`A.rock`, `A.bush`, `A.broadleaf` proberen eerst 3D), goudaders, stronken, brandhout,
+  bessenstruiken, alle 16 boomsoorten (`tree`, zelfde nummers als `nature.js`; zonder slagschaduw, die zit in de grondlaag)
+  en het barbarenkamp (`campback` + `campfront`, de barbaren ertussen). Schaap en everzwijn zijn 3D-figuren (`figmodels.js`,
+  soort `s` en `b`). Nieuwe aankleding: eerst een model in `propmodels.js`, de getekende versie blijft als terugval.
+  Steengroeve en goudmijn gebruiken `rockShape` (gefacetteerde rotsen).
   Figuren in meerdere resoluties: `getFig(..., need)` (need = schermpixels per wereldpixel, `needOf` in `figures.js`) vraagt
   bij inzoomen een scherpe versie (`HI` = 4 of 6, sleutel `…@6`) en toont tot dan de beste die er is; wachtrij met voorrang
   (gewone eerst), hooguit `MAX_HI` scherpe beelden in het geheugen. Figuren krijgen anti-aliasing (`aa`) in `render()`.
