@@ -7,6 +7,19 @@ const TAU = Math.PI * 2;
 const SKIN = ['#e9bf96', '#d8a375', '#c08455', '#86553a'];
 const HAIR = ['#6b4a2b', '#3b2a1a', '#a0703c', '#1f1a16'];
 const WORK_ARM = [-0.2, -1.1, -2.1, -2.6, -1.5, 0.3, 1.05, 0.55];
+// Aanvallen (mode 'atk', 8 beelden): beeld 0 = het moment van de slag of het schot, daarna uitzwaaien, herstellen,
+// opnieuw aanzetten. Hoeken zoals arm(): 0 = omlaag, π/2 = recht vooruit, π = omhoog, meer = naar achter boven het hoofd.
+// Zwaard: arm, buiging van de elleboog en de richting van het blad (0 = omhoog, + = naar voren).
+export const SWORD_ARM = [1.55, 1.0, 0.55, 0.7, 0.85, 2.55, 3.35, 2.5];
+const SWORD_BEND = [0.1, 0.25, 0.6, 0.6, 0.5, 0.35, 0.25, 0.1];
+export const SWORD_ROT = [2.0, 2.7, 1.2, 0.7, 0.6, -0.6, -2.2, 1.2];
+// speer: hoe ver de hand naar voren steekt (stoot op 0), en een beetje op en neer
+export const SPEAR_X = [0.2, 0.16, 0.08, 0.01, -0.02, -0.02, 0.04, 0.14];
+const SPEAR_DZ = [-0.1, -0.1, -0.06, -0.01, 0.02, 0.02, -0.03, -0.08];
+// boog: trekken (0 = los, 1 = helemaal aangespannen); 1-2 = pijl uit de koker, 3 = op de pees
+export const BOW_DRAW = [0, 0, 0, 0, 0.35, 0.7, 1, 1];
+// werpspeer (peltast): arm ver naar achter en dan werpen; 0-2 heeft hij geen speer in de hand
+const JAV_ARM = [2.0, 1.2, 0.4, 0.5, 2.6, 3.2, 3.5, 2.8];
 
 const shade = (hex, a) => {
   const n = parseInt(hex.slice(1), 16); const f = (c) => Math.round(a < 0 ? c * (1 + a) : c + (255 - c) * a);
@@ -33,6 +46,52 @@ function arm(s, sh, ang, sleeve, skin, bend = 0.35, len = 0.075, guard = null) {
   s.cap(mid, [hand[0] * 0.85 + el[0] * 0.15, hand[1] * 0.85 + el[1] * 0.15, hand[2] * 0.85 + el[2] * 0.15], 0.0165, guard || leather(shade(sleeve, -0.3)));
   s.ell(hand[0], hand[1], hand[2], 0.014, 0.014, 0.014, plain(skin));
   return hand;
+}
+
+// arm naar een punt (eenvoudige inverse kinematica): de elleboog buigt naar 'pole'
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const len3 = (a) => Math.sqrt(dot(a, a));
+const norm = (a) => mul(a, 1 / (len3(a) || 1));
+function armTo(s, sh, target, sleeve, skin, pole) {
+  const L1 = 0.075; const L2 = 0.071;
+  let v = sub(target, sh); let d = len3(v);
+  const maxD = L1 + L2 - 0.002;
+  let t = target;
+  if (d > maxD) { t = add(sh, mul(v, maxD / d)); v = sub(t, sh); d = maxD; }
+  const u = mul(v, 1 / (d || 1));
+  const a = (L1 * L1 - L2 * L2 + d * d) / (2 * (d || 1));
+  const h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+  const pp = norm(sub(pole, mul(u, dot(pole, u))));
+  const el = add(add(sh, mul(u, a)), mul(pp, h));
+  s.cap(sh, el, 0.017, cloth(sleeve));
+  s.cap(el, t, 0.015, cloth(shade(sleeve, -0.08)));
+  const mid = [(el[0] + t[0] * 2) / 3, (el[1] + t[1] * 2) / 3, (el[2] + t[2] * 2) / 3];
+  s.cap(mid, [t[0] * 0.85 + el[0] * 0.15, t[1] * 0.85 + el[1] * 0.15, t[2] * 0.85 + el[2] * 0.15], 0.0165, leather(shade(sleeve, -0.3)));
+  s.ell(t[0], t[1], t[2], 0.014, 0.014, 0.014, plain(skin));
+  return t;
+}
+
+// zwaard vanuit de hand in richting rot (0 = omhoog, + = naar voren)
+function swordAt(s, hand, rot, blade, big = false) {
+  const d = [Math.sin(rot), 0, Math.cos(rot)];
+  const L = big ? 0.17 : 0.155;
+  s.cap(add(hand, mul(d, 0.012)), add(hand, mul(d, L)), 0.0068, metal(blade));
+  s.cap(add(hand, mul(d, 0.04)), add(hand, mul(d, L - 0.012)), 0.0025, metal(shade(blade, -0.25))); // groef
+  s.cap(add(hand, add(mul(d, 0.008), [0, -0.02, 0])), add(hand, add(mul(d, 0.008), [0, 0.02, 0])), 0.005, metal('#b08a3a')); // pareerstang
+  s.cap(add(hand, mul(d, -0.004)), add(hand, mul(d, -0.022)), 0.006, leather('#3a2414')); // greep
+  const k = add(hand, mul(d, -0.026)); s.ell(k[0], k[1], k[2], 0.008, 0.008, 0.008, { k: 'gold' }); // knop
+}
+
+// lange stok (speer, lans, werpspeer) door de hand: 'back' achter de hand, 'front' ervoor, punt van metaal
+function pole(s, hand, dir, back, front, shaft = '#7a5129', r = 0.007) {
+  const d = norm(dir);
+  const tip = add(hand, mul(d, front));
+  s.cap(add(hand, mul(d, -back)), tip, r, wood(shaft));
+  s.cap(add(tip, mul(d, -0.012)), add(tip, mul(d, 0.03)), 0.0095, metal('#dfe5ec'));
+  s.cap(add(tip, mul(d, 0.03)), add(tip, mul(d, 0.055)), 0.004, metal('#dfe5ec'));
+  return tip;
 }
 
 function tool(s, kind, hand, rot) {
@@ -118,7 +177,7 @@ function head(s, L, hz, skin) {
 // kledij, wapens en houding volgens de opties van de getekende figuur (zelfde namen)
 export function person(s, L, mode, f, seated = null) {
   const a = (f / 8) * TAU;
-  const walk = mode === 'walk' && !seated; const work = mode === 'work';
+  const walk = mode === 'walk' && !seated; const work = mode === 'work'; const atk = mode === 'atk';
   const sw = walk ? Math.sin(a) : 0;
   const bob = walk ? Math.abs(Math.cos(a)) * 0.012 : 0;
   const skin = SKIN[L.skin || 0];
@@ -137,8 +196,10 @@ export function person(s, L, mode, f, seated = null) {
       continue;
     }
     const lift = walk ? Math.max(0, ph) * 0.03 : 0;
-    const foot = [ph * 0.075, side * 0.032, 0.02 + lift];
-    const knee = [ph * 0.035 + 0.018, side * 0.03, 0.11 + bob + lift * 0.5];
+    // in een gevecht: wijde stand, linkervoet voor, rechtervoet achter
+    const st = atk ? side * 0.05 : ph * 0.075;
+    const foot = [st, side * (atk ? 0.04 : 0.032), 0.02 + lift];
+    const knee = [st * 0.45 + 0.018 + (atk ? 0.008 : 0), side * (atk ? 0.035 : 0.03), 0.11 + bob + lift * 0.5 - (atk ? 0.006 : 0)];
     s.cap(hip, knee, 0.022, cloth(pants));
     s.cap(knee, foot, 0.019, leather(boots));
     s.ell(foot[0] + 0.016, foot[1], foot[2] - 0.006, 0.03, 0.017, 0.013, leather(boots));
@@ -190,7 +251,7 @@ export function person(s, L, mode, f, seated = null) {
   if (carry === 'wood') leftAng = Math.PI - 0.5;
   // schild links
   if (L.weapon === 'spear' || L.weapon === 'sword' || L.look === 'hoplite' || L.look === 'lionguard' || L.look === 'immortal' || L.look === 'peltast') {
-    arm(s, shL, 0.6, sleeve, skin, 0.9);
+    arm(s, shL, atk ? 0.95 : 0.6, sleeve, skin, 0.9);
     const big = L.look === 'hoplite';
     const sc = L.look === 'hoplite' ? '#c8963e' : L.look === 'lionguard' ? '#2c5fae' : L.look === 'immortal' ? '#a07a46' : L.look === 'peltast' ? '#8a6238' : L.team || '#8a6238';
     const kit = L.kit || '';
@@ -198,14 +259,52 @@ export function person(s, L, mode, f, seated = null) {
     const rz = (L.weapon === 'sword' && !L.look ? 0.085 : big ? 0.09 : 0.07) * (wide ? 1.3 : 1);
     const rw = (big ? 0.085 : 0.065) * (wide ? 1.15 : 1);
     const rim = kit.includes('G') ? { k: 'gold' } : wide || L.armor ? metal('#8e959f') : wood('#4a3020');
-    s.ell(0.04, 0.088, hipZ + 0.1, rw + 0.006, 0.01, rz + 0.006, rim);
-    s.ell(0.04, 0.092, hipZ + 0.1, rw, 0.012, rz, { k: 'cloth', c: rgb(sc) });
+    // in een gevecht houdt hij het schild hoger en meer voor zich
+    const sx = atk ? 0.065 : 0.04; const sz = hipZ + (atk ? 0.12 : 0.1);
+    s.ell(sx, 0.088, sz, rw + 0.006, 0.01, rz + 0.006, rim);
+    s.ell(sx, 0.092, sz, rw, 0.012, rz, { k: 'cloth', c: rgb(sc) });
     if (!L.look || L.look === 'lionguard') { // embleem: een kruis in een lichtere kleur
       const em = shade(sc, sc === L.team ? 0.55 : 0.3);
-      s.ell(0.04, 0.1, hipZ + 0.1, 0.008, 0.006, rz * 0.82, plain(em));
-      s.ell(0.04, 0.1, hipZ + 0.1, rw * 0.82, 0.006, 0.008, plain(em));
-    } else if (L.look === 'hoplite') s.ell(0.04, 0.1, hipZ + 0.1, rw * 0.5, 0.006, rz * 0.5, plain('#7a2a20')); // hoplietenschild: rode cirkel
-    s.ell(0.04, 0.103, hipZ + 0.1, 0.016, 0.01, 0.016, kit.includes('G') ? { k: 'gold' } : metal('#c9a23a'));
+      s.ell(sx, 0.1, sz, 0.008, 0.006, rz * 0.82, plain(em));
+      s.ell(sx, 0.1, sz, rw * 0.82, 0.006, 0.008, plain(em));
+    } else if (L.look === 'hoplite') s.ell(sx, 0.1, sz, rw * 0.5, 0.006, rz * 0.5, plain('#7a2a20')); // hoplietenschild: rode cirkel
+    s.ell(sx, 0.103, sz, 0.016, 0.01, 0.016, kit.includes('G') ? { k: 'gold' } : metal('#c9a23a'));
+  } else if (L.weapon === 'bow' && atk) {
+    // aanspannen en schieten: boog recht voor zich, de rechterhand haalt een pijl, legt aan, trekt en laat los
+    const kit = L.kit || ''; const bl = kit.includes('L') ? 1.4 : 1;
+    const B = [0.15, 0.035, shZ + 0.015];
+    armTo(s, shL, B, sleeve, skin, [-0.3, 0.8, -0.6]);
+    const dr = BOW_DRAW[f];
+    const bend = 0.035 + dr * 0.03;
+    const top = add(B, [-0.012 - dr * 0.025, 0, 0.13 * bl]); const bot = add(B, [-0.012 - dr * 0.025, 0, -0.13 * bl]);
+    const p = [top, add(B, [bend * 0.85 - 0.005, 0, 0.065 * bl]), add(B, [bend, 0, 0]), add(B, [bend * 0.85 - 0.005, 0, -0.065 * bl]), bot];
+    for (let k = 0; k < 4; k++) s.cap(p[k], p[k + 1], 0.006, wood(kit.includes('L') ? '#4a2e18' : '#6b4523'));
+    s.cap(add(B, [bend - 0.002, 0, -0.012]), add(B, [bend - 0.002, 0, 0.012]), 0.008, leather('#3a2414')); // greep
+    const nock = add(B, [-0.012, -0.002, 0.0]);
+    const anchor = [0.02, -0.012, shZ + 0.035];
+    const R = f === 0 ? [0.07, -0.03, shZ + 0.025] : f === 1 ? [-0.02, -0.075, shZ - 0.02] : f === 2 ? [-0.06, -0.02, hipZ + 0.2]
+      : [nock[0] + (anchor[0] - nock[0]) * dr, nock[1] + (anchor[1] - nock[1]) * dr, nock[2] + (anchor[2] - nock[2]) * dr];
+    armTo(s, shR, R, sleeve, skin, [-0.4, -0.8, -0.4]);
+    // pees: los recht, aangespannen naar de hand
+    if (f >= 3) { s.cap(top, R, 0.002, plain('#eee6d0')); s.cap(R, bot, 0.002, plain('#eee6d0')); } else s.cap(top, bot, 0.002, plain('#eee6d0'));
+    // pijl: uit de koker (2), op de pees (3-7)
+    const fire = kit.includes('F');
+    if (f === 2) { s.cap(add(R, [0, 0, -0.03]), add(R, [0.01, 0, 0.15]), 0.0035, wood('#c9a26a')); }
+    if (f >= 3) {
+      const dir = norm(sub(add(B, [0.05, 0.002, 0.004]), R));
+      const tip = add(R, mul(dir, 0.2));
+      s.cap(add(R, mul(dir, -0.008)), tip, 0.0035, wood('#c9a26a'));
+      s.cap(add(tip, mul(dir, -0.012)), add(tip, mul(dir, 0.012)), 0.006, fire ? plain('#ff8a1e', true) : metal('#9aa3ad'));
+      s.cap(add(R, mul(dir, 0.0)), add(R, mul(dir, 0.035)), 0.007, plain('#d24a3a')); // veren
+    }
+    s.cap([0.04, -0.05, shZ + 0.01], [-0.04, 0.05, hipZ + 0.01], 0.006, leather('#4a2e18')); // riem van de pijlkoker
+    for (const q of kit.includes('Q') ? [0, 1] : [0]) {
+      const qx = -0.05 - q * 0.01; const qy = 0.02 - q * 0.04;
+      s.cyl(qx, qy, 0.018, hipZ + 0.06, hipZ + 0.2, leather(q ? '#5a3a1e' : '#6b4523'));
+      s.cyl(qx, qy, 0.0195, hipZ + 0.185, hipZ + 0.2, leather('#3a2414'));
+      if (fire) s.ell(qx, qy, hipZ + 0.215, 0.016, 0.016, 0.018, plain('#ff8a1e', true));
+      else for (const [dx, dy, col] of [[-0.006, -0.006, '#efe7d6'], [0.006, 0.004, '#d24a3a'], [-0.004, 0.008, '#efe7d6']]) s.cap([qx + dx, qy + dy, hipZ + 0.2], [qx + dx * 1.4, qy + dy * 1.4, hipZ + 0.235], 0.0045, plain(col));
+    }
   } else if (L.weapon === 'bow') {
     const hand = arm(s, shL, 1.45, sleeve, skin, 0.05);
     // boog: drie stukjes in een boog voor de hand
@@ -229,7 +328,30 @@ export function person(s, L, mode, f, seated = null) {
     arm(s, shL, leftAng, sleeve, skin, carry === 'wood' ? 0.2 : 0.35);
   }
   // rechts: wapen of gereedschap
-  if (L.weapon === 'lance') { // lans met wimpel, schuin naar voren
+  if (atk && L.weapon === 'bow') {
+    // (de rechterhand trekt de pees: zie hierboven)
+  } else if (atk && L.weapon === 'lance') { // lans neer en vooruit stoten
+    const hand = armTo(s, shR, [0.03 + SPEAR_X[f] * 0.8, -0.06, shZ - 0.035], sleeve, skin, [-0.3, -0.8, -0.6]);
+    const tip = pole(s, hand, [1, 0, -0.06], 0.16, 0.56, '#7a5129', 0.008);
+    if (L.team) s.ell(tip[0] - 0.07, tip[1] + 0.012, tip[2] + 0.02, 0.035, 0.004, 0.014, cloth(L.team));
+  } else if (atk && (L.weapon === 'spear' || L.look === 'hoplite' || L.look === 'lionguard' || L.look === 'immortal')) {
+    // steken: de speer ligt vooruit, de hand trekt terug en stoot naar voren
+    const over = L.look === 'hoplite' || seated; // hoplieten en ruiters steken van boven
+    const hand = armTo(s, shR, [SPEAR_X[f], -0.05, over ? shZ + 0.055 : shZ - 0.025], sleeve, skin, over ? [-0.5, -0.6, 0.4] : [-0.3, -0.8, -0.6]);
+    pole(s, hand, [1, 0, (over ? -0.14 : 0) + SPEAR_DZ[f]], 0.26, 0.48);
+  } else if (atk && (L.weapon === 'sword' || L.look === 'samurai')) {
+    const hand = arm(s, shR, SWORD_ARM[f], sleeve, skin, SWORD_BEND[f]);
+    swordAt(s, hand, SWORD_ROT[f], L.look === 'samurai' ? '#e8edf2' : '#d5dbe2', L.look === 'samurai');
+    if (!seated && L.look !== 'samurai') { // lege schede aan de heup
+      s.cap([-0.006, 0.062, hipZ + 0.03], [-0.07, 0.07, hipZ - 0.09], 0.009, leather('#3a2414'));
+      s.ell(-0.07, 0.07, hipZ - 0.092, 0.009, 0.009, 0.01, metal('#b08a3a'));
+    }
+  } else if (atk && L.look === 'peltast') {
+    const hand = arm(s, shR, JAV_ARM[f], sleeve, skin, f >= 4 && f <= 6 ? 0.9 : 0.25);
+    if (f >= 3) pole(s, hand, f === 3 ? [0.1, 0, 1] : [1, 0, 0.35], 0.11, 0.15, '#7a5129', 0.005);
+  } else if (atk && L.weapon === 'tool') {
+    const ang = WORK_ARM[(f + 6) % 8]; const hand = arm(s, shR, ang, sleeve, skin, 0.15); tool(s, L.tool || 'axe', hand, Math.PI - ang);
+  } else if (L.weapon === 'lance') { // lans met wimpel, schuin naar voren
     const hand = arm(s, shR, 0.9, sleeve, skin, 0.5);
     const tip = add(hand, [0.34, 0, 0.18]);
     s.cap(add(hand, [-0.1, 0, -0.05]), tip, 0.008, wood('#7a5129'));
@@ -339,7 +461,7 @@ export function horse(s, L, mode, f) {
     s.ell(0.04, side * 0.083, bz - 0.115, 0.012, 0.006, 0.006, metal('#8e959f'));
   }
   // ruiter
-  person(s, { ...L, horse: undefined }, 'idle', 0, bz + 0.05);
+  person(s, { ...L, horse: undefined }, mode === 'atk' ? 'atk' : 'idle', mode === 'atk' ? f : 0, bz + 0.05);
 }
 
 // schaap: wollen lijf uit plukjes, donkere kop, dunne poten; graast met de kop omlaag

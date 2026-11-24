@@ -1217,7 +1217,7 @@ export class TownView {
   drawSoldier(ctx, s, x, y, t) {
     const team = this.team;
     const bob = s.walking ? 0 : Math.sin(t * 0.004 + s.gx * 3 + s.gy * 5) * 0.3;
-    const o = { s: 1.05, team, phase: t * 0.012, walking: !!s.walking };
+    const o = { s: 1.05, team, phase: t * 0.012, walking: !!s.walking, attack: s.attack };
     const sl = this.sel;
     if (sl && !s.walking && ((sl.type === 'soldier' && sl.kind === s.kind && Math.abs(sl.gx - s.gx) < 0.01 && Math.abs(sl.gy - s.gy) < 0.01)
       || ((sl.type === 'soldiers' || sl.type === 'kind') && sl.kind === s.kind) || sl.type === 'army')) {
@@ -1229,7 +1229,7 @@ export class TownView {
     if (s.kind === 'ram') { A.ram(ctx, x, y, 0.9); return; }
     // uitrusting volgens de smidse en het onderzoek van de Academie
     const look = soldierOpts(s.kind, this.troopLook());
-    if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: o.walking, phase: o.phase });
+    if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: o.walking, phase: o.phase, attack: o.attack });
     else if (look) A.person(ctx, x, y + bob, { ...o, ...look });
     else A.person(ctx, x, y, o);
   }
@@ -2615,7 +2615,10 @@ export class TownView {
     const ls = lastSwing(sc.f, u.side, u.i, u.k, now);
     const swing = ls != null && now - ls < 340 ? Math.sin(((now - ls) / 340) * Math.PI) : 0;
     const q = toWorld(u.x + u.ux * swing * 0.16, u.y + u.uy * swing * 0.16);
-    this.drawFightFigure(ctx, u, q.x, q.y, t, swing > 0 || u.charging, dir, ls != null ? (now - ls) / 340 : t * 0.004);
+    // aanvalsbeweging: fase tussen twee slagen (0 = de slag of het schot), daarvoor in de aanslag
+    const R = (UNITS[u.k] && UNITS[u.k].rate) || 1500;
+    const atk = !u.charging && FIG.hasAttackAnim(u.k) ? (ls != null && now - ls < R ? (now - ls) / R : FIG.attackReady(u.k)) : null;
+    this.drawFightFigure(ctx, u, q.x, q.y, t, (swing > 0 && atk == null) || u.charging, dir, ls != null ? (now - ls) / 340 : t * 0.004, atk);
     // levensbalk (pas na de eerste treffer, anders wordt het te druk)
     if (u.hp >= u.max) return;
     const tall = u.k === 'elephant' ? 50 : UNITS[u.k] && UNITS[u.k].type === 'cav' ? 38 : u.k === 'boar' ? 22 : 30;
@@ -2646,12 +2649,12 @@ export class TownView {
     }
   }
 
-  drawFightFigure(ctx, u, x, y, t, swinging, dir, sp = 0) {
+  drawFightFigure(ctx, u, x, y, t, swinging, dir, sp = 0, atk = null) {
     facing(ctx, x, dir, () => {
-      if (u.k === 'barbarian') A.person(ctx, x, y, { s: 1.05, body: u.i % 2 ? '#4f3a2a' : '#5b4636', weapon: u.i % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.i % 3), walking: swinging, phase: sp * Math.PI });
+      if (u.k === 'barbarian') A.person(ctx, x, y, { s: 1.05, body: u.i % 2 ? '#4f3a2a' : '#5b4636', weapon: u.i % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.i % 3), walking: swinging, phase: sp * Math.PI, attack: atk });
       else if (u.k === 'boar') FIG.boar(ctx, x, y, { s: 1.15, walking: swinging, phase: sp * 6 });
-      else if (u.k === 'villager') A.person(ctx, x, y, { s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe', working: swinging, phase: sp * Math.PI * 2 });
-      else this.drawSoldier(ctx, { kind: u.k, gx: u.x, gy: u.y, walking: swinging }, x, y, t);
+      else if (u.k === 'villager') A.person(ctx, x, y, { s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe', working: swinging, phase: sp * Math.PI * 2, attack: atk });
+      else this.drawSoldier(ctx, { kind: u.k, gx: u.x, gy: u.y, walking: swinging, attack: atk }, x, y, t);
     });
   }
 
