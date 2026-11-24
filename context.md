@@ -342,6 +342,9 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     aan de rand; loslaten zet het neer. Gratis, enkel op vrije bouwgrond; het stadscentrum blijft in het midden. Ingedrukt
     houden naast een gebouw kiest nog altijd je hele leger. Op pc ook via de knop Verplaatsen. Getest met muis en echte
     aanraking (gsm), ook na herladen (de server bewaart het).
+    **Aangepast** (feedback: "inhouden lukt niet op mobiel, selecteert mijn leger"): geen lang indrukken meer. Knop
+    **Verplaatsen** bovenaan in het gebouwpaneel; dan tikken op de nieuwe plek of het gebouw verslepen, en 'Zet hier'
+    (met een muis: klikken zet het neer). Balk bovenaan met 'Zet hier' / 'Stoppen'. Lang indrukken = enkel het leger.
 
 ## 8. Bekende beperkingen en ideeën
 
