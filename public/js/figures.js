@@ -644,6 +644,8 @@ export function sheep(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 1 * s, y, 7 * s, 2.4 * s, 0, 0, TAU); ctx.fill();
   const mode = o.walking ? 'walk' : o.graze ? 'graze' : 'idle';
   const f = mode === 'walk' ? frameOf(o.phase) : 0;
+  const f3 = S3.getFig('s', { body: o.black ? '#4f4844' : '#f2eee6', thumb: o.thumb }, mode, f, needOf(ctx, s));
+  if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   const key = `s|${mode}${f}|${R}|${o.black ? 1 : 0}`;
   blit(ctx, sprite(key, R, S_BOX, (c) => drawSheepFig(c, o, mode, f)), S_BOX, x, y, s);
@@ -687,6 +689,8 @@ export function boar(ctx, x, y, o = {}) {
   ctx.beginPath(); ctx.ellipse(x + 1 * s, y, 9.5 * s, 3 * s, 0, 0, TAU); ctx.fill();
   const mode = o.walking ? 'walk' : 'idle';
   const f = mode === 'walk' ? frameOf(o.phase) : 0;
+  const f3 = S3.getFig('b', { thumb: o.thumb }, mode, f, needOf(ctx, s));
+  if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
   blit(ctx, sprite(`b|${mode}${f}|${R}`, R, B_BOX, (c) => drawBoarFig(c, mode, f)), B_BOX, x, y, s);
 }

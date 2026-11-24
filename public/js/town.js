@@ -2264,7 +2264,11 @@ export class TownView {
     }
     // dorp uit vooraf getekende lagen (achterkant en voorkant van de palissade), daartussen vuur en barbaren
     const spr = campSprites();
-    ctx.drawImage(spr.back, -spr.w / 2, -spr.ay, spr.w, spr.h);
+    // 3D (zelfde stijl als de stad) zodra beide lagen klaar zijn, anders de getekende versie
+    const cm = ctx.getTransform(); const cneed = Math.hypot(cm.a, cm.b);
+    const b3 = S3.getProp('campback', 0, cneed); const f3 = b3 && S3.getProp('campfront', 0, cneed);
+    if (b3 && f3) ctx.drawImage(b3.cv, -b3.ax, -b3.ay, b3.w, b3.h);
+    else ctx.drawImage(spr.back, -spr.w / 2, -spr.ay, spr.w, spr.h);
     A.fire(ctx, p.x - 4, p.y + 4, 1.15, t);
     A.smoke(ctx, p.x - 26, p.y - 30, t, 3, 0.7);
     A.smoke(ctx, p.x + 24, p.y - 34, t, 5, 0.7);
@@ -2282,7 +2286,8 @@ export class TownView {
         facing(ctx, p.x + dx, dir, () => A.person(ctx, p.x + dx, p.y + dy + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: ph % 2 ? '#4f3a2a' : '#5b4636', weapon: ph === 2 || ph === 5 ? 'spear' : 'sword', barb: true, skin: 1 + (ph % 3) }));
       }
     }
-    ctx.drawImage(spr.front, -spr.w / 2, -spr.ay, spr.w, spr.h);
+    if (b3 && f3) ctx.drawImage(f3.cv, -f3.ax, -f3.ay, f3.w, f3.h);
+    else ctx.drawImage(spr.front, -spr.w / 2, -spr.ay, spr.w, spr.h);
     if (!busy) {
       // hoeveel barbaren wonen hier? (altijd zichtbaar, zodat je weet waar je aan begint)
       const txt = `${Math.max(1, campSize(s))} barbaren`;

@@ -8,7 +8,7 @@ self.onmessage = (e) => {
   const { id, type, level, civ, variant, scale, wall, low, fig, prop } = e.data;
   try {
     let sc; let r;
-    if (prop) { sc = propScene(prop.kind, prop.v); r = render(sc, scale, { ao: low ? 3 : 4, aa: true, fill: 0.3, ground: prop.kind === 'tree' ? false : undefined }); } else {
+    if (prop) { sc = propScene(prop.kind, prop.v); r = render(sc, scale, { ao: low ? 3 : 4, aa: true, fill: 0.3, ground: prop.kind === 'tree' || prop.kind === 'campfront' ? false : undefined }); } else {
       sc = fig ? figureScene(fig.kind, fig.L, fig.mode, fig.f) : wall ? wallScene(wall) : build(type, level, civ, variant);
       r = render(sc, scale, fig || wall ? { ground: false, ao: fig ? 3 : low ? 3 : 5, fill: fig ? 0.5 : 0.16, aa: !!fig } : { apron: sc.apron, ao: low ? 3 : 5 });
     }
