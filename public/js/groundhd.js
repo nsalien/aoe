@@ -266,3 +266,200 @@ export class HDGround {
     return todo.length - made; // nog te maken
   }
 }
+
+// ---------- natuur van dichtbij (enkel in de scherpe stukken) ----------
+const fr = (x) => x - Math.floor(x);
+
+// Grasplukje: 6-9 spitse sprieten in een waaier, donker onderaan en licht in de top (zon van linksboven).
+export function grassClump(g, x, y, s, dark, light, h) {
+  const n = 6 + Math.floor(h * 4);
+  g.fillStyle = 'rgba(18,36,8,0.22)';
+  g.beginPath(); g.ellipse(x + 0.9 * s, y + 0.25 * s, 3.6 * s, 1.1 * s, 0, 0, TAU); g.fill();
+  for (let k = 0; k < n; k++) {
+    const t = (k + 0.5) / n - 0.5;
+    const lean = t * 5.2 * s + (fr(h * 7.31 + k * 0.618) - 0.5) * 1.4 * s;
+    const ht = (3.4 + fr(h * 3.17 + k * 0.371) * 3.4) * s * (1 - Math.abs(t) * 0.55);
+    const bx = x + t * 3.4 * s; const w = (0.42 + fr(h * 5.3 + k * 0.29) * 0.22) * s;
+    const tx = bx + lean; const ty = y - ht;
+    g.fillStyle = k % 3 === 1 ? light : dark;
+    g.beginPath(); g.moveTo(bx - w, y); g.quadraticCurveTo(bx + lean * 0.15, y - ht * 0.55, tx, ty); g.quadraticCurveTo(bx + lean * 0.2 + w * 0.5, y - ht * 0.45, bx + w, y); g.closePath(); g.fill();
+    if (k % 3 !== 1) {
+      // lichte top
+      const mx = bx + lean * 0.42; const my = y - ht * 0.5;
+      g.fillStyle = light;
+      g.beginPath(); g.moveTo(mx - w * 0.35, my); g.quadraticCurveTo(mx + lean * 0.2, my - ht * 0.25, tx, ty); g.lineTo(mx + w * 0.25, my); g.closePath(); g.fill();
+    }
+  }
+}
+
+// Bloempje met 5 blaadjes, een hartje en een steeltje.
+export function flower(g, x, y, col, s = 1, h = 0.5) {
+  g.strokeStyle = 'rgba(58,104,32,0.9)'; g.lineWidth = 0.32 * s;
+  g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + (h - 0.5) * 1.2 * s, y - 1.4 * s, x + (h - 0.5) * 0.6 * s, y - 2.6 * s); g.stroke();
+  const cx = x + (h - 0.5) * 0.6 * s; const cy = y - 2.7 * s;
+  g.fillStyle = 'rgba(40,60,20,0.35)';
+  g.beginPath(); g.ellipse(cx + 0.25 * s, cy + 0.3 * s, 1.15 * s, 0.6 * s, 0, 0, TAU); g.fill();
+  g.fillStyle = col;
+  for (let k = 0; k < 5; k++) {
+    const a = h * 6 + (k / 5) * TAU;
+    g.beginPath(); g.ellipse(cx + Math.cos(a) * 0.62 * s, cy + Math.sin(a) * 0.36 * s, 0.5 * s, 0.34 * s, a, 0, TAU); g.fill();
+  }
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.beginPath(); g.ellipse(cx - 0.35 * s, cy - 0.2 * s, 0.35 * s, 0.22 * s, 0, 0, TAU); g.fill();
+  g.fillStyle = '#e8b830';
+  g.beginPath(); g.ellipse(cx, cy, 0.3 * s, 0.22 * s, 0, 0, TAU); g.fill();
+}
+
+// Steen in het gras: onregelmatig, met een verloop en een plek mos bovenop.
+export function rock(g, x, y, r, h, moss = true) {
+  const n = 7;
+  const pts = [];
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * TAU + h * 2;
+    const rr = r * (0.75 + fr(h * 13.7 + k * 0.53) * 0.4);
+    pts.push(x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.55 - (Math.sin(a) < 0 ? r * 0.35 : 0));
+  }
+  const path = (dx, dy) => { g.beginPath(); g.moveTo(pts[0] + dx, pts[1] + dy); for (let k = 2; k < pts.length; k += 2) g.lineTo(pts[k] + dx, pts[k + 1] + dy); g.closePath(); };
+  g.fillStyle = 'rgba(16,26,8,0.32)';
+  g.beginPath(); g.ellipse(x + r * 0.35, y + r * 0.3, r * 1.15, r * 0.5, 0, 0, TAU); g.fill();
+  const base = 118 + Math.round(h * 40);
+  const gr = g.createLinearGradient(x - r * 0.6, y - r * 0.9, x + r * 0.5, y + r * 0.5);
+  gr.addColorStop(0, `rgb(${base + 70},${base + 66},${base + 56})`);
+  gr.addColorStop(0.5, `rgb(${base + 20},${base + 18},${base + 10})`);
+  gr.addColorStop(1, `rgb(${base - 40},${base - 42},${base - 46})`);
+  g.fillStyle = gr; path(0, 0); g.fill();
+  g.strokeStyle = 'rgba(40,36,30,0.35)'; g.lineWidth = Math.max(0.15, r * 0.06); g.stroke();
+  if (moss) {
+    g.fillStyle = 'rgba(92,132,44,0.78)';
+    g.beginPath(); g.ellipse(x - r * 0.15, y - r * 0.55, r * 0.55, r * 0.22, -0.2, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(150,190,80,0.55)';
+    g.beginPath(); g.ellipse(x - r * 0.28, y - r * 0.62, r * 0.25, r * 0.1, -0.2, 0, TAU); g.fill();
+  }
+}
+
+// Struikje: overlappende bladtrossen, achteraan en onderaan donker, linksboven licht.
+const hexRGB = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+export function shrub(g, x, y, s, light, dark, h) {
+  const L = hexRGB(light); const D = hexRGB(dark);
+  g.fillStyle = 'rgba(16,30,8,0.3)';
+  g.beginPath(); g.ellipse(x + 1.6 * s, y + 0.4 * s, 6.2 * s, 2.1 * s, 0, 0, TAU); g.fill();
+  const blobs = [];
+  for (let k = 0; k < 13; k++) {
+    const a = fr(h * 9.13 + k * 0.381) * TAU; const rr = Math.sqrt(fr(h * 4.71 + k * 0.733)) * 3.6 * s;
+    const px = x + Math.cos(a) * rr; const py = y - 3.2 * s + Math.sin(a) * rr * 0.6 - (1 - rr / (3.6 * s)) * 1.6 * s;
+    blobs.push([px, py, (1.5 + fr(h * 2.3 + k * 0.57) * 0.9) * s]);
+  }
+  blobs.sort((a, b) => a[1] - b[1]);
+  for (const [px, py, r] of blobs) {
+    const t = Math.max(0, Math.min(1, 0.55 - (px - x) / (9 * s) - (py - (y - 3.2 * s)) / (5 * s)));
+    const c = [D[0] + (L[0] - D[0]) * t, D[1] + (L[1] - D[1]) * t, D[2] + (L[2] - D[2]) * t];
+    g.fillStyle = `rgb(${D[0] * 0.7 | 0},${D[1] * 0.7 | 0},${D[2] * 0.7 | 0})`;
+    g.beginPath(); g.ellipse(px + 0.3 * s, py + 0.35 * s, r, r * 0.82, 0, 0, TAU); g.fill();
+    g.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+    g.beginPath(); g.ellipse(px, py, r, r * 0.82, 0, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(235,255,190,0.22)';
+    g.beginPath(); g.ellipse(px - r * 0.3, py - r * 0.3, r * 0.42, r * 0.3, 0, 0, TAU); g.fill();
+  }
+}
+
+// Varen: gebogen bladstelen met blaadjes langs beide kanten.
+export function fern(g, x, y, s, col, h) {
+  const C = hexRGB(col);
+  for (let k = 0; k < 6; k++) {
+    const a = -2.75 + (k / 5) * 2.4 + (fr(h * 3.1 + k) - 0.5) * 0.25;
+    const len = (5.5 + fr(h * 5.7 + k * 0.4) * 2.5) * s;
+    const ex = x + Math.cos(a) * len; const ey = y + Math.sin(a) * len * 0.55;
+    const cx = x + Math.cos(a) * len * 0.45; const cy = y + Math.sin(a) * len * 0.55 * 0.45 - 2.2 * s;
+    const lt = 0.75 + (k % 2) * 0.25;
+    g.strokeStyle = `rgb(${C[0] * 0.7 | 0},${C[1] * 0.7 | 0},${C[2] * 0.7 | 0})`; g.lineWidth = 0.35 * s;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(cx, cy, ex, ey); g.stroke();
+    g.fillStyle = `rgb(${Math.min(255, C[0] * lt) | 0},${Math.min(255, C[1] * lt) | 0},${Math.min(255, C[2] * lt) | 0})`;
+    for (let q = 1; q < 8; q++) {
+      const t = q / 8; const u = 1 - t;
+      const px = u * u * x + 2 * u * t * cx + t * t * ex; const py = u * u * y + 2 * u * t * cy + t * t * ey;
+      const dx = 2 * u * (cx - x) + 2 * t * (ex - cx); const dy = 2 * u * (cy - y) + 2 * t * (ey - cy);
+      const dl = Math.hypot(dx, dy) || 1; const nx = -dy / dl; const ny = dx / dl;
+      const w = (1 - t * 0.7) * 1.3 * s;
+      for (const sd of [-1, 1]) {
+        g.beginPath(); g.ellipse(px + nx * w * 0.6 * sd, py + ny * w * 0.6 * sd, w * 0.62, w * 0.26, Math.atan2(ny * sd, nx * sd), 0, TAU); g.fill();
+      }
+    }
+  }
+}
+
+// ---------- in bulk: veel plukjes/bloemen met weinig tekenopdrachten (per kleur één pad) ----------
+function groupBy(list, key) {
+  const m = new Map();
+  for (const it of list) { const k = key(it); let a = m.get(k); if (!a) m.set(k, a = []); a.push(it); }
+  return m;
+}
+
+// list: [{ x, y, s, d, l, h }] (d/l = donkere en lichte kleur)
+export function grassClumps(g, list) {
+  if (!list.length) return;
+  g.fillStyle = 'rgba(18,36,8,0.2)';
+  g.beginPath();
+  for (const c of list) { g.moveTo(c.x + 0.9 * c.s + 3.6 * c.s, c.y + 0.25 * c.s); g.ellipse(c.x + 0.9 * c.s, c.y + 0.25 * c.s, 3.6 * c.s, 1.1 * c.s, 0, 0, TAU); }
+  g.fill();
+  for (const arr of groupBy(list, (c) => c.d + c.l).values()) {
+    for (const pass of [0, 1]) {
+      g.beginPath();
+      for (const { x, y, s, h } of arr) {
+        const n = 6 + Math.floor(h * 4);
+        for (let k = 0; k < n; k++) {
+          const t = (k + 0.5) / n - 0.5;
+          const lean = t * 5.2 * s + (fr(h * 7.31 + k * 0.618) - 0.5) * 1.4 * s;
+          const ht = (3.4 + fr(h * 3.17 + k * 0.371) * 3.4) * s * (1 - Math.abs(t) * 0.55);
+          const bx = x + t * 3.4 * s; const w = (0.42 + fr(h * 5.3 + k * 0.29) * 0.22) * s;
+          const tx = bx + lean; const ty = y - ht;
+          const lightBlade = k % 3 === 1;
+          if (pass === 0 && !lightBlade) {
+            g.moveTo(bx - w, y); g.quadraticCurveTo(bx + lean * 0.15, y - ht * 0.55, tx, ty); g.quadraticCurveTo(bx + lean * 0.2 + w * 0.5, y - ht * 0.45, bx + w, y); g.closePath();
+          } else if (pass === 1) {
+            if (lightBlade) { g.moveTo(bx - w, y); g.quadraticCurveTo(bx + lean * 0.15, y - ht * 0.55, tx, ty); g.quadraticCurveTo(bx + lean * 0.2 + w * 0.5, y - ht * 0.45, bx + w, y); g.closePath(); } else {
+              const mx = bx + lean * 0.42; const my = y - ht * 0.5;
+              g.moveTo(mx - w * 0.35, my); g.quadraticCurveTo(mx + lean * 0.2, my - ht * 0.25, tx, ty); g.lineTo(mx + w * 0.25, my); g.closePath();
+            }
+          }
+        }
+      }
+      g.fillStyle = pass ? arr[0].l : arr[0].d;
+      g.fill();
+    }
+  }
+}
+
+// list: [{ x, y, col, s, h }]
+export function flowers(g, list) {
+  if (!list.length) return;
+  const head = (f) => [f.x + (f.h - 0.5) * 0.6 * f.s, f.y - 2.7 * f.s];
+  g.strokeStyle = 'rgba(58,104,32,0.9)';
+  for (const arr of groupBy(list, (f) => Math.round(f.s * 4)).values()) {
+    g.lineWidth = 0.32 * arr[0].s;
+    g.beginPath();
+    for (const f of arr) { const [cx, cy] = head(f); g.moveTo(f.x, f.y); g.quadraticCurveTo(f.x + (f.h - 0.5) * 1.2 * f.s, f.y - 1.4 * f.s, cx, cy); }
+    g.stroke();
+  }
+  g.fillStyle = 'rgba(40,60,20,0.3)';
+  g.beginPath();
+  for (const f of list) { const [cx, cy] = head(f); g.moveTo(cx + 0.25 * f.s + 1.15 * f.s, cy + 0.3 * f.s); g.ellipse(cx + 0.25 * f.s, cy + 0.3 * f.s, 1.15 * f.s, 0.6 * f.s, 0, 0, TAU); }
+  g.fill();
+  for (const arr of groupBy(list, (f) => f.col).values()) {
+    g.beginPath();
+    for (const f of arr) {
+      const [cx, cy] = head(f);
+      for (let k = 0; k < 5; k++) {
+        const a = f.h * 6 + (k / 5) * TAU;
+        const px = cx + Math.cos(a) * 0.62 * f.s; const py = cy + Math.sin(a) * 0.36 * f.s;
+        g.moveTo(px + Math.cos(a) * 0.5 * f.s, py + Math.sin(a) * 0.5 * f.s);
+        g.ellipse(px, py, 0.5 * f.s, 0.34 * f.s, a, 0, TAU);
+      }
+    }
+    g.fillStyle = arr[0].col;
+    g.fill();
+  }
+  g.fillStyle = '#e8b830';
+  g.beginPath();
+  for (const f of list) { const [cx, cy] = head(f); g.moveTo(cx + 0.3 * f.s, cy); g.ellipse(cx, cy, 0.3 * f.s, 0.22 * f.s, 0, 0, TAU); }
+  g.fill();
+}

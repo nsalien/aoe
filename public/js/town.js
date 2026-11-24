@@ -161,6 +161,34 @@ function drawSub(ctx, cv, scale, ox, oy, W, H, v) {
 const bScale = (b) => ((BUILDINGS[b.type].size || 1) === 1 ? 1.12 : 1);
 
 const FOG_SCALE = 0.25;
+// kleur per diepte (f = waarde / 255 * 1,6) voor de scherpe meren: zandrand, schuim, ondiep, diep
+let lakeLut = null;
+function lakeLUT() {
+  if (lakeLut) return lakeLut;
+  const L = new Uint8ClampedArray(256 * 4);
+  const ramp = (f, a, b) => Math.min(1, Math.max(0, (f - a) / (b - a)));
+  for (let v = 0; v < 256; v++) {
+    const f = (v / 255) * 1.6;
+    let r = 0; let g = 0; let b = 0; let a = 0;
+    if (f < 0.22) a = 0;
+    else if (f < 0.4) {
+      const t = ramp(f, 0.22, 0.3);
+      r = 210; g = 192; b = 138; a = t * (f < 0.34 ? 0.75 : 0.95);
+      if (f > 0.34) { r = 178; g = 158; b = 106; } // natte rand
+    } else if (f < 0.46) { r = 236; g = 244; b = 246; a = 0.92; } // schuim
+    else {
+      const dpt = ramp(f, 0.46, 1.5);
+      r = 96 - dpt * 52; g = 168 - dpt * 52; b = 206 - dpt * 22; a = 1;
+      if (f < 0.6) { const t = 1 - ramp(f, 0.46, 0.6); r += (130 - r) * t * 0.5; g += (205 - g) * t * 0.5; b += (215 - b) * t * 0.5; }
+      if (f > 0.47 && f < 0.5) { r += 18; g += 18; b += 14; } // lichte lijn net binnen het schuim
+    }
+    L[v * 4] = r; L[v * 4 + 1] = g; L[v * 4 + 2] = b; L[v * 4 + 3] = Math.round(a * 255);
+  }
+  lakeLut = L;
+  return L;
+}
+// resolutie van getekende (2D) stukken die als afbeelding bewaard worden: scherper als je inzoomt
+const spriteQ = (need) => (need > 4.5 ? 6 : need > 3 ? 4 : 2.5);
 
 export class TownView {
   constructor(canvas) {
@@ -448,9 +476,17 @@ export class TownView {
       const px = img.data;
       const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
       const C0 = hex('#5c9838'); const C1 = hex('#93bd54'); const DRY = hex('#b9b764'); const OUT = hex('#557f33');
-      const FOR = hex('#3c6628'); const MOSS = hex('#5d6f2c'); const SAND = hex('#cdbb85');
+      const FOR = hex('#3c6628'); const MOSS = hex('#5d6f2c'); const SAND = hex('#cdbb85'); const LUSH = hex('#467f2c');
+      const SUN = hex('#b3c95e'); const COOL = hex('#2e5e3c');
       const lerp = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
       const c = [0, 0, 0];
+      // zacht glooiend land: hoogte uit ruis, belicht van linksboven (de kant die naar -i kijkt krijgt licht)
+      const HN = NW + 2;
+      const HG = new Float32Array(HN * HN);
+      for (let v = 0; v < HN; v++) for (let u = 0; u < HN; u++) {
+        const gx = T_MIN + (u - 0.5) / RS; const gy = T_MIN + (v - 0.5) / RS;
+        HG[v * HN + u] = fbm(gx / 5.5, gy / 5.5, sd + 701, 3) + fbm(gx / 2, gy / 2, sd + 702, 2) * 0.3;
+      }
       for (let v = 0; v < NW; v++) {
         for (let u = 0; u < NW; u++) {
           const gx = T_MIN + (u + 0.5) / RS; const gy = T_MIN + (v + 0.5) / RS;
@@ -464,8 +500,19 @@ export class TownView {
           if (f > 0) { lerp(c, FOR, Math.min(0.78, f * 0.9)); lerp(c, MOSS, f * n2 * 0.4); }
           const t = terr.tiles[tileIndex(i, j)];
           if (t === TILE.SAND || t === TILE.WATER) lerp(c, SAND, 0.4);
+          // sappige, donkerder plekken gras
+          const n4 = fbm(gx / 3.1 + 20, gy / 3.1, sd + 14, 2);
+          if (n4 > 0.56 && f < 0.5) lerp(c, LUSH, Math.min(0.42, (n4 - 0.56) * 2.2));
+          // reliëf: helling naar het licht, iets vlakker in de stad
+          const hc = HG[(v + 1) * HN + u + 1];
+          const hu = (HG[(v + 1) * HN + u + 2] - HG[(v + 1) * HN + u]) * RS * 0.5;
+          const hv = (HG[(v + 2) * HN + u + 1] - HG[v * HN + u + 1]) * RS * 0.5;
+          const flat = Math.min(1, 0.3 + ringOf(i, j) / 7);
+          const sh = Math.max(-0.2, Math.min(0.2, (hu * 1.7 + hv * 0.25) * flat));
+          if (sh > 0) lerp(c, SUN, sh * 1.3); else lerp(c, COOL, -sh * 1.1);
+          const lv = 1 + sh * 0.6 - (hc < 0.42 ? (0.42 - hc) * 0.3 * flat : 0);
           const o = (v * NW + u) * 4;
-          px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2]; px[o + 3] = 255;
+          px[o] = c[0] * lv; px[o + 1] = c[1] * lv; px[o + 2] = c[2] * lv; px[o + 3] = 255;
         }
       }
       bc.putImageData(img, 0, 0);
@@ -534,12 +581,45 @@ export class TownView {
       }
     }
     const tuftList = [];
+    const tuftHD = [];
     for (let k = 0; k < (FX.LOW_POWER ? 4200 : 9500); k++) {
       const i = T_MIN + hashInt(k, 3, sd) * T_W; const j = T_MIN + hashInt(k, 4, sd) * T_W;
       if (!okGround(i, j)) continue;
       const r = hashInt(k, 5, sd);
       const p = toWorld(i, j);
-      tuftList.push({ x: p.x, y: p.y, s: 0.75 + r * 0.55, col: fAt(i, j) > 0.45 || r < 0.45 ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', tip: r > 0.82 ? 'rgba(232,240,170,0.7)' : null });
+      const dark = fAt(i, j) > 0.45 || r < 0.45;
+      tuftList.push({ x: p.x, y: p.y, s: 0.75 + r * 0.55, col: dark ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', tip: r > 0.82 ? 'rgba(232,240,170,0.7)' : null });
+      tuftHD.push({ x: p.x, y: p.y, s: (0.75 + r * 0.55) * 0.95, d: dark ? '#3a7424' : '#6fa23c', l: dark ? '#6fae3e' : '#b9de74', h: hashInt(k, 6, sd) });
+    }
+    // wilde bloemen in groepjes (kleur per plek) en stenen met mos, buiten de bouwgrond
+    const WILD = ['#ffffff', '#f6e05a', '#c9a2f0', '#f2a0c0', '#9ec2f5', '#ffd27a', '#ffffff'];
+    const wildFlowers = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 5000 : 10000); k++) {
+      const i = T_MIN + hashInt(k, 731, sd) * T_W; const j = T_MIN + hashInt(k, 732, sd) * T_W;
+      if (ringOf(Math.floor(i), Math.floor(j)) === 0 || !okGround(i, j) || fAt(i, j) > 0.4) continue;
+      const m = fbm(i / 3.5, j / 3.5, sd + 733, 2);
+      if (hashInt(k, 734, sd) > (m - 0.34) * 2.6) continue;
+      const p = toWorld(i, j);
+      const cl = Math.floor(fbm(i / 2.2, j / 2.2, sd + 735, 1) * 11) % WILD.length;
+      wildFlowers.push({ x: p.x, y: p.y, col: WILD[cl], h: hashInt(k, 736, sd), s: 0.85 + hashInt(k, 737, sd) * 0.5 });
+    }
+    // extra fijne grasplukjes, enkel van dichtbij (dicht, sappig gras)
+    const fineClumps = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 7000 : 14000); k++) {
+      const i = T_MIN + hashInt(k, 751, sd) * T_W; const j = T_MIN + hashInt(k, 752, sd) * T_W;
+      if (!okGround(i, j)) continue;
+      const p = toWorld(i, j);
+      const f = fAt(i, j); const h = hashInt(k, 753, sd);
+      const pal = f > 0.45 ? ['#2f5f20', '#5a8f36'] : h < 0.5 ? ['#4b8a2c', '#8cc24f'] : h < 0.85 ? ['#5e9a34', '#a8d264'] : ['#7d9a3a', '#cbd884'];
+      fineClumps.push({ x: p.x, y: p.y, s: 0.55 + hashInt(k, 754, sd) * 0.35, d: pal[0], l: pal[1], h });
+    }
+    const rockList = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 150 : 300); k++) {
+      const i = T_MIN + hashInt(k, 741, sd) * T_W; const j = T_MIN + hashInt(k, 742, sd) * T_W;
+      if (ringOf(Math.floor(i), Math.floor(j)) <= 3 || !okGround(i, j)) continue;
+      const p = toWorld(i, j);
+      const h = hashInt(k, 743, sd);
+      rockList.push({ x: p.x, y: p.y, r: 1.3 + h * h * 2.8, h: hashInt(k, 744, sd), moss: fAt(i, j) > 0.2 || h < 0.6 });
     }
     const FLOWERS = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43', '#f2f2f2', '#7fb0f0'];
     const LEAVES = ['rgba(150,95,35,0.55)', 'rgba(190,130,45,0.5)', 'rgba(95,85,35,0.5)', 'rgba(120,60,30,0.45)'];
@@ -604,7 +684,8 @@ export class TownView {
       // in grid-ruimte tekenen (cirkels worden isometrische ellipsen)
       g.save();
       g.transform(...ISO);
-      if (lakeImg) g.drawImage(...lakeImg);
+      if (lakeImg && !S) g.drawImage(...lakeImg.img);
+      if (lakeImg && S) { g.restore(); this.lakeHD(g, lakeImg); g.save(); g.transform(...ISO); }
       g.lineCap = 'round';
       for (const [w, col] of [[1.3, 'rgba(95,80,40,0.22)'], [0.98, '#a88a58'], [0.8, '#bfa06b'], [0.36, 'rgba(226,206,160,0.35)']]) {
         g.strokeStyle = col; g.lineWidth = w;
@@ -684,7 +765,7 @@ export class TownView {
             const p = toWorld(gx, gy);
             if (!vis(p.x, p.y, 10)) continue;
             if (h < 0.55) { g.fillStyle = h < 0.25 ? 'rgba(168,138,88,0.75)' : 'rgba(190,160,108,0.6)'; g.beginPath(); g.ellipse(p.x, p.y, 3 + h * 5, 1.4 + h * 2, 0, 0, Math.PI * 2); g.fill(); }
-            else if (h > 0.78) NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null);
+            else if (h > 0.78) { if (S) GH.grassClump(g, p.x, p.y, 0.85, '#4f8a2e', '#9cc95c', h); else NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null); }
           }
         }
       }
@@ -715,20 +796,33 @@ export class TownView {
         ell(p.x, p.y, 1.4, 0.8);
       }
       // gras, bloemenweitjes, steentjes en een rijke bosbodem
-      for (const t of tuftList) if (vis(t.x, t.y, 7)) NAT.tuft(g, t.x, t.y, t.s, t.col, t.tip);
+      if (S) {
+        // grasplukjes met echte sprieten, wilde bloemen en stenen
+        GH.grassClumps(g, fineClumps.filter((c, k) => (S >= 3 || k % 2 === 0) && vis(c.x, c.y, 6)));
+        for (const r of rockList) if (vis(r.x, r.y, r.r * 1.6)) GH.rock(g, r.x, r.y, r.r, r.h, r.moss);
+        GH.grassClumps(g, tuftHD.filter((c) => vis(c.x, c.y, 9)));
+        GH.flowers(g, wildFlowers.filter((f) => vis(f.x, f.y, 4)));
+      } else {
+        for (const r of rockList) if (vis(r.x, r.y, 4)) NAT.pebble(g, r.x, r.y, r.r / 2.2, r.moss ? '#8f9784' : '#a49e90');
+        for (const t of tuftList) if (vis(t.x, t.y, 7)) NAT.tuft(g, t.x, t.y, t.s, t.col, t.tip);
+        for (const f of wildFlowers) if (vis(f.x, f.y, 2)) { g.fillStyle = f.col; g.fillRect(f.x - 0.6, f.y - 1.4, 1.2, 1.2); }
+      }
       for (let k = 0; k < meadows; k++) {
         const ci = T_MIN + hashInt(k, 71, sd) * T_W; const cj = T_MIN + hashInt(k, 72, sd) * T_W;
         if (!gvis(ci, cj, 80) || !okGround(ci, cj) || fAt(ci, cj) > 0.35) continue;
         const col = FLOWERS[k % FLOWERS.length]; const col2 = FLOWERS[(k + 3) % FLOWERS.length];
         const n = 6 + Math.floor(hashInt(k, 73, sd) * 12);
+        const batch = [];
         for (let q = 0; q < n; q++) {
           const a = hashInt(k, 80 + q, sd) * Math.PI * 2; const d = Math.sqrt(hashInt(k, 120 + q, sd)) * 1.1;
           const i = ci + Math.cos(a) * d; const j = cj + Math.sin(a) * d;
           if (!okGround(i, j)) continue;
           const p = toWorld(i, j);
           if (!vis(p.x, p.y, 4)) continue;
-          NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
+          if (S) batch.push({ x: p.x, y: p.y, col: q % 4 === 0 ? col2 : col, s: 1.1, h: hashInt(k, 160 + q, sd) });
+          else NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
         }
+        if (S) GH.flowers(g, batch);
       }
       for (let k = 0; k < (FX.LOW_POWER ? 160 : 300); k++) {
         const i = T_MIN + hashInt(k, 91, sd) * T_W; const j = T_MIN + hashInt(k, 92, sd) * T_W;
@@ -746,8 +840,14 @@ export class TownView {
             g.fillStyle = LEAVES[q % 4]; g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.7, q, 0, Math.PI * 2); g.fill();
           }
           const r1 = hashInt(i, j, sd + 103); const r2 = hashInt(i, j, sd + 104); const r3 = hashInt(i, j, sd + 105);
-          if (r1 < 0.6) { const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6); NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34'); }
-          if (r2 < 0.3) { const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2); NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28'); }
+          if (r1 < 0.6) {
+            const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6);
+            if (S) GH.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#4f8f34' : '#62a03e', r1); else NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34');
+          }
+          if (r2 < 0.3) {
+            const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2);
+            if (S) GH.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#86c050' : '#97c85a', '#2f5e22', r2); else NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28');
+          }
           if (r3 < 0.06) { const p = toWorld(i + 0.5, j + 0.6); NAT.mushroom(g, p.x, p.y, 1); NAT.mushroom(g, p.x + 3, p.y + 1, 0.75); }
           if (r3 > 0.975) { const p = toWorld(i + 0.5, j + 0.5); NAT.log(g, p.x, p.y, 0.9); }
         }
@@ -776,6 +876,15 @@ export class TownView {
         g.strokeStyle = k % 2 ? '#4f7d2c' : '#6a9a3a'; g.lineWidth = 1.2;
         g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - 1.5, p.y - 9); g.moveTo(p.x + 2, p.y); g.lineTo(p.x + 3, p.y - 7); g.moveTo(p.x - 1, p.y); g.lineTo(p.x - 4, p.y - 6); g.stroke();
         if (k % 3 === 0) { g.fillStyle = '#6b4523'; g.fillRect(p.x - 2.3, p.y - 12, 2, 4.5); }
+      }
+      // kiezels op de oever van de vijver
+      for (let k = 0; k < 60; k++) {
+        const a = hashInt(k, 801, sd) * Math.PI * 2;
+        const rr = pd.r + 0.18 + hashInt(k, 802, sd) * 0.32;
+        const p = toWorld(pd.x + Math.cos(a) * rr * Math.cos(0.4) - Math.sin(a) * rr * 0.8 * Math.sin(0.4), pd.y + Math.cos(a) * rr * Math.sin(0.4) + Math.sin(a) * rr * 0.8 * Math.cos(0.4));
+        if (!vis(p.x, p.y, 4)) continue;
+        if (S) GH.rock(g, p.x, p.y, 0.8 + hashInt(k, 803, sd) * 1.1, hashInt(k, 804, sd), false);
+        else NAT.pebble(g, p.x, p.y, 0.5, '#a9a291');
       }
     };
 
@@ -828,6 +937,63 @@ export class TownView {
 
   // meertjes in de wildernis met vloeiende oevers: een zacht 'metaball'-veld rond de watertegels,
   // met zandrand, schuimlijn, ondiep en diep water. Geeft [beeld, x, y, breedte, hoogte] in tegelruimte.
+  // Meren in een scherp stuk: het diepte-beeld (zacht, bilineair vergroot) per pixel omzetten naar kleur. Omdat de diepte
+  // glad verloopt, worden de randen (zand, schuim, ondiep, diep) haarscherp op elke resolutie.
+  lakeHD(g, L) {
+    const T = g.getTransform();
+    const [x0, y0, x1, y1] = L.box;
+    let bx0 = Infinity; let by0 = Infinity; let bx1 = -Infinity; let by1 = -Infinity;
+    for (const [gx, gy] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) {
+      const w = toWorld(gx, gy);
+      const dx = T.a * w.x + T.c * w.y + T.e; const dy = T.b * w.x + T.d * w.y + T.f;
+      bx0 = Math.min(bx0, dx); by0 = Math.min(by0, dy); bx1 = Math.max(bx1, dx); by1 = Math.max(by1, dy);
+    }
+    const cw = g.canvas.width; const ch = g.canvas.height;
+    const bx = Math.max(0, Math.floor(bx0)); const by = Math.max(0, Math.floor(by0));
+    const bw = Math.min(cw, Math.ceil(bx1)) - bx; const bh = Math.min(ch, Math.ceil(by1)) - by;
+    if (bw <= 0 || bh <= 0) return;
+    if (!this.lakeTmp) this.lakeTmp = document.createElement('canvas');
+    const tmp = this.lakeTmp;
+    if (tmp.width < cw || tmp.height < ch) { tmp.width = cw; tmp.height = ch; }
+    const t = tmp.getContext('2d', { willReadFrequently: true });
+    t.setTransform(1, 0, 0, 1, 0, 0);
+    t.clearRect(0, 0, tmp.width, tmp.height);
+    t.setTransform(T); t.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'high';
+    const [, ix, iy, iw, ih] = L.img;
+    t.drawImage(L.field, ix, iy, iw, ih);
+    const id = t.getImageData(bx, by, bw, bh);
+    const d = id.data;
+    const lut = lakeLUT();
+    // golfjes: dunne, lichte, golvende lijnen in wereldcoördinaten (lopen naadloos door over de stukken)
+    const ia = 1 / T.a;
+    for (let i = 0, k = 0; i < d.length; i += 4, k++) {
+      if (d[i + 3] === 0) continue;
+      const v = d[i];
+      const o = v * 4;
+      const a = lut[o + 3];
+      if (!a) { d[i + 3] = 0; continue; }
+      let r = lut[o]; let gg = lut[o + 1]; let b = lut[o + 2];
+      if (a === 255) {
+        const n = ((((k * 2654435761) >>> 27) - 16) * 0.25); // fijne ruis
+        r += n; gg += n; b += n;
+        if (v > 100) {
+          const px = bx + (k % bw); const py = by + ((k / bw) | 0);
+          const wx = (px - T.e) * ia; const wy = (py - T.f) * ia;
+          const w = Math.sin(wx * 0.11 + wy * 0.42 + Math.sin(wx * 0.045 + wy * 0.03) * 2.6);
+          if (w > 0.9) { const l = (w - 0.9) * 140; r += l; gg += l; b += l * 0.8; }
+          else if (w < -0.95) { const l = (-0.95 - w) * 160; r -= l; gg -= l; b -= l * 0.6; }
+        }
+      }
+      d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = a;
+    }
+    t.putImageData(id, bx, by);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(tmp, bx, by, bw, bh, bx, by, bw, bh);
+    g.restore();
+  }
+
   lakeImage(lakes, sd) {
     const RS = FX.LOW_POWER ? 10 : 14; // pixels per tegel
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
@@ -848,6 +1014,13 @@ export class TownView {
     const c = cv.getContext('2d');
     const img = c.createImageData(W, H);
     const d = img.data;
+    // tweede beeld: de 'diepte' f zelf (grijswaarde), voor scherpe meren in de HD-stukken (zie lakeHD)
+    const fcv = document.createElement('canvas');
+    fcv.width = W; fcv.height = H;
+    const fc = fcv.getContext('2d');
+    const fimg = fc.createImageData(W, H);
+    const fd = fimg.data;
+    for (let i = 3; i < fd.length; i += 4) fd[i] = 255;
     const R2 = 1.3 * 1.3;
     const ramp = (f, a, b) => Math.min(1, Math.max(0, (f - a) / (b - a)));
     for (let v = 0; v < H; v++) {
@@ -861,6 +1034,7 @@ export class TownView {
           if (q > 0) f += q * q;
         }
         f += (fbm(gx * 0.8, gy * 0.8, sd + 141, 2) - 0.5) * 0.5 + (fbm(gx * 2.6, gy * 2.6, sd + 142, 2) - 0.5) * 0.14;
+        { const fv = Math.max(0, Math.min(255, Math.round((f / 1.6) * 255))); const fo = (v * W + u) * 4; fd[fo] = fv; fd[fo + 1] = fv; fd[fo + 2] = fv; }
         if (f < 0.22) continue;
         const o = (v * W + u) * 4;
         let r; let gg; let b; let a;
@@ -880,7 +1054,8 @@ export class TownView {
       }
     }
     c.putImageData(img, 0, 0);
-    return [cv, x0, y0, TWd, THd];
+    fc.putImageData(fimg, 0, 0);
+    return { img: [cv, x0, y0, TWd, THd], field: fcv, box: [x0, y0, x1, y1] };
   }
 
   tcDoor() {
@@ -1234,7 +1409,7 @@ export class TownView {
     };
     // achterste toren eerst (verder weg in de isometrie); torens en boog als afbeelding (enkel de deuren bewegen)
     const [back, front] = t1.x + t1.y <= t2.x + t2.y ? [t1, t2] : [t2, t1];
-    const t3 = (p) => S3.getWall({ x0: p.x - tw, y0: p.y - tw, x1: p.x + tw, y1: p.y + tw, tower: true }, level, th);
+    const t3 = (p) => S3.getWall({ x0: p.x - tw, y0: p.y - tw, x1: p.x + tw, y1: p.y + tw, tower: true }, level, th, this.treeNeed);
     const tb = t3(back); const tf = t3(front);
     const use3d = tb && tf;
     if (use3d) { const w = toWorld(back.x, back.y); A.drawSprite(ctx, tb, w.x, w.y, 1); }
@@ -1282,7 +1457,8 @@ export class TownView {
 
   // vaste stukken van een poort (torens, boog) één keer tekenen en daarna als afbeelding hergebruiken
   gatePart(ctx, seg, level, which, top, draw) {
-    if (!this.gateSprites || this.gateSprites.level !== level) this.gateSprites = { level, map: new Map() };
+    const Q = spriteQ(this.treeNeed);
+    if (!this.gateSprites || this.gateSprites.level !== level || this.gateSprites.q !== Q) this.gateSprites = { level, q: Q, map: new Map() };
     const key = `${seg.cx},${seg.cy},${seg.ax},${seg.w || 1},${which}`;
     let spr = this.gateSprites.map.get(key);
     if (!spr) {
@@ -1293,7 +1469,6 @@ export class TownView {
         }
       }
       x0 = Math.floor(x0 - 3); y0 = Math.floor(y0 - 3); x1 = Math.ceil(x1 + 3); y1 = Math.ceil(y1 + 3);
-      const Q = 2.5;
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round((x1 - x0) * Q)); cv.height = Math.max(1, Math.round((y1 - y0) * Q));
       const c = cv.getContext('2d');
@@ -1313,14 +1488,15 @@ export class TownView {
   // muurstukken één keer tekenen en daarna als afbeelding hergebruiken (stenen textuur is duur)
   drawWallPiece(ctx, seg, level) {
     if (seg.gateTile) { this.drawGate(ctx, seg, Math.max(1, level)); return; }
-    const w3 = S3.getWall(seg, level, this.wallHeight(seg, level));
+    const w3 = S3.getWall(seg, level, this.wallHeight(seg, level), this.treeNeed);
     if (w3) {
       const c = toWorld((seg.x0 + seg.x1) / 2, (seg.y0 + seg.y1) / 2);
       A.drawSprite(ctx, w3, c.x, c.y, 1);
       if (seg.gate) this.drawTorch(ctx, seg, level);
       return;
     }
-    if (!this.wallSprites || this.wallSprites.level !== level) this.wallSprites = { level, map: new Map() };
+    const Q = spriteQ(this.treeNeed);
+    if (!this.wallSprites || this.wallSprites.level !== level || this.wallSprites.q !== Q) this.wallSprites = { level, q: Q, map: new Map() };
     const key = `${seg.x0},${seg.y0},${seg.x1},${seg.y1},${seg.tower ? 1 : 0}${seg.gate ? 1 : 0}`;
     let spr = this.wallSprites.map.get(key);
     if (!spr) {
@@ -1332,7 +1508,6 @@ export class TownView {
         }
       }
       x0 = Math.floor(x0 - 3); y0 = Math.floor(y0 - 3); x1 = Math.ceil(x1 + 3); y1 = Math.ceil(y1 + 3);
-      const Q = 2.5;
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round((x1 - x0) * Q)); cv.height = Math.max(1, Math.round((y1 - y0) * Q));
       const c = cv.getContext('2d');
@@ -3013,9 +3188,9 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null, this.treeNeed);
       if (s3) A.drawSprite(ctx, s3, c.x, c.y, 1);
-      else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id), c.x, c.y, bScale(b));
+      else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id, S3.has(b.type) ? 0 : this.treeNeed * bScale(b)), c.x, c.y, bScale(b));
       if (s3) this.drawOverlay3d(ctx, b, c, t, s3); else this.drawOverlay(ctx, b, c, t);
       if (sel) {
         // voorste randen van de voet in goud, over het gebouw heen: zo zie je duidelijk wat gekozen is
@@ -3038,6 +3213,18 @@ export class TownView {
   // vlag, rook en gloed op de ankerpunten van het 3D-model
   drawOverlay3d(ctx, b, c, t, s3) {
     const a = s3.anchors || {};
+    if (a.blades) {
+      // wieken van het molentje op de boerderij (draaien)
+      ctx.save(); ctx.translate(c.x + a.blades[0], c.y + a.blades[1]); ctx.rotate(t * 0.0015);
+      ctx.fillStyle = '#efe6cf'; ctx.strokeStyle = '#6b4527'; ctx.lineWidth = 0.6;
+      for (let i = 0; i < 4; i++) {
+        ctx.rotate(Math.PI / 2);
+        ctx.fillStyle = '#5a3a1e'; ctx.fillRect(0, -0.6, 12, 1.2);
+        ctx.fillStyle = '#efe6cf'; ctx.fillRect(3, 0.6, 9, 2.6); ctx.strokeRect(3, 0.6, 9, 2.6);
+      }
+      ctx.fillStyle = '#4d4f54'; ctx.beginPath(); ctx.arc(0, 0, 1.4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
     if (a.flag) A.flag(ctx, c.x + a.flag[0], c.y + a.flag[1], b.type === 'tower' ? 14 : 17, this.team, t + b.id * 300);
     if (a.smoke && (b.type !== 'house' || b.level >= 2 || b.id % 2 === 0)) A.smoke(ctx, c.x + a.smoke[0], c.y + a.smoke[1], t, b.id);
     if (a.glow) {
