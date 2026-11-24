@@ -315,6 +315,15 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     torens, muren (`wallHp`), molen/gildehuis, bouwloods, academie (nieuwe rij), punten. Plus een tip of het nu zin heeft
     (vrije werkplekken, bevolking in gebruik, voorraad t.o.v. opslag, muur nog open).
 
+35. **Scherp en gedetailleerd terrein in de stad** (feedback met screenshot op de gsm: "gebouwen en figuren zijn goed,
+    maar het terrein loopt achterop; veel mooier, scherper, gedetailleerder"). De grond was één afbeelding op 1,25 px per
+    wereldpixel (op een gsm ingezoomd 6–8× uitvergroot). Nu tekent de stad ingezoomd het zichtbare deel opnieuw in stukken
+    op schermresolutie (tot 6 px per wereldpixel, ook op gsm; `groundhd.js`). Nieuw: plein met kasseien in kringen (bolle
+    stenen met schaduwkant en glans, sierringen, mos in de voegen), straten met kinderkopjes in verband en een stoeprand,
+    stapstenen op de paadjes, moestuintjes met ruggen en plantjes (kool, sla, bonen, pompoen), grind op de aardewegen,
+    fijne grasprietjes/bosbodem/aarde-texturen per resolutie en een fijne korrel over alles. Tijd per stuk in headless
+    Chromium (zonder GPU) 15–50 ms; op een toestel met GPU sneller.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
