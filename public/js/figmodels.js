@@ -342,10 +342,60 @@ export function horse(s, L, mode, f) {
   person(s, { ...L, horse: undefined }, 'idle', 0, bz + 0.05);
 }
 
+// schaap: wollen lijf uit plukjes, donkere kop, dunne poten; graast met de kop omlaag
+export function sheep(s, L, mode, f) {
+  const a = (f / 8) * TAU; const walk = mode === 'walk'; const graze = mode === 'graze';
+  const wool = L.body || '#f2eee6'; const face = L.body && L.body !== '#f2eee6' ? '#2a2420' : '#3a3430';
+  const bob = walk ? Math.abs(Math.sin(a)) * 0.008 : 0;
+  const bz = 0.13 + bob;
+  for (const [lx, side, ph] of [[0.08, 1, 0], [0.08, -1, Math.PI], [-0.08, 1, Math.PI], [-0.08, -1, 0]]) {
+    const sw = walk ? Math.sin(a + ph) * 0.03 : 0; const lift = walk ? Math.max(0, Math.cos(a + ph)) * 0.02 : 0;
+    s.cap([lx, side * 0.045, bz - 0.04], [lx + sw, side * 0.047, 0.012 + lift], 0.014, plain(face));
+  }
+  s.ell(0, 0, bz + 0.01, 0.14, 0.09, 0.085, cloth(wool));
+  const R = [[0.07, 0.055, 0.04], [-0.06, 0.055, 0.035], [0.0, 0.065, 0.05], [0.06, -0.055, 0.04], [-0.07, -0.045, 0.04], [0.0, -0.065, 0.045], [0.04, 0.0, 0.075], [-0.05, 0.0, 0.07], [0.11, 0.0, 0.03], [-0.12, 0.0, 0.03], [0.07, 0.03, -0.02], [-0.07, 0.03, -0.02]];
+  for (const [x, y, z] of R) s.ell(x, y, bz + z - 0.01, 0.056, 0.05, 0.05, cloth(shade(wool, (x + y) * 0.6)));
+  const hx = graze ? 0.17 : 0.15; const hz = graze ? 0.05 : bz + 0.07;
+  s.cap([0.11, 0, bz + 0.02], [hx, 0, hz], 0.026, cloth(shade(wool, -0.05))); // hals
+  s.ell(hx + 0.02, 0, hz, 0.045, 0.032, 0.035, plain(face));
+  for (const side of [1, -1]) {
+    s.ell(hx + 0.005, side * 0.035, hz + 0.012, 0.012, 0.018, 0.007, plain(face)); // oren
+    s.ell(hx + 0.045, side * 0.018, hz + 0.01, 0.005, 0.005, 0.005, plain('#0e0b09')); // ogen
+  }
+  s.ell(-0.125, 0, bz + 0.03, 0.02, 0.02, 0.02, cloth(wool)); // staartje
+}
+
+// everzwijn: borstelig lijf, kam op de rug, snuit met slagtanden
+export function boar(s, L, mode, f) {
+  const a = (f / 8) * TAU; const walk = mode === 'walk';
+  const bob = walk ? Math.abs(Math.sin(a)) * 0.01 : 0;
+  const bz = 0.18 + bob;
+  const hide = { k: 'leather', c: rgb('#4a3628') };
+  for (const [lx, side, ph] of [[0.1, 1, 0], [0.1, -1, Math.PI], [-0.1, 1, Math.PI], [-0.1, -1, 0]]) {
+    const sw = walk ? Math.sin(a + ph) * 0.04 : 0; const lift = walk ? Math.max(0, Math.cos(a + ph)) * 0.025 : 0;
+    s.cap([lx, side * 0.045, bz - 0.04], [lx + sw, side * 0.048, 0.014 + lift], 0.018, plain('#2b1d14'));
+    s.ell(lx + sw + 0.006, side * 0.048, 0.008 + lift, 0.016, 0.014, 0.009, plain('#15100c'));
+  }
+  s.ell(0, 0, bz, 0.17, 0.085, 0.1, hide);
+  s.ell(0.07, 0, bz + 0.02, 0.09, 0.085, 0.1, hide); // schoft
+  for (let i = 0; i < 11; i++) { const x = -0.13 + i * 0.026; const z = bz + 0.088 + (i > 5 ? 0.015 : 0) - Math.abs(i - 6) * 0.003; s.cap([x, 0, z], [x - 0.01, 0, z + 0.018], 0.011, plain('#1f1610')); } // borstels
+  s.cap([0.15, 0, bz + 0.03], [0.27, 0, bz - 0.04], 0.05, hide); // kop
+  s.ell(0.3, 0, bz - 0.055, 0.022, 0.03, 0.026, plain('#c99a86')); // snuit
+  for (const side of [1, -1]) {
+    s.ell(0.318, side * 0.011, bz - 0.055, 0.005, 0.005, 0.006, plain('#5a3a30'));
+    s.cap([0.27, side * 0.03, bz - 0.07], [0.29, side * 0.04, bz - 0.02], 0.006, plain('#f4efe0', true)); // slagtanden
+    s.ell(0.2, side * 0.035, bz + 0.03, 0.007, 0.006, 0.006, plain('#120c08')); // ogen
+    s.cap([0.16, side * 0.035, bz + 0.06], [0.15, side * 0.045, bz + 0.1], 0.012, plain('#2b1d14')); // oren
+  }
+  s.cap([-0.17, 0, bz + 0.03], [-0.21, 0, bz - 0.04], 0.006, plain('#2b1d14')); // staart
+}
+
 // de opties van de getekende figuur → een scène
 export function figureScene(kind, L, mode, f) {
   const s = new Scene();
   if (kind === 'h') horse(s, L, mode, f);
+  else if (kind === 's') sheep(s, L, mode, f);
+  else if (kind === 'b') boar(s, L, mode, f);
   else person(s, L, mode, f);
   return s;
 }

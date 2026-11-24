@@ -127,6 +127,55 @@ const TREES = [
   (s) => { birch3(s, -0.38, -0.06, 0.85, LEAF.birch, 16); oak3(s, -0.09, -0.41, 0.8, LEAF.oakD, 17); round3(s, 0, 0, 1.0, LEAF.oak, 18); },
 ];
 
+// ---------- barbarenkamp (twee lagen: achteraan en de palissade vooraan; de barbaren staan ertussen) ----------
+// Zelfde plaats en maat als de getekende versie in town.js (campSprites): een palissade van ±1,33 tegels straal,
+// een poort vooraan (richting de kijker), drie hutten, een totem, een droogrek en wat beenderen.
+const CAMP_R = 1.33;
+function campStakes(s, front) {
+  for (let i = 0; i < 34; i++) {
+    const th = (i / 34) * TAU;
+    const dg = Math.abs(((th - Math.PI / 4 + Math.PI) % TAU + TAU) % TAU - Math.PI);
+    if (dg < 0.26) continue; // poort vooraan
+    const x = Math.cos(th) * CAMP_R; const y = Math.sin(th) * CAMP_R;
+    if ((x + y >= 0) !== front) continue;
+    const h = (15 + ((i * 7) % 5)) / 39.19;
+    const lx = Math.cos(th) * 0.04; const ly = Math.sin(th) * 0.04;
+    s.cap([x, y, 0], [x + lx, y + ly, h], 0.034, bark('#5e4027'));
+    s.cone(x + lx, y + ly, 0.03, h, h + 0.1, plain('#8a6a44'));
+    s.cyl(x + lx * 0.5, y + ly * 0.5, 0.038, h * 0.5, h * 0.5 + 0.025, leather('#b89a6a')); // touw
+  }
+}
+function hut(s, x, y, r, roof) {
+  const wh = r * 0.85 * (45 / 39.19);
+  s.cyl(x, y, r, 0, wh, wood('#7a5a36', 0.03));
+  const d = r * 0.98;
+  s.box(x + d * 0.62 - 0.03, y + d * 0.62 - 0.03, 0, x + d * 0.72 + 0.03, y + d * 0.72 + 0.03, wh * 0.7, plain('#1e140c')); // deuropening
+  s.cone(x, y, r * 1.2, wh - 0.02, wh + r * 1.45 * (45 / 39.19), { k: 'thatch', c: rgb(roof) });
+  s.cyl(x, y, 0.03, wh + r * 1.3, wh + r * 1.45 * (45 / 39.19) + 0.03, plain('#3a2a18'));
+}
+const leather = (c) => ({ k: 'leather', c: rgb(c) });
+function campBack(s) {
+  s.ell(0, 0, 0, CAMP_R - 0.08, CAMP_R - 0.08, 0.012, { k: 'dirt', c: [0.45, 0.36, 0.24] }, 0);
+  campStakes(s, false);
+  hut(s, -0.72, 0.22, 0.24, '#c9a24a');
+  hut(s, 0.03, -0.78, 0.29, '#b8913e');
+  hut(s, -0.62, -0.5, 0.2, '#d0ab55');
+  // totem met een schedel en hoorns
+  const tx = 0.56; const ty = -0.81;
+  ['#7a4a26', '#a8432f', '#2a2018', '#c49a3a', '#7a4a26'].forEach((c, i) => s.box(tx - 0.045, ty - 0.045, i * 0.15, tx + 0.045, ty + 0.045, (i + 1) * 0.15, plain(c)));
+  s.ell(tx, ty, 0.8, 0.05, 0.05, 0.055, plain('#efe6d2'));
+  for (const sd of [1, -1]) { s.ell(tx + 0.04, ty + sd * 0.018, 0.81, 0.008, 0.008, 0.009, plain('#2a1a10')); s.cap([tx, ty + sd * 0.045, 0.81], [tx - 0.02, ty + sd * 0.11, 0.9], 0.009, plain('#efe6d2')); }
+  // droogrek met een huid
+  const rx = -0.53; const ry = 0.9;
+  s.cap([rx, ry - 0.2, 0], [rx, ry - 0.2, 0.38], 0.016, bark('#5e4027'));
+  s.cap([rx, ry + 0.2, 0], [rx, ry + 0.2, 0.42], 0.016, bark('#5e4027'));
+  s.cap([rx, ry - 0.22, 0.35], [rx, ry + 0.22, 0.39], 0.012, bark('#5e4027'));
+  s.box(rx - 0.006, ry - 0.15, 0.1, rx + 0.006, ry + 0.15, 0.35, leather('#c9a77a'));
+  // houtstapel bij het vuur en wat beenderen
+  for (const [y, z] of [[0.13, 0.025], [0.2, 0.025], [0.165, 0.07]]) logX(s, 0.45, 0.72, y, z, 0.026, '#6b4826');
+  for (const [x, y] of [[-0.25, 0.6], [0.45, 0.55], [-0.9, 0.4], [0.95, -0.2]]) { s.cap([x - 0.05, y, 0.01], [x + 0.04, y - 0.02, 0.01], 0.008, plain('#efe6d2')); s.ell(x + 0.05, y - 0.02, 0.012, 0.012, 0.012, 0.01, plain('#efe6d2')); }
+}
+
 // ---------- de spullen ----------
 const MODELS = {
   // straatlantaarn: stenen voet, paal (hout, later ijzer), arm en een brandende lantaarn
@@ -301,6 +350,8 @@ const MODELS = {
   woodpile(s) {
     for (const [y, z] of [[-0.035, 0.026], [0.035, 0.026], [0, 0.072]]) logX(s, -0.11, 0.11, y, z, 0.026, '#6b4523');
   },
+  campback(s) { campBack(s); },
+  campfront(s) { campStakes(s, true); },
   // boom (v = soort 0..15, zelfde nummers als nature.js); zonder slagschaduw, die zit al in de grondlaag
   tree(s, v) { (TREES[v] || TREES[0])(s); },
   // bessenstruik
