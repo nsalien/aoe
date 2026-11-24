@@ -1581,7 +1581,103 @@ export function smoke(ctx, x, y, t, seed = 0, s = 1) {
 
 // ---------- sprite-cache ----------
 
-const DRAW = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc };
+
+// ---------- nieuwe gebouwen (getekende versie, zolang het 3D-model nog niet klaar is) ----------
+
+function roofFor(ctx, x0, y0, x1, y1, z, h, along = 'x') {
+  if (STYLE && STYLE.roof && STYLE.roof !== 'gable') return styledRoof(ctx, x0, y0, x1, y1, z, h, C.roof, along === 'x');
+  if (along === 'x') gableX(ctx, x0, y0, x1, y1, z, h, C.roof, C.plaster); else gableY(ctx, x0, y0, x1, y1, z, h, C.roof, C.plaster);
+}
+
+function mill(ctx, L) {
+  shadow(ctx, 0.32);
+  const h = 36 + L * 4;
+  box(ctx, -0.18, -0.24, 0.18, 0.12, 0, h, C.plaster);
+  doorL(ctx, 0.12, -0.06, 0.1, 10);
+  poly(ctx, [P(-0.22, -0.28, h), P(0.22, -0.28, h), P(0.22, 0.16, h), P(-0.22, 0.16, h), P(0, -0.06, h + 20)], C.thatch, EDGE);
+  poly(ctx, [P(0.22, -0.28, h), P(0.22, 0.16, h), P(0, -0.06, h + 20)], shade(C.thatch, -0.2), EDGE);
+  const [hx, hy] = P(0.24, -0.06, h - 4);
+  ctx.strokeStyle = C.woodDark; ctx.lineWidth = 1.6;
+  for (const a of [0.5, 2.07, 3.64, 5.21]) {
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * 22, hy + Math.sin(a) * 22); ctx.stroke();
+    ctx.fillStyle = 'rgba(240,232,210,0.9)';
+    ctx.beginPath(); ctx.moveTo(hx + Math.cos(a) * 6, hy + Math.sin(a) * 6); ctx.lineTo(hx + Math.cos(a) * 21, hy + Math.sin(a) * 21);
+    ctx.lineTo(hx + Math.cos(a + 0.25) * 20, hy + Math.sin(a + 0.25) * 20); ctx.lineTo(hx + Math.cos(a + 0.5) * 6, hy + Math.sin(a + 0.5) * 6); ctx.fill();
+  }
+  ctx.fillStyle = C.iron; ctx.beginPath(); ctx.arc(hx, hy, 2, 0, Math.PI * 2); ctx.fill();
+}
+
+function academy(ctx, L) {
+  shadow(ctx, 0.44);
+  const h = 26 + L * 3;
+  box(ctx, -0.42, -0.4, 0.26, 0.1, 0, h, C.plaster);
+  for (let k = 0; k < 4; k++) column(ctx, -0.36 + k * 0.19, 0.28, 0, h * 0.8);
+  box(ctx, -0.42, 0.1, 0.26, 0.32, h * 0.8, h * 0.8 + 3, C.plaster);
+  doorL(ctx, 0.1, -0.12, 0.12, 12);
+  roofFor(ctx, -0.42, -0.4, 0.26, 0.1, h, 14);
+  if (L >= 2) {
+    box(ctx, -0.4, -0.38, -0.18, -0.16, h, h + 18, C.plaster);
+    if (L >= 3) dome(ctx, -0.29, -0.27, h + 18, 0.14, '#5f7f9e');
+    else hipRoof(ctx, -0.42, -0.4, -0.16, -0.14, h + 18, 10, C.roofDark, 0.02);
+  }
+  target(ctx, 0.36, 0.3);
+}
+
+function guild(ctx, L) {
+  shadow(ctx, 0.42);
+  const h = 38 + L * 4;
+  box(ctx, -0.32, -0.36, 0.3, 0.2, 0, h, '#c9b48e');
+  for (let k = 0; k < 4; k++) {
+    const w = 0.31 - k * 0.075;
+    box(ctx, -0.01 - w, 0.17, -0.01 + w, 0.21, h + k * 4.5, h + (k + 1) * 4.5, '#c9b48e');
+  }
+  gableY(ctx, -0.32, -0.36, 0.3, 0.17, h, 18, C.roof, '#c9b48e');
+  for (const a of [-0.26, -0.04, 0.16]) { windowL(ctx, 0.21, a, h - 12, 0.08, 7); windowL(ctx, 0.21, a, 6, 0.1, 9); }
+  windowR(ctx, 0.3, -0.12, h - 12, 0.1, 7);
+  const [sx, sy] = P(0.38, 0.14, 26);
+  ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, Math.PI * 2); ctx.fill();
+}
+
+function lodge(ctx, L) {
+  shadow(ctx, 0.42);
+  const h = 16 + L * 2;
+  for (const [x, y] of [[-0.4, -0.4], [0.06, -0.4], [-0.4, 0.02], [0.06, 0.02]]) box(ctx, x - 0.02, y - 0.02, x + 0.02, y + 0.02, 0, h, C.woodDark, null);
+  gableX(ctx, -0.42, -0.42, 0.08, 0.04, h, 10, C.roof, C.wood);
+  const [bx, by] = P(0.26, -0.2);
+  ctx.strokeStyle = C.woodDark; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by - 46 - L * 4); ctx.lineTo(bx - 18, by - 34 - L * 4); ctx.stroke();
+  ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(bx - 18, by - 34 - L * 4); ctx.lineTo(bx - 18, by - 16); ctx.stroke();
+  ctx.fillStyle = '#d3cbb8'; ctx.fillRect(bx - 22, by - 16, 8, 6);
+  box(ctx, 0.2, 0.22, 0.42, 0.38, 0, 5, '#cfc6b2');
+}
+
+function court(ctx, L, team) {
+  shadow(ctx, 0.44);
+  const h = 30 + L * 4;
+  box(ctx, -0.36, -0.34, 0.28, 0.2, 0, h, C.stone);
+  hipRoof(ctx, -0.38, -0.36, 0.3, 0.22, h, 20, '#3f4a5c', 0.04);
+  for (const [x, y] of [[0.22, 0.14], [-0.36, 0.14]]) { box(ctx, x - 0.06, y - 0.06, x + 0.06, y + 0.06, 0, h + 10, C.stone); poly(ctx, [P(x - 0.08, y + 0.08, h + 10), P(x + 0.08, y + 0.08, h + 10), P(x + 0.08, y - 0.08, h + 10), P(x, y, h + 26)], C.roofDark, EDGE); }
+  doorL(ctx, 0.2, -0.12, 0.14, 13);
+  banner(ctx, -0.25, 0.2, h - 4, team, 12); banner(ctx, 0.08, 0.2, h - 4, team, 12);
+  const [gx, gy] = P(-0.04, -0.07, h + 20); ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(gx, gy, 2.2, 0, Math.PI * 2); ctx.fill();
+}
+
+function cathedral(ctx, L) {
+  shadow(ctx, 0.46);
+  const h = 30 + L * 3;
+  box(ctx, -0.42, -0.24, 0.14, 0.18, 0, h, '#d3cbb8');
+  gableX(ctx, -0.42, -0.24, 0.14, 0.18, h, 16, C.slate, '#d3cbb8');
+  for (let k = 0; k < 4; k++) windowL(ctx, 0.18, -0.36 + k * 0.13, 10, 0.05, 12);
+  const th = h + 22 + L * 8;
+  box(ctx, 0.14, -0.13, 0.4, 0.13, 0, th, '#e0d9c8');
+  windowR(ctx, 0.4, -0.04, th - 14, 0.08, 9);
+  const [rx, ry] = P(0.4, 0, 22); ctx.fillStyle = '#3d6fb5'; ctx.beginPath(); ctx.ellipse(rx, ry, 3.5, 4.2, 0, 0, Math.PI * 2); ctx.fill();
+  poly(ctx, [P(0.14, 0.13, th), P(0.4, 0.13, th), P(0.27, 0, th + 34 + L * 6)], C.slate, EDGE);
+  poly(ctx, [P(0.4, -0.13, th), P(0.4, 0.13, th), P(0.27, 0, th + 34 + L * 6)], shade(C.slate, -0.25), EDGE);
+  const [cx, cy] = P(0.27, 0, th + 34 + L * 6); ctx.fillStyle = C.gold; ctx.fillRect(cx - 0.6, cy - 7, 1.2, 7); ctx.fillRect(cx - 2.5, cy - 5, 5, 1.2);
+}
+
+const DRAW = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral };
 const SIZES = { tc: 2, monument: 2 };
 
 const cache = new Map();

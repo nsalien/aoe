@@ -4,7 +4,7 @@
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
-  LAND, landCost, WALL_TILE, GATE, DEMOLISH,
+  LAND, landCost, WALL_TILE, GATE, DEMOLISH, TECHS, TECH_IDS, LOYALTY,
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
 import {
@@ -80,10 +80,21 @@ export function protectAmount(s) {
   return p;
 }
 
+// extra productie van de molen en het gildehuis (per niveau)
+export function boost(s) {
+  const out = { food: 0, wood: 0, stone: 0, gold: 0 };
+  for (const b of s.buildings) {
+    const bo = BUILDINGS[b.type].boost;
+    if (bo && b.level > 0) for (const r of Object.keys(bo)) out[r] += bo[r] * b.level;
+  }
+  return out;
+}
+
 export function rates(s, speed = 1) {
   const mult = (1 + 0.1 * (age(s) - 1)) * speed;
+  const bo = boost(s);
   const out = {};
-  for (const r of RES) out[r] = s.villagers[r] * GATHER_RATE[r] * mult;
+  for (const r of RES) out[r] = s.villagers[r] * GATHER_RATE[r] * mult * (1 + bo[r]);
   return out;
 }
 
@@ -103,12 +114,28 @@ export function unitsPop(units) {
 export const homePop = (s) => totalVillagers(s) + unitsPop(s.units) + queuedPop(s) + fieldSoldierPop(s);
 
 export function maxBuilds(s) {
-  return age(s) >= 3 ? 3 : 2;
+  return (age(s) >= 3 ? 3 : 2) + (bLevel(s, 'lodge') > 0 ? BUILDINGS.lodge.builders : 0);
 }
+
+// bouwduur in ms voor deze stad (de bouwloods bouwt sneller)
+export function buildTime(s, type, level, speed = 1) {
+  const f = type === 'tc' || type === 'lodge' ? 1 : 1 - BUILDINGS.lodge.buildSpeed * bLevel(s, 'lodge');
+  return Math.max(5000, Math.round(levelTime(type, level, speed) * f));
+}
+
+// ---------- trouw ----------
+export const isVassal = (s, t = s.t) => !!(s.vas && s.vas.until > t);
+export const loyalty = (s) => (s.loy == null ? LOYALTY.max : s.loy);
+export const loyaltyRegen = (s) => LOYALTY.regen + BUILDINGS.cathedral.loyalty * bLevel(s, 'cathedral');
 
 function accrue(s, t, speed) {
   const dt = (t - s.t) / 3600000;
   if (dt <= 0) return;
+  // de trouw herstelt vanzelf (niet zolang je vazal bent)
+  if (s.loy != null && s.loy < LOYALTY.max && !isVassal(s)) {
+    s.loy = Math.min(LOYALTY.max, s.loy + loyaltyRegen(s) * dt * speed);
+    if (s.loy >= LOYALTY.max) delete s.loy;
+  }
   const r = rates(s, speed);
   const extra = gatherAccrue(s, dt, speed);
   const cap = capacity(s);
@@ -285,9 +312,12 @@ export function advance(s, t, speed = 1) {
     }
     for (const h of s.harvests) if (h.end < next) { next = h.end; job = null; qkey = null; hv = h; wild = null; }
     if (s.nextNode < next) { next = s.nextNode; job = null; qkey = null; hv = null; spawn = true; wild = null; }
+    let rs = false;
+    if (s.research && s.research.end < next) { next = s.research.end; job = null; qkey = null; hv = null; spawn = false; wild = null; rs = true; }
     if (next > t) break;
     accrue(s, next, speed);
-    if (wild) applyWildEvent(s, wild, speed);
+    if (rs) finishResearch(s);
+    else if (wild) applyWildEvent(s, wild, speed);
     else if (spawn) spawnBonus(s, next, speed);
     else if (hv) finishHarvest(s, hv);
     else if (job) finishBuild(s, job);
@@ -1205,10 +1235,12 @@ export function canPlaceAt(s, type, x, y) {
 
 // ---------- acties (geven een foutmelding terug of null) ----------
 
+export const needAge = (a) => `Vereist het ${AGES[a].name}.`;
+
 export function checkBuild(s, type) {
   const def = BUILDINGS[type];
   if (!def || def.placeable === false) return 'Onbekend gebouw.';
-  if (age(s) < def.age) return `Vereist het ${['', 'eerste', 'tweede', 'derde', 'vierde'][def.age]} tijdperk.`;
+  if (age(s) < def.age) return needAge(def.age);
   if (findType(s, type).length >= def.max) return `Je hebt al het maximum (${def.max}) van dit gebouw.`;
   if (s.builds.length >= maxBuilds(s)) return 'Al je bouwers zijn bezig.';
   if (tooBig(s, levelCost(type, 1))) return 'Je opslag is te klein hiervoor: bouw of verbeter een opslagplaats.';
@@ -1223,7 +1255,7 @@ export function doBuild(s, type, x, y, now, speed) {
   pay(s.res, levelCost(type, 1));
   const b = { id: s.nextId++, type, x, y, level: 0 };
   s.buildings.push(b);
-  s.builds.push({ bid: b.id, to: 1, start: now, end: now + levelTime(type, 1, speed) });
+  s.builds.push({ bid: b.id, to: 1, start: now, end: now + buildTime(s, type, 1, speed) });
   return b;
 }
 
@@ -1234,7 +1266,7 @@ export function checkUpgrade(s, bid) {
   if (s.builds.some((j) => j.bid === bid)) return 'Er wordt al aan gewerkt.';
   if (b.level >= def.maxLevel) return 'Maximaal niveau bereikt.';
   const to = b.level + 1;
-  if (age(s) < levelAge(b.type, to)) return `Vereist het ${['', 'eerste', 'tweede', 'derde', 'vierde'][levelAge(b.type, to)]} tijdperk.`;
+  if (age(s) < levelAge(b.type, to)) return needAge(levelAge(b.type, to));
   if (b.type === 'tc' && Object.keys(s.queues).includes('tc')) return 'Wacht tot de training in het stadscentrum klaar is.';
   if (s.builds.length >= maxBuilds(s)) return 'Al je bouwers zijn bezig.';
   const cost = levelCost(b.type, to);
@@ -1254,7 +1286,7 @@ export function doUpgrade(s, bid, now, speed) {
   const b = s.buildings.find((x) => x.id === bid);
   const to = b.level + 1;
   pay(s.res, levelCost(b.type, to));
-  s.builds.push({ bid, to, start: now, end: now + levelTime(b.type, to, speed) });
+  s.builds.push({ bid, to, start: now, end: now + buildTime(s, b.type, to, speed) });
 }
 
 // ---------- afbreken ----------
@@ -1265,6 +1297,7 @@ export function checkDemolish(s, bid) {
   if (b.type === 'tc') return 'Je stadscentrum kan je niet afbreken.';
   if (b.type === 'wall') return 'Muren breek je stuk per stuk af: tik op een muurstuk.';
   if ((s.queues[b.type] || []).length) return 'Er wordt nog getraind in dit gebouw. Wacht tot dat klaar is.';
+  if (b.type === 'academy' && s.research) return 'Er loopt nog een onderzoek. Wacht tot dat klaar is.';
   return null;
 }
 
@@ -1295,7 +1328,16 @@ export function doDemolish(s, bid) {
   return refund;
 }
 
-export function checkTrain(s, unit, n, awayPop = 0) {
+// edelmannen die je hebt: thuis, in opleiding, in je gebied en (via awayNobles) onderweg of elders
+export function noblesOwned(s, awayNobles = 0) {
+  let n = (s.units.noble || 0) + awayNobles;
+  for (const it of s.queues.court || []) n += it.n - it.done;
+  for (const g of s.field || []) n += g.units.noble || 0;
+  return n;
+}
+export const noblesMax = (s) => bLevel(s, 'court');
+
+export function checkTrain(s, unit, n, awayPop = 0, awayNobles = 0) {
   const u = UNITS[unit];
   if (!u || u.wild || !u.building) return 'Onbekende eenheid.';
   if (u.civ && u.civ !== s.civ) return 'Dit is een eenheid van een ander volk.';
@@ -1306,13 +1348,18 @@ export function checkTrain(s, unit, n, awayPop = 0) {
   if (lvl < u.bl) return `Vereist ${BUILDINGS[u.building].name} niveau ${u.bl}.`;
   if (unit === 'villager' && s.builds.some((j) => j.bid === 1)) return 'Het stadscentrum wordt verbeterd.';
   if ((s.queues[u.queue || u.building] || []).length >= 8) return 'De wachtrij is vol.';
+  if (u.noble) {
+    if ((s.queues.court || []).length) return 'Er wordt al een edelman opgeleid.';
+    if (n > 1) return 'Je leidt één edelman tegelijk op.';
+    if (noblesOwned(s, awayNobles) + n > noblesMax(s)) return `Je mag ${noblesMax(s)} edelman${noblesMax(s) > 1 ? 'nen' : ''} hebben: verbeter je Adelshof.`;
+  }
   if (homePop(s) + awayPop + n * u.pop > popCap(s)) return 'Niet genoeg bevolkingsruimte. Bouw huizen!';
   if (!canAfford(s.res, u.cost, n)) return 'Niet genoeg grondstoffen.';
   return null;
 }
 
-export function doTrain(s, unit, n, now, speed, awayPop = 0) {
-  const err = checkTrain(s, unit, n, awayPop);
+export function doTrain(s, unit, n, now, speed, awayPop = 0, awayNobles = 0) {
+  const err = checkTrain(s, unit, n, awayPop, awayNobles);
   if (err) throw new GameError(err);
   const u = UNITS[unit];
   pay(s.res, u.cost, n);
@@ -1370,8 +1417,46 @@ export function addUnits(s, units) {
   for (const k of Object.keys(units || {})) if (units[k] > 0) s.units[k] = (s.units[k] || 0) + units[k];
 }
 
+// ---------- Academie: onderzoek ----------
+
+export const techDone = (s, id) => !!(s.tech && s.tech[id]);
+
+export function checkResearch(s, id) {
+  const T = TECHS[id];
+  if (!T) return 'Onbekend onderzoek.';
+  if (techDone(s, id)) return 'Dit heb je al onderzocht.';
+  const L = bLevel(s, 'academy');
+  if (!L) return 'Bouw eerst een Academie.';
+  if (s.research) return 'Er loopt al een onderzoek.';
+  if (s.builds.some((j) => s.buildings.find((b) => b.id === j.bid && b.type === 'academy'))) return 'De Academie wordt verbouwd.';
+  if (L < T.row) return `Vereist Academie niveau ${T.row} (${AGES[levelAge('academy', T.row)].name}).`;
+  if (T.row > 1) {
+    const prev = TECH_IDS.find((k) => TECHS[k].line === T.line && TECHS[k].row === T.row - 1);
+    if (!techDone(s, prev)) return `Onderzoek eerst ${TECHS[prev].name}.`;
+  }
+  if (tooBig(s, T.cost)) return 'Je opslag is te klein hiervoor: bouw of verbeter een opslagplaats.';
+  if (!canAfford(s.res, T.cost)) return 'Niet genoeg grondstoffen.';
+  return null;
+}
+
+export const researchTime = (id, speed = 1) => Math.max(5000, Math.round((TECHS[id].time * 1000) / speed));
+
+export function doResearch(s, id, now, speed) {
+  const err = checkResearch(s, id);
+  if (err) throw new GameError(err);
+  pay(s.res, TECHS[id].cost);
+  s.research = { id, start: now, end: now + researchTime(id, speed) };
+}
+
+function finishResearch(s) {
+  if (!s.tech) s.tech = {};
+  s.tech[s.research.id] = 1;
+  s.research = null;
+}
+
 export function townScore(s) {
   let pts = 10;
+  for (const id of Object.keys(s.tech || {})) if (TECHS[id]) pts += costValue(TECHS[id].cost) / 50;
   for (const b of s.buildings) {
     for (let L = 1; L <= b.level; L++) {
       if (b.type === 'tc') { if (L >= 2) pts += costValue(AGE_UP[L].cost) / 50; }
@@ -1391,5 +1476,8 @@ export function publicSummary(s) {
     wall: bLevel(s, 'wall'),
     monument: bLevel(s, 'monument'),
     score: townScore(s),
+    loyalty: Math.floor(loyalty(s)),
+    shield: s.loyShield && s.loyShield > s.t ? s.loyShield : 0,
+    vassal: isVassal(s) ? { lord: s.vas.lord, lname: s.vas.lname, ltown: s.vas.ltown, until: s.vas.until } : null,
   };
 }

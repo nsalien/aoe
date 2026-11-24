@@ -40,6 +40,20 @@ Daarom:
 ## Waar staat wat
 
 - `public/shared/rules.js` — **alle** spelregels en balans (kosten, tijden, troepen, kampen). Gedeeld door server en browser.
+  **5 tijdperken** (`AGES`, `MAX_AGE`): niveau N van een gebouw vraagt tijdperk N (`levelAge`, of `levelAges` per gebouw).
+  Nieuwe gebouwen: molen en gildehuis (`boost` = productiebonus), bouwloods (`builders`, `buildSpeed` → `maxBuilds`/`buildTime`
+  in `sim.js`; gebruik altijd `buildTime(s, ...)`, niet `levelTime`, voor bouwen), Academie (`research`), Adelshof (edelman),
+  kathedraal (`loyalty`, `score`). **Onderzoek**: `TECHS` (4 soorten × 3 rijen, `techAt`, `techTier`), in de stad `s.tech` en
+  `s.research` (`doResearch`/`checkResearch`, klaar in `advance()`); in de automatische slag via `auto` → `techMods` (`battle.js`:
+  `attTech`/`defTech`), in de live slag via `st.tk` en `TK()` (`fieldbattle.js`; schildmuur, vuurpijlen, taxusboog, pijlenregen,
+  hoefijzers `reg.sp`, lansen, flankrit, krijgsdrill `moLoss`, strijdkreet, kokende pek `pourPitch` → `g.pt`, torenkruisbogen,
+  ijzerbeslag). Hoefijzers versnellen ook marsen (`slowestSpeed(units, tech)`).
+- **Edelmannen en vazallen** (`functions/lib/vassal.js`, tabel `vassals`, migratie `0007`): trouw `s.loy` (ontbreekt = 100,
+  herstelt in `accrue`, niet als vazal), `LOYALTY`/`VASSAL` in `rules.js`. `attackTown` roept `applyNobles` op (−25 per
+  levende edelman, `nobleBlock`: al vazal, beschermd `s.loyShield`, < 45% van je punten, max. 2 vazallen); bij 0 `s.vas` +
+  rij in `vassals`. `processVassals` (in `processDue`, ≤ 2 per verzoek) stuurt schatting (`kind = 'tribute'`) en zet vazallen
+  na 3 dagen vrij; `liberateByAttack` na een gewonnen aanval op de heer door zijn clan; `/vassal/ransom`. Heer en vazal
+  vallen elkaar niet aan maar mogen elkaar helpen (`relation` in `/march`). Ranglijst: `vassalShare` (20% van de punten).
 - `public/shared/sim.js` — simulatie van één stad + acties (bouwen, trainen, vondsten oogsten, …). Vondsten verschijnen
   deterministisch in `advance()` (zelfde uitkomst in browser en server). `battle.js` — gevechten. `worldgen.js` — kaart uit seed.
 - `public/shared/territory.js` — het eigen gebied rond een stad (bomen, meren, bronnen, everzwijnen, barbarenkamp), puur uit
@@ -70,16 +84,43 @@ Daarom:
   `inZone`, knop Start = `{ready}`), daarna de slag (vaste tikken van 100 ms, deterministisch, geen Math.random/hypot).
   De aanvaller komt uit de richting van zijn stad (`dir`); de verdediger kan door zijn poorten en zijn voetvolk/schutters op de muur
   (`p1 === 3`). Wie niet zelf bestuurt, wordt door `aiDefend`/`aiAttack` geleid (schutters op de muur aan de kant van de aanval,
-  voetvolk achter de bedreigde poort; rammen op de poort). Winnen: alle verdedigers weg, of het plein (`plaza`) `FB.capMs` houden.
+  voetvolk achter de bedreigde poort; rammen op de poort). Winnen: alle verdedigers weg of op de vlucht, of het plein (`plaza`) `FB.capMs` houden.
+  **Regimenten zoals Rome: Total War** (`st.regs`, soldaat → `u.sq` = regiment-id, `regOf`): per soort hooguit `FB.squad` figuren.
+  Een regiment heeft een formatie (`FORMS`: linie, blok, wig, los, kring; `slotOffsets` enkel met + en ×, geen goniometrie), een richting
+  (`fx, fy`) en een vaandel (`x, y`) dat één route volgt (`regMove`, `advanceAnchor`, wacht op wie achterop raakt); elke soldaat loopt
+  naar zijn plaats rond het vaandel (`oa, ob`) en staat daarna op zijn thuisplek (`hx, hy`, altijd aan dezelfde kant van de muur: `sideAt`).
+  Toestanden: `hold`, `move`, `attack`/`charge` (`eng` = in gevecht), `wall`, `rout`. Groepen stellen zich op in slagorde (`groupPlan`),
+  een getrokken lijn geeft richting en breedte (`fx, fy, w` → `fitWidth`). Schade: formatie, flank/rug en stormloop (`u.mv`) in `damage()`.
+  Moed (`r.mo`): verliezen en flankaanvallen kosten moed, onder `FB.rout` vlucht het regiment naar `rallyPoint` en hergroepeert het na rust.
+  Bevelen gelden voor het hele regiment van de meegestuurde soldaten; vluchtende regimenten luisteren niet.
   Bevelen gaan via `/battle/order` met de tik `at` in een wachtrij (`queueOrder`, `st.q`); de server rekent `FB.delay` achter op de
   klok zodat ze op dezelfde tik uitgevoerd worden als in de browser. De browser (`battleview.js` + `siegeview.js`, een `TownView`
-  met `battleMode`) peilt `/battle?id=` elke `FB.pollMs` (0,6 s), rekent zelf verder en laat verschillen bijglijden (max. 2,5 tegels/s).
+  met `battleMode`) peilt `/battle?id=&have=t0` elke `FB.pollMs` (0,6 s; met `have` laat de server de vaste delen `grid`/`ins`/`meta`
+  weg), rekent zelf verder en laat verschillen bijglijden (max. 2,5 tegels/s). Kiezen gebeurt per regiment (kaartje, vaandel of soldaat),
+  rechts slepen (of de knop Lijn op een gsm) trekt een lijn (`cam.onRightDrag` / `cam.lineMode` in `iso.js`). Verhoog `FB.v` als de
+  toestand van een slag verandert: lopende slagen van een oudere versie worden dan automatisch afgerond.
   Een bevel gaat `FB.lead` tikken na de tik in, zodat de tegenstander het meestal al kent. Aanraakscherm: met troepen gekozen is
   een tik altijd een bevel (andere troep kiezen = kaartje of dubbeltik); muis: links klikken kiest, rechts klikken = bevel. De server rekent per verzoek
   hooguit `FB.maxTicksPerCall` tikken. Een slag waar niemand meer naar kijkt (`FB.staleMs`) rondt `processBattles()` automatisch af.
   Het einde (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override` (zelfde buit, rapporten en punten).
   **Oefenslag** (`/battle/practice`, `startPractice`, `target_kind = 'practice'`): meteen 30 tegen 30 tegen de computer, in een
   ommuurd oefendorp of in je eigen stad; `finishBattle` toont enkel de uitslag (geen verliezen, buit of rapport).
+- **Computerspelers (bots)**: gewone spelers met `players.bot = 1` en een eigen stad, in eigen clans (teams met enkel bots;
+  `/register` zet een mens nooit in een botclan). Aantal en niveau staan in `world.bots` / `world.bot_level` (beheer).
+  Geen achtergrondtaak (de cron-worker draait niet zonder tokenrecht): na een gewoon verzoek komt telkens één bot aan de beurt
+  (`botTick` in `functions/lib/bots.js`, via `waitUntil`, enkel als het verzoek ≤ 18 query's gebruikte; `players.bot_next` + index).
+  Een bot haalt gemiste tijd in stappen in (30–90 min, hooguit 3 per beurt) met telkens een beslissing van het brein
+  (`functions/lib/botbrain.js`, puur, gebruikt de gewone acties uit `sim.js`: dorpelingen, huizen, werkplekken, tijdperken,
+  muurring op ring 1 met 4 poorten, torens, leger). Pas als hij bij is, beslist hij over zijn leger (`military`): versterking naar
+  een clanlid dat aangevallen wordt (en terughalen), karavanen naar een clanlid dat spaart, spelers aanvallen na hun vrede als
+  `resolveBattle` voorspelt dat hij wint (gezamenlijk doel per clan in `config` `clan:<team>`, wachttijd per doelwit voor alle bots
+  `prey:<stad>`), anders roverskampen. Zijn geheugen staat in `towns.state.bot`. `ensureBots` maakt/verwijdert bots (± om de 10 min).
+  **Balans met de echte spelers**: elke bot heeft een sterkte (`bot.tier`: zwak, gemiddeld, sterk; vaste mix `TIER_ORDER`, ook binnen
+  een clan) en een doelscore (`botTarget`) t.o.v. de scores van de actieve echte spelers (`humanRef` → `world.bot_ref`, om de 10 min):
+  zwak ±70% van de mediaan, gemiddeld de mediaan, sterk minstens de beste speler, maal het niveau (0,8 / 1 / 1,2). Boven zijn doel
+  rust een bot (bouwt niet verder, ook geen nieuw tijdperk dat hem ver boven zijn doel brengt). Hij valt geen stad aan met minder
+  dan 45% van zijn eigen score, tenzij die hem de laatste dag aanviel (`bot.foe`). Bots van voor de balans (`bot.v` ≠ 2) die meer
+  dan 1,5× hun doel hadden, begonnen opnieuw.
 - Meldingen op je gsm (Web Push, `functions/lib/push.js`, zonder bibliotheek): VAPID-sleutels worden de eerste keer gemaakt en
   in de tabel `config` bewaard; inschrijvingen in `push_subs` (enkel echte meldingsdiensten, `validPushEndpoint`).
   `notifyDue()` stuurt ±2 min voor een aanval aankomt een melding met geluid (aanvaller + verdediger) en ±1 min vooraf een stille
@@ -94,6 +135,9 @@ Daarom:
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.
 - `public/js/art.js` — procedurele tekeningen (gebouwen, mensen, bomen; geen afbeeldingsbestanden).
+- `public/js/troops.js` — uitzicht van de soldaten (`soldierOpts`, `lookOf`): uitrusting volgens de smidse (`gear`, `plate`)
+  en details van het onderzoek (`kit`: S schild, P pluim, G goud, F vuurpijlen, L lange boog, Q twee pijlkokers, B kleed,
+  N lans, H paardenpluim). Nieuwe opties ook toevoegen aan `FIG_KEYS` in `sprite3d.js` en aan de sleutels in `figures.js`.
 - **3D-look** (zoals vooraf gerenderde sprites in klassieke RTS-spellen): `render3d.js` is een kleine straalvolger
   (vormen: convexe veelvlakken, cilinders, kegels, ellipsoïden, capsules; procedurele materialen; zon, slagschaduw,
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
@@ -134,5 +178,5 @@ npm run dev                      # http://localhost:8788  (beheer: /admin.html)
 npm test
 ```
 
-Maak via `/admin.html` een testwereld met bv. snelheid 100 en 0,05 dagen vrede.
+Maak via `/admin.html` een testwereld met bv. snelheid 100 en 0,1 uur vrede per speler.
 Playwright en Chromium zijn in cloudsessies voorgeïnstalleerd: maak screenshots om grafische wijzigingen te controleren.

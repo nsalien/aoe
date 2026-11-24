@@ -204,8 +204,16 @@ function head(c, o, hx, hy) {
     c.beginPath(); c.moveTo(hx + 2.4, hy - 1.6); c.quadraticCurveTo(hx + 4.4, hy - 3, hx + 3.4, hy - 5.4); c.stroke();
     return;
   }
+  if (o.look === 'noble') { // edelman: gouden kroon
+    c.fillStyle = hair; c.beginPath(); c.arc(hx - 0.5, hy - 0.4, 2.8, Math.PI, 0); c.fill();
+    c.fillStyle = '#e0b23a'; c.fillRect(hx - 2.7, hy - 2.7, 5.4, 1.2);
+    c.beginPath(); for (const px of [-2.4, 0, 2.4]) { c.moveTo(px + hx - 0.9, hy - 2.6); c.lineTo(px + hx, hy - 4.6); c.lineTo(px + hx + 0.9, hy - 2.6); } c.fill();
+    disc(c, hx, hy - 2.1, 0.45, '#c0392b');
+    return;
+  }
   if (o.helmet) {
-    if (o.armor && o.team) { // pluim in teamkleur
+    if (o.team && (o.armor || (o.kit && o.kit.includes('P')))) { // pluim in teamkleur (krijgsdrill: een grotere, met goud)
+      if (o.kit && o.kit.includes('P')) { c.fillStyle = '#e0b23a'; c.beginPath(); c.moveTo(hx - 0.2, hy - 3.6); c.quadraticCurveTo(hx - 3.4, hy - 8, hx - 6.4, hy - 4.2); c.quadraticCurveTo(hx - 3.4, hy - 5.6, hx - 1.2, hy - 2.6); c.closePath(); c.fill(); }
       c.fillStyle = shade(o.team, -0.15);
       c.beginPath(); c.moveTo(hx - 0.2, hy - 3.2); c.quadraticCurveTo(hx - 2.6, hy - 6.2, hx - 5.2, hy - 3.6); c.quadraticCurveTo(hx - 3, hy - 4.2, hx - 1.2, hy - 2.4); c.closePath(); c.fill();
       c.fillStyle = o.team; c.beginPath(); c.moveTo(hx, hy - 3.2); c.quadraticCurveTo(hx - 2.2, hy - 5.8, hx - 4.6, hy - 4); c.quadraticCurveTo(hx - 2.4, hy - 4.2, hx - 0.8, hy - 2.6); c.closePath(); c.fill();
@@ -252,10 +260,17 @@ function drawPerson(c, o, mode, f) {
 
   // pijlkoker op de rug
   if (o.weapon === 'bow') {
-    c.save(); c.translate(-2.3, ty + 1.5); c.rotate(-0.35);
-    c.fillStyle = '#6b4523'; c.fillRect(-0.9, -1, 1.8, 6);
-    for (const dx of [-0.5, 0.1, 0.6]) { line(c, dx, -1, dx, -3, '#d8cfb8', 0.3); c.fillStyle = '#d24a3a'; c.fillRect(dx - 0.3, -3.6, 0.6, 1); }
-    c.restore();
+    const kit = o.kit || '';
+    for (const q of kit.includes('Q') ? [1, 0] : [0]) {
+      c.save(); c.translate(-2.3 - q * 1.6, ty + 1.5 + q * 0.6); c.rotate(-0.35 - q * 0.25);
+      c.fillStyle = q ? '#5a3a1e' : '#6b4523'; c.fillRect(-0.9, -1, 1.8, 6);
+      for (const dx of [-0.5, 0.1, 0.6]) {
+        line(c, dx, -1, dx, -3, '#d8cfb8', 0.3);
+        if (kit.includes('F')) { c.fillStyle = 'rgba(255,150,40,0.45)'; c.beginPath(); c.arc(dx, -3.6, 1, 0, TAU); c.fill(); c.fillStyle = '#ffb347'; c.fillRect(dx - 0.3, -4, 0.6, 1.1); }
+        else { c.fillStyle = '#d24a3a'; c.fillRect(dx - 0.3, -3.6, 0.6, 1); }
+      }
+      c.restore();
+    }
   }
 
   // benen: achterste donkerder, voeten met laarsjes
@@ -315,7 +330,11 @@ function drawPerson(c, o, mode, f) {
   };
   torso(); c.fillStyle = body; c.fill();
   c.save(); torso(); c.clip();
-  if (o.armor) {
+  if (o.armor && o.plate) { // plaatharnas: glanzend staal met banden
+    c.fillStyle = '#d3d9e1'; c.fillRect(-3.5, ty - 1, 7, 6.6);
+    c.fillStyle = 'rgba(255,255,255,0.55)'; c.fillRect(-2.6, ty - 0.6, 1.6, 5.6);
+    c.fillStyle = 'rgba(70,78,90,0.45)'; for (let yy = ty + 1.2; yy < ty + 5.5; yy += 1.4) c.fillRect(-3.5, yy, 7, 0.35);
+  } else if (o.armor) {
     c.fillStyle = 'rgba(205,212,222,0.55)'; c.fillRect(-3.5, ty - 1, 7, 6.2);
     c.fillStyle = 'rgba(80,90,100,0.35)';
     for (let yy = ty; yy < ty + 5; yy += 1) for (let xx = -3 + ((yy - ty) % 2) * 0.5; xx < 3.4; xx += 1) c.fillRect(xx, yy, 0.45, 0.45);
@@ -335,10 +354,16 @@ function drawPerson(c, o, mode, f) {
   if (o.weapon && o.weapon !== 'bow') { c.fillStyle = '#5a3d22'; c.beginPath(); c.ellipse(2.4, hipY + 0.9, 0.85, 1.05, 0.2, 0, TAU); c.fill(); }
 
   // schild (vooraan, aan de linkerkant)
-  if (o.weapon === 'spear') roundShield(c, -2.5, ty + 3.6, 2.9, o.team || '#8a6238', !o.team);
+  // schildmuur: een groter schild met ijzeren rand; op het hoogste niveau een gouden rand
+  const kit = o.kit || '';
+  if (o.weapon === 'spear' && kit.includes('S')) { c.save(); c.translate(-2.6, ty + 3.4); c.scale(1.18, 1.12); kiteShield(c, 0, 0, o.team || '#7a8696'); c.restore(); }
+  else if (o.weapon === 'spear') roundShield(c, -2.5, ty + 3.6, 2.9, o.team || '#8a6238', !o.team);
   if (o.weapon === 'sword') {
     if (o.barb) roundShield(c, -2.6, ty + 3.4, 2.8, '#8a6238', true);
-    else kiteShield(c, -2.6, ty + 3.4, o.team || '#7a8696');
+    else { c.save(); c.translate(-2.6, ty + 3.4); if (kit.includes('S')) c.scale(1.15, 1.12); kiteShield(c, 0, 0, o.team || '#7a8696'); c.restore(); }
+  }
+  if (kit.includes('G') && (o.weapon === 'spear' || o.weapon === 'sword') && !o.barb) {
+    c.strokeStyle = '#e0b23a'; c.lineWidth = 0.6; c.beginPath(); c.ellipse(-2.6, ty + 3.6, 2.9, 4.4, 0, 0, TAU); c.stroke();
   }
 
   // nek en hoofd
@@ -372,9 +397,10 @@ function drawPerson(c, o, mode, f) {
     disc(c, ex, ey, 0.8, skin);
   } else if (o.weapon === 'bow') {
     const [ex, ey] = arm(c, 2.0, ty + 1.1, 1.35, sleeve, skin, 4.1);
-    c.strokeStyle = '#7a5129'; c.lineWidth = 0.85;
-    c.beginPath(); c.arc(ex - 2.2, ey, 4.6, -0.95, 0.95); c.stroke();
-    const bx0 = ex - 2.2 + Math.cos(-0.95) * 4.6; const by0 = ey + Math.sin(-0.95) * 4.6;
+    const br = (o.kit || '').includes('L') ? 6.4 : 4.6; // taxusboog: langer
+    c.strokeStyle = (o.kit || '').includes('L') ? '#5a3a1e' : '#7a5129'; c.lineWidth = 0.85;
+    c.beginPath(); c.arc(ex - 2.2, ey, br, -0.95, 0.95); c.stroke();
+    const bx0 = ex - 2.2 + Math.cos(-0.95) * br; const by0 = ey + Math.sin(-0.95) * br;
     line(c, bx0, by0, bx0, ey + (ey - by0), 'rgba(245,238,215,0.9)', 0.28);
     disc(c, ex, ey, 0.8, skin);
   } else if (o.weapon === 'tool') {
@@ -398,7 +424,7 @@ function drawPerson(c, o, mode, f) {
   }
   // schouderstuk bij een harnas
   if (o.armor) {
-    disc(c, 2.0, ty + 0.9, 1.55, '#8e98a4');
+    disc(c, 2.0, ty + 0.9, o.plate ? 1.9 : 1.55, o.plate ? '#c3cad3' : '#8e98a4');
     c.fillStyle = 'rgba(255,255,255,0.55)'; c.beginPath(); c.ellipse(1.6, ty + 0.4, 0.8, 0.45, -0.4, 0, TAU); c.fill();
     c.strokeStyle = 'rgba(40,45,55,0.6)'; c.lineWidth = 0.3; c.beginPath(); c.arc(2.0, ty + 0.9, 1.0, 0.2, Math.PI - 0.2); c.stroke();
   }
@@ -416,7 +442,7 @@ export function person(ctx, x, y, o = {}) {
   const f3 = S3.getFig('p', o, mode, f);
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
-  const key = `p|${mode}${f}|${R}|${o.body || ''}|${o.leg || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.tool || ''}|${o.carry || ''}|${o.team || ''}|${o.barb ? 1 : 0}`;
+  const key = `p|${mode}${f}|${R}|${o.body || ''}|${o.leg || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.tool || ''}|${o.carry || ''}|${o.team || ''}|${o.barb ? 1 : 0}|${o.plate ? 1 : 0}|${o.kit || ''}|${o.look || ''}`;
   blit(ctx, sprite(key, R, P_BOX, (c) => drawPerson(c, o, mode, f), [-4.6, 4.4]), P_BOX, x, y, s);
 }
 
@@ -477,6 +503,13 @@ function drawHorse(c, o, mode, f) {
     c.fillStyle = 'rgba(255,245,210,0.8)'; c.beginPath(); c.arc(-1, by + 2.8, 1.1, 0, TAU); c.fill();
     c.fillStyle = o.team; c.beginPath(); c.arc(-1, by + 2.8, 0.6, 0, TAU); c.fill();
   }
+  // hoefijzers: een kleed in teamkleur; flankrit: een pluim op het hoofd
+  const hk = o.kit || '';
+  if (hk.includes('B') && o.team && !o.armor) {
+    c.fillStyle = shade(o.team, -0.1);
+    c.beginPath(); c.moveTo(-5.4, by - 2.4); c.lineTo(3.4, by - 2.4); c.lineTo(3.8, by + 3.2); c.quadraticCurveTo(-0.8, by + 4.2, -5.8, by + 3.2); c.closePath(); c.fill();
+    c.strokeStyle = '#e0b23a'; c.lineWidth = 0.4; c.beginPath(); c.moveTo(-5.8, by + 3.1); c.quadraticCurveTo(-0.8, by + 4.1, 3.8, by + 3.1); c.stroke();
+  }
   // hals en hoofd
   c.fillStyle = coat;
   c.beginPath(); c.moveTo(2.8, by - 2.4); c.quadraticCurveTo(5.2, by - 7.4, 7.2, by - 9.4); c.lineTo(10.2, by - 8.2); c.quadraticCurveTo(8.4, by - 4.4, 8.4, by - 0.4); c.closePath(); c.fill();
@@ -487,6 +520,7 @@ function drawHorse(c, o, mode, f) {
   if (o.armor) { c.fillStyle = IRON; c.beginPath(); c.ellipse(1.3, -0.3, 2.5, 1.35, 0, 0, TAU); c.fill(); }
   c.restore();
   c.fillStyle = dark; c.beginPath(); c.moveTo(8.5, by - 10.2); c.lineTo(8.9, by - 12.3); c.lineTo(9.8, by - 10); c.closePath(); c.fill();
+  if (hk.includes('H') && o.team) { c.fillStyle = o.team; c.beginPath(); c.moveTo(8.8, by - 10.4); c.quadraticCurveTo(7.2, by - 15, 5.2, by - 14.2); c.quadraticCurveTo(7, by - 13, 8.2, by - 10.2); c.fill(); }
   disc(c, 10.5, by - 8.9, 0.42, '#140d08');
   disc(c, 10.35, by - 9.05, 0.14, 'rgba(255,255,255,0.8)');
   // hoofdstel en teugels
@@ -513,7 +547,12 @@ function drawHorse(c, o, mode, f) {
   line(c, 0.2, sy + 0.4, 1.6, sy + 3.6, shade(body, -0.42), 1.7);
   c.fillStyle = '#3a2a1c'; c.beginPath(); c.ellipse(2.1, sy + 4.1, 1.2, 0.65, 0, 0, TAU); c.fill();
   const ty = sy - 5.6;
-  if (o.weapon === 'spear' && o.team) roundShield(c, -2.3, ty + 3.4, 2.6, o.team);
+  if ((o.weapon === 'spear' || o.weapon === 'lance') && o.team) roundShield(c, -2.3, ty + 3.4, 2.6, o.team);
+  if (o.look === 'noble') { // mantel van de edelman
+    c.fillStyle = shade(o.body || '#5b2a7a', -0.2);
+    c.beginPath(); c.moveTo(-1.6, ty - 0.2); c.quadraticCurveTo(-5.2, ty + 3, -6.4, sy + 3.4); c.lineTo(-2.2, sy + 2.6); c.closePath(); c.fill();
+    c.strokeStyle = '#e0b23a'; c.lineWidth = 0.4; c.beginPath(); c.moveTo(-6.4, sy + 3.4); c.lineTo(-2.2, sy + 2.6); c.stroke();
+  }
   const torso = () => {
     c.beginPath();
     c.moveTo(-2.4, ty + 1.2); c.quadraticCurveTo(-2.5, ty - 0.3, -1.1, ty - 0.45); c.lineTo(1.4, ty - 0.45);
@@ -521,8 +560,9 @@ function drawHorse(c, o, mode, f) {
   };
   torso(); c.fillStyle = body; c.fill();
   c.save(); torso(); c.clip();
-  if (o.armor) { c.fillStyle = 'rgba(205,212,222,0.55)'; c.fillRect(-3, ty - 1, 6, 7); }
+  if (o.armor) { c.fillStyle = o.plate ? '#d3d9e1' : 'rgba(205,212,222,0.55)'; c.fillRect(-3, ty - 1, 6, 7); }
   if (o.team && !o.armor) { c.fillStyle = o.team; c.fillRect(-1.1, ty - 0.2, 2.2, 6); }
+  if (o.look === 'noble') { c.fillStyle = '#e0b23a'; c.fillRect(-2.6, ty + 2.2, 5.4, 0.6); }
   c.fillStyle = 'rgba(0,0,0,0.2)'; c.fillRect(0.9, ty - 1, 3, 8);
   c.restore();
   c.fillStyle = shade(skin, -0.12); c.fillRect(-0.6, ty - 1.5, 1.4, 1.3);
@@ -535,6 +575,12 @@ function drawHorse(c, o, mode, f) {
   if (o.weapon === 'bow') {
     const [ex, ey] = arm(c, 1.9, ty + 1, 1.35, sleeve, skin, 4);
     c.strokeStyle = '#3a2a1a'; c.lineWidth = 0.85; c.beginPath(); c.arc(ex - 2.6, ey - 1, 6.4, -1.05, 1.05); c.stroke();
+    disc(c, ex, ey, 0.75, skin);
+  } else if (o.weapon === 'lance') { // lans met wimpel, schuin naar voren
+    const [ex, ey] = arm(c, 1.9, ty + 1, 1.2, sleeve, skin, 3.8);
+    line(c, ex - 4.5, ey + 2.2, ex + 13, ey - 9.5, '#7a5129', 1.0);
+    c.fillStyle = '#d5dbe2'; c.beginPath(); c.moveTo(ex + 15.2, ey - 11); c.lineTo(ex + 12.4, ey - 9.6); c.lineTo(ex + 13.4, ey - 8.6); c.closePath(); c.fill();
+    if (o.team) { c.fillStyle = o.team; c.beginPath(); c.moveTo(ex + 10.6, ey - 8.3); c.lineTo(ex + 14.6, ey - 6.6); c.lineTo(ex + 9.8, ey - 6.9); c.closePath(); c.fill(); }
     disc(c, ex, ey, 0.75, skin);
   } else if (o.weapon === 'spear') {
     const [ex, ey] = arm(c, 1.9, ty + 1, 0.9, sleeve, skin, 3.8);
@@ -558,7 +604,7 @@ export function horseman(ctx, x, y, o = {}) {
   const f3 = S3.getFig('h', o, mode, f);
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
-  const key = `h|${mode}${f}|${R}|${o.body || ''}|${o.horse || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.team || ''}|${o.look || ''}`;
+  const key = `h|${mode}${f}|${R}|${o.body || ''}|${o.horse || ''}|${o.armor ? 1 : 0}|${o.skin || 0}|${o.helmet || ''}|${o.hat || ''}|${o.weapon || ''}|${o.team || ''}|${o.look || ''}|${o.plate ? 1 : 0}|${o.kit || ''}`;
   blit(ctx, sprite(key, R, H_BOX, (c) => drawHorse(c, o, mode, f), [-9, 11]), H_BOX, x, y, s);
 }
 

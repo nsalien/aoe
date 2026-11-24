@@ -3,14 +3,15 @@ import * as A from './art.js';
 import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
-  LAND, landCost, WALL_TILE, TOWER, GATE,
+  LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
   fmtDuration, campUnits, campLoot,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
-  checkDemolish, demolishRefund, checkPlaceGate,
+  checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
+  isVassal, noblesOwned, noblesMax, boost,
 } from '../shared/sim.js';
 import { territory, exHas } from '../shared/territory.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
@@ -109,6 +110,7 @@ export function unitThumb(unit, team = '#3f7fd9') {
     case 'rider': A.horseman(ctx, 20, 40, { s: 1.6, team, thumb: true, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' }); break;
     case 'knight': A.horseman(ctx, 20, 40, { s: 1.6, team, thumb: true, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530' }); break;
     case 'ram': A.ram(ctx, 21, 34, 1.5); break;
+    case 'noble': A.horseman(ctx, 20, 40, { s: 1.6, team, thumb: true, body: '#5b2a7a', look: 'noble', horse: '#efe6d6', kit: 'B' }); break;
     case 'stonethrower': A.stoneThrower(ctx, 22, 38, 1.5); break;
     default:
   }
@@ -129,7 +131,7 @@ export function costHtml(cost, res, mult = 1) {
 
 const timer = (end, start) => `<span class="timer" data-end="${end}"${start ? ` data-start="${start}"` : ''}></span>`;
 const bar = (start, end) => `<div class="bar"><i data-bstart="${start}" data-bend="${end}" style="width:0"></i></div>`;
-const ageWord = (a) => ['', 'eerste', 'tweede', 'derde', 'vierde'][a];
+const ageWord = (a) => ['', 'eerste', 'tweede', 'derde', 'vierde', 'vijfde'][a];
 
 export const capacityOf = (live) => capacity(live);
 
@@ -147,9 +149,15 @@ export function resBarHtml(live, speed, bumps = []) {
     </div>`;
 }
 
-export function phaseHtml(w, now) {
+// '24 uur', '30 min', …
+export function peaceText(ms) {
+  const m = Math.round(ms / 60000);
+  return m >= 60 && m % 60 === 0 ? `${m / 60} uur` : m >= 60 ? `${(m / 60).toFixed(1).replace('.', ',')} uur` : `${m} min`;
+}
+
+export function phaseHtml(w, now, peaceEnd) {
   if (w.phase === 'lobby') return { cls: 'lobby', html: `${icon('hourglass')} Start over <span class="timer" data-end="${w.startAt}"></span>` };
-  if (w.phase === 'prep') return { cls: 'prep', html: `${icon('dove')} Vredestijd · nog <span class="timer" data-end="${w.prepEnd}"></span>` };
+  if (w.phase === 'war' && now < peaceEnd) return { cls: 'prep', html: `${icon('dove')} Vrede · nog <span class="timer" data-end="${peaceEnd}"></span>` };
   if (w.phase === 'war') return { cls: 'war', html: `${icon('swords')} Oorlog! · nog <span class="timer" data-end="${w.warEnd}"></span>` };
   return { cls: 'ended', html: `${icon('flag')} Seizoen voorbij` };
 }
@@ -233,6 +241,7 @@ export function townOverviewHtml(app, live) {
     <div><h2>${esc(d.town.name)}</h2><div class="lvl">${AGES[a].name}${live.civ ? ` · <span class="civ-tag">${civEmblem(live.civ, 14)} ${civName(live.civ)}</span>` : ''}</div>
     <div class="small muted">Positie (${d.town.x}, ${d.town.y}) · <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></div></div></div>`;
 
+  html += loyaltyCardHtml(app, live);
   html += bonusCardHtml(app, live);
   html += `<div class="card"><h3>${icon('people')} Dorpelingen <span class="right">${total + away} totaal · ${idle} vrij${away ? ` · ${away} op pad` : ''}</span></h3>`;
   for (const k of RES) {
@@ -375,7 +384,96 @@ export function unitsText(units) {
 }
 
 function queuesHtml(app, live) {
-  return buildQueueHtml(app, live) + trainQueueHtml(app, live.queues);
+  return buildQueueHtml(app, live) + researchQueueHtml(app, live) + trainQueueHtml(app, live.queues);
+}
+
+function researchQueueHtml(app, live) {
+  const r = live.research;
+  if (!r) return '';
+  return `<div class="card"><h3>${icon('book')} Onderzoek</h3><div class="qitem"><span class="qicon">${icon(LINE_ICON[TECHS[r.id].line])}</span>
+    <div><div class="nm">${TECHS[r.id].name} <span class="muted small">(Academie)</span></div>${bar(r.start, r.end)}</div>${timer(r.end)}</div></div>`;
+}
+
+// ---------- trouw en vazallen ----------
+const loyBar = (v, cls = '') => `<div class="loybar ${cls}" title="Trouw ${Math.floor(v)}/100"><i style="width:${Math.max(0, Math.min(100, v))}%"></i><span>${Math.floor(v)}</span></div>`;
+
+function loyaltyCardHtml(app, live) {
+  const d = app.data;
+  const now = app.now();
+  const v = loyalty(live);
+  const vas = isVassal(live, now) ? live.vas : null;
+  const mine = d.vassals || [];
+  let html = '';
+  if (vas) {
+    const cost = ransomCost(age(live));
+    html += `<div class="card vassal-card"><h3>${icon('crown')} Vazal van ${esc(vas.lname)} <span class="right">nog ${timer(vas.until)}</span></h3>
+      <p class="small" style="margin:0 0 6px">Je stad betaalt schatting: om de ${VASSAL.tributeMs / 3600000} uur vertrekt een karavaan met ${Math.round(VASSAL.tribute * 100)}% van je productie naar ${esc(vas.ltname || vas.lname)}.
+      Je kan je heer niet aanvallen. Vrij komen: wachten, losgeld betalen, of een clanlid dat je heer verslaat.</p>
+      <div class="row small"><span class="grow">Losgeld:</span>${costHtml(cost, live.res)}</div>
+      <div class="actions"><button class="btn primary" data-action="ransom" ${app.canAct && canAfford(live.res, cost) ? '' : 'disabled'}>${icon('scales')} Losgeld betalen</button></div></div>`;
+  } else if (v < LOYALTY.max || (live.loyShield && live.loyShield > now)) {
+    html += `<div class="card"><h3>${icon('crown')} Trouw van je volk</h3>${loyBar(v, v < 50 ? 'low' : '')}
+      <p class="small muted" style="margin:6px 0 0">${v < LOYALTY.max ? `Edelmannen van een vijand hebben je volk opgestookt. De trouw herstelt met ${loyaltyRegen(live)} per uur${bLevel(live, 'cathedral') ? ' (dankzij je kathedraal)' : ''}. Bij 0 word je vazal.` : ''}
+      ${live.loyShield && live.loyShield > now ? `Je bent net bevrijd: nog ${timer(live.loyShield)} beschermd tegen edelmannen.` : ''}</p></div>`;
+  }
+  if (mine.length) {
+    html += `<div class="card"><h3>${icon('crown')} Je vazallen <span class="right">${mine.length}/${VASSAL.maxPerLord}</span></h3>
+      ${mine.map((m) => `<div class="row small"><span class="grow"><b>${esc(m.town)}</b> (${esc(m.player)}) · vrij over ${timer(m.until)}</span>
+        <button class="btn small" data-action="mapTo" data-x="${m.x}" data-y="${m.y}" data-id="${m.townId}">Op kaart</button></div>`).join('')}
+      <p class="small muted" style="margin:6px 0 0">Ze sturen je om de ${VASSAL.tributeMs / 3600000} uur schatting en je krijgt ${Math.round(VASSAL.scoreShare * 100)}% van hun punten.</p></div>`;
+  }
+  return html;
+}
+
+// ---------- Academie ----------
+const LINE_ICON = { inf: 'shield', rng: 'target', cav: 'horse', town: 'castle' };
+
+function academyHtml(app, live, b) {
+  const d = app.data;
+  const L = b.level;
+  let html = `<div class="card"><h3>${icon('book')} Onderzoek <span class="right">${Object.keys(live.tech || {}).length}/${Object.keys(TECHS).length}</span></h3>
+    <p class="small muted" style="margin:0 0 8px">Eén onderzoek tegelijk. Elke rij vraagt een hoger niveau van de Academie; per soort werk je van links naar rechts.
+    Wat je onderzoekt, zie je aan je troepen (en aan de Academie).</p><div class="techgrid">`;
+  for (const line of TECH_LINE_IDS) {
+    html += `<div class="techline"><div class="tl-head">${icon(LINE_ICON[line])} ${TECH_LINES[line].name}</div>`;
+    for (let row = 1; row <= 3; row++) {
+      const id = techAt(line, row);
+      const T = TECHS[id];
+      const done = techDone(live, id);
+      const busy = live.research && live.research.id === id;
+      const err = done || busy ? null : checkResearch(live, id);
+      const locked = !done && !busy && err && !/grondstoffen|loopt al/.test(err);
+      html += `<div class="tech ${done ? 'done' : busy ? 'busy' : locked ? 'locked' : ''}">
+        <div class="tn">${done ? icon('star') : ''}${T.name} <span class="muted small">rij ${row}</span></div>
+        <div class="small">${T.desc}</div>
+        ${done ? '<div class="small ok">Onderzocht</div>' : busy ? `${bar(live.research.start, live.research.end)}<div class="small">klaar over ${timer(live.research.end)}</div>`
+        : `${costHtml(T.cost, live.res)}<div class="small muted">${icon('clock')} ${fmtDuration(researchTime(id, d.world.speed))}</div>
+          ${locked ? `<p class="req">${err}</p>` : `<button class="btn small primary" data-action="research" data-id="${id}" ${!app.canAct || err ? 'disabled' : ''}>Onderzoeken</button>`}`}
+      </div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  if (L < 3) html += `<p class="small muted" style="margin:8px 0 0">Rij ${L + 1} komt vrij met Academie niveau ${L + 1} (${AGES[L + 3].name}).</p>`;
+  return html + '</div>';
+}
+
+// ---------- Adelshof ----------
+function awayNobles(app) {
+  let n = 0;
+  for (const m of app.data.marches || []) if (m.own && m.units) n += m.units.noble || 0;
+  for (const sp of app.data.mySupport || []) n += sp.units.noble || 0;
+  return n;
+}
+
+function courtHtml(app, live, b) {
+  const have = noblesOwned(live, awayNobles(app));
+  return `<div class="card"><dl class="kv"><dt>Edelmannen</dt><dd>${have}/${noblesMax(live)}</dd>
+    <dt>Je vazallen</dt><dd>${(app.data.vassals || []).length}/${VASSAL.maxPerLord}</dd></dl>
+    <p class="small muted" style="margin:6px 0 0">Stuur een edelman mee met een aanval op een speler. Wint je leger en overleeft hij, dan daalt de trouw van die stad met ${LOYALTY.hit}
+    (per edelman). Bij 0 wordt de stad ${VASSAL.ms / 86400000} dagen je <b>vazal</b>: ze stuurt je schatting en je krijgt een deel van haar punten.
+    Niet tegen steden met minder dan ${Math.round(LOYALTY.minScore * 100)}% van jouw punten, en niet tegen een stad die net bevrijd werd.</p></div>`
+    + trainHtml(app, live, b, ['noble']);
 }
 
 function buildQueueHtml(app, live) {
@@ -439,7 +537,7 @@ export function buildingPanelHtml(app, live, b) {
     const err = checkUpgrade(live, b.id);
     const title = b.type === 'tc' ? `Naar het ${AGES[to].name}` : (lvl === 0 ? 'Bouwen' : `Verbeteren naar niveau ${to}`);
     html += `<div class="card"><h3>${icon('up')} ${title}</h3>${costHtml(cost, live.res)}
-      <div class="small muted" style="margin-top:4px">${icon('clock')} ${fmtDuration(levelTime(b.type, to, d.world.speed))}</div>`;
+      <div class="small muted" style="margin-top:4px">${icon('clock')} ${fmtDuration(buildTime(live, b.type, to, d.world.speed))}</div>`;
     if (b.type === 'tc') html += unlocksHtml(to, live.civ);
     if (err && err !== 'Niet genoeg grondstoffen.') html += `<p class="req">${err}</p>`;
     html += `<div class="actions"><button class="btn primary" data-action="upgrade" data-id="${b.id}" ${!canAct || err ? 'disabled' : ''}>${b.type === 'tc' ? 'Nieuw tijdperk' : (lvl === 0 ? 'Bouwen' : 'Verbeteren')}</button></div></div>`;
@@ -516,11 +614,22 @@ function buildingInfo(app, live, b) {
         <div class="actions"><button class="btn" data-action="deselect">Dorpelingen verdelen</button></div></div>`;
     }
     case 'storage': return `<div class="card"><dl class="kv"><dt>Opslag per grondstof</dt><dd>${fmt(capacity(live))}</dd><dt>Verborgen voor plunderaars</dt><dd>${fmt(protectAmount(live))}</dd></dl></div>`;
-    case 'smithy': return `<div class="card"><dl class="kv"><dt>Bonus aanval en verdediging</dt><dd>+${5 * L}%</dd></dl></div>`;
+    case 'smithy': return `<div class="card"><dl class="kv"><dt>Bonus aanval en verdediging</dt><dd>+${5 * L}%</dd>
+      <dt>Uitrusting van je troepen</dt><dd>${['leer en brons', 'ijzer en maliën', 'plaatharnas'][gearOf(L)]}</dd></dl>
+      <p class="small muted" style="margin:6px 0 0">Op niveau 3 krijgen je soldaten ijzeren helmen en maliën, op niveau 5 een glanzend plaatharnas.</p></div>`;
+    case 'mill': return `<div class="card"><dl class="kv"><dt>Extra voedsel</dt><dd>+${5 * L}%</dd></dl></div>`;
+    case 'guild': { const bo = boost(live); return `<div class="card"><dl class="kv"><dt>Extra productie</dt><dd>+${3 * L}% van alles</dd>
+      <dt>In totaal</dt><dd>${RES.map((r) => `${RES_NAMES[r].toLowerCase()} +${Math.round(bo[r] * 100)}%`).join(' · ')}</dd></dl></div>`; }
+    case 'lodge': return `<div class="card"><dl class="kv"><dt>Bouwers</dt><dd>${maxBuilds(live)} (+${BUILDINGS.lodge.builders})</dd><dt>Sneller bouwen</dt><dd>${L * 5}%</dd></dl></div>`;
+    case 'academy': return academyHtml(app, live, b);
+    case 'court': return courtHtml(app, live, b);
+    case 'cathedral': return `<div class="card"><dl class="kv"><dt>Trouw van je volk</dt><dd>${Math.floor(loyalty(live))}/100</dd>
+      <dt>Herstel</dt><dd>${loyaltyRegen(live)} per uur</dd><dt>Punten</dt><dd>+${fmt(600 * L)}</dd></dl></div>`;
     case 'tower': {
-      const n = Math.max(1, L); const nx = Math.min(3, n + 1);
-      const up = L && L < 3 ? ` <span class="muted">→ ${TOWER.dmg[nx]}</span>` : '';
-      const upH = L && L < 3 ? ` <span class="muted">→ ${TOWER.hp[nx]}</span>` : '';
+      const top = TOWER.hp.length - 1;
+      const n = Math.max(1, L); const nx = Math.min(top, n + 1);
+      const up = L && L < top ? ` <span class="muted">→ ${TOWER.dmg[nx]}</span>` : '';
+      const upH = L && L < top ? ` <span class="muted">→ ${TOWER.hp[nx]}</span>` : '';
       return `<div class="card"><dl class="kv"><dt>Schade per pijl</dt><dd>${TOWER.dmg[n]}${up}</dd>
         <dt>Levens</dt><dd>${TOWER.hp[n]}${upH}</dd><dt>Bereik</dt><dd>${TOWER.range} passen</dd>
         <dt>Schiet om de</dt><dd>${TOWER.rate / 1000} s</dd><dt>Verdediging (automatisch)</dt><dd>+${80 * L}</dd></dl>
@@ -559,9 +668,9 @@ function trainHtml(app, live, b, units, title = null, cls = '') {
   let html = `<div class="card ${cls}"><h3>${title || `${icon('target')} Trainen`}</h3>`;
   for (const k of units) {
     const u = UNITS[k];
-    const err = checkTrain(live, k, 1, d.awayPop);
+    const err = checkTrain(live, k, 1, d.awayPop, u.noble ? awayNobles(app) : 0);
     const locked = age(live) < u.age || bLevel(live, u.building) < u.bl;
-    const max = maxTrain(live, k, d.awayPop);
+    const max = u.noble ? (err ? 0 : 1) : maxTrain(live, k, d.awayPop);
     const lvl = u.queue === 'castle' ? b.level - CASTLE_LEVEL + 1 : b.level;
     const t = Math.round((u.time * Math.pow(0.85, Math.max(0, lvl - 1))) / d.world.speed);
     html += `<div class="urow"><img src="${unitThumb(k, d.team.color)}" alt="">
@@ -610,7 +719,7 @@ export function worldPanelHtml(app, sel) {
     const u = campUnits(c.level);
     const loot = campLoot(c.level);
     return `<div class="ph"><div><h2>Roverskamp</h2><div class="lvl">Niveau ${c.level} · positie (${c.x}, ${c.y}) · ${dist.toFixed(1)} tegels</div></div></div>
-      <p class="desc">Rovers plunderen de vallei. Versla ze voor buit en punten — ook tijdens de vredestijd! Na een aanval herstelt het kamp zich na een tijdje.</p>
+      <p class="desc">Rovers plunderen de vallei. Versla ze voor buit en punten — ook tijdens je vrede! Na een aanval herstelt het kamp zich na een tijdje.</p>
       ${targetMarchesHtml(app, 'camp', c.id)}
       ${c.plundered ? `<div class="card"><b>Verlaten.</b> De rovers keren terug over ${timer(c.refreshAt)}.</div>` : ''}
       <div class="card"><h3>Geschatte bezetting (vol kamp)</h3><div class="unitgrid">${Object.keys(u).map((k) => `<div class="ucell"><img src="${unitThumb(k, '#333333')}" alt=""><b>${u[k]}</b>${UNITS[k].name}</div>`).join('')}</div>
@@ -624,30 +733,48 @@ export function worldPanelHtml(app, sel) {
   const ally = t.teamId === d.me.teamId;
   const dist = Math.hypot(t.x - me.x, t.y - me.y);
   let html = `<div class="ph"><img class="thumb" src="${buildingThumb('tc', t.age, team ? team.color : '#888', t.civ)}" alt="">
-    <div><h2>${esc(t.name)}</h2><div class="lvl">${esc(t.player)} ${t.online ? '· <span style="color:#3f8f3c">● online</span>' : ''}</div>
+    <div><h2>${esc(t.name)}</h2><div class="lvl">${esc(t.player)} ${t.bot ? `· <span class="bot-tag" title="Een computerspeler: bouwt zijn rijk uit en valt aan zoals een echte speler. Sterkte: ${t.botTier || 'gemiddeld'} (t.o.v. de echte spelers)">computer${t.botTier ? ` · ${t.botTier}` : ''}</span>` : t.online ? '· <span style="color:#3f8f3c">● online</span>' : ''}</div>
     ${t.civ ? `<div class="small">${civEmblem(t.civ, 14)} ${civName(t.civ)}</div>` : ''}
     ${team ? `<span class="pill" style="background:${team.color}">${esc(team.name)}</span>` : ''}</div></div>
+    ${t.vassal && t.vassal.until > now ? `<p class="vassal-tag">${icon('crown')} Vazal van <b>${esc(t.vassal.lname)}</b> · nog ${timer(t.vassal.until)}</p>` : ''}
     <div class="card"><dl class="kv"><dt>Tijdperk</dt><dd>${AGES[t.age].short}</dd><dt>Punten</dt><dd>${fmt(t.score)}</dd>
+    <dt>Trouw</dt><dd>${loyBar(t.loyalty ?? 100, (t.loyalty ?? 100) < 50 ? 'low' : '')}${t.shield && t.shield > now ? `<span class="small muted">beschermd nog ${timer(t.shield)}</span>` : ''}</dd>
     <dt>Gebouwen</dt><dd>${t.buildings}</dd><dt>Muur</dt><dd>${t.wall ? `niveau ${t.wall}` : 'geen'}</dd>
     ${t.monument ? `<dt>Monument</dt><dd>niveau ${t.monument}</dd>` : ''}
     <dt>Positie</dt><dd>(${t.x}, ${t.y})</dd>${mine ? '' : `<dt>Afstand</dt><dd>${dist.toFixed(1)} tegels</dd>`}</dl></div>
     ${targetMarchesHtml(app, 'town', t.id)}`;
+  // heer en vazal: elkaar helpen mag, aanvallen niet
+  const myVassal = t.vassal && t.vassal.until > now && t.vassal.lord === d.me.id;
+  const myLord = app.live && app.live.vas && app.live.vas.until > now && app.live.vas.ltown === t.id;
   if (mine) {
     html += `<div class="actions"><button class="btn primary" data-action="view" data-view="town">${icon('castle')} Naar mijn stad</button></div>`;
+  } else if (myVassal || myLord) {
+    html += `<p class="desc">${icon('crown')} ${myVassal ? 'Dit is je vazal: je valt hem niet aan, maar je kan hem helpen.' : 'Dit is je heer: je kan hem niet aanvallen. Koop je vrij of laat een clanlid hem verslaan.'}</p>
+      <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
+      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
   } else if (ally) {
     html += `<p class="desc">${icon('team')} Dit is je bondgenoot. Help elkaar met troepen en grondstoffen!</p>
       <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
       <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
   } else {
-    const war = d.world.phase === 'war';
-    html += `${war ? '' : `<p class="req">Vredestijd: spelers aanvallen kan pas vanaf de oorlogsweek (over ${timer(d.world.prepEnd)}).</p>`}
-      <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${war && app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
-      <button class="btn" data-action="send" data-kind="scout" ${war && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
+    // vrede: een aanval mag pas aankomen als de vrede van beide spelers voorbij is
+    const mine = now < d.me.peaceEnd;
+    const theirs = now < (t.peaceEnd || 0);
+    if (mine) html += `<p class="req">${icon('dove')} Je hebt nog vrede (nog ${timer(d.me.peaceEnd)}): tot dan kan je geen spelers aanvallen, en zij jou niet.</p>`;
+    else if (theirs) html += `<p class="req">${icon('dove')} ${esc(t.player)} is net begonnen en heeft nog vrede (nog ${timer(t.peaceEnd)}, tot ${clockTime(t.peaceEnd - (app.offset || 0))}). Je leger mag pas daarna aankomen.</p>`;
+    const nob = (app.live && app.live.units.noble) || 0;
+    if (nob && !mine) {
+      const why = t.vassal && t.vassal.until > now ? 'deze stad is al vazal' : t.shield && t.shield > now ? 'deze stad is net bevrijd'
+        : t.score < (((app.map && app.map.towns.find((x) => x.id === me.id)) || {}).score || 0) * LOYALTY.minScore ? 'deze stad is veel kleiner dan de jouwe' : (d.vassals || []).length >= VASSAL.maxPerLord ? `je hebt al ${VASSAL.maxPerLord} vazallen` : null;
+      html += `<p class="small ${why ? 'req' : 'muted'}">${icon('crown')} ${why ? `Edelmannen kunnen hier niets doen: ${why}.` : `Stuur een edelman mee: wint je leger en overleeft hij, dan zakt de trouw met ${LOYALTY.hit}.`}</p>`;
+    }
+    html += `<div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${!mine && app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
+      <button class="btn" data-action="send" data-kind="scout" ${!mine && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
   }
   return html + `<div class="actions"><button class="btn ghost" data-action="deselect">← Overzicht</button></div>`;
 }
 
-const KIND = { attack: ['swords', 'Aanval'], scout: ['magnifier', 'Verkenning'], support: ['shield', 'Versterking'], trade: ['cart', 'Karavaan'], return: ['home', 'Terugkeer'] };
+const KIND = { attack: ['swords', 'Aanval'], scout: ['magnifier', 'Verkenning'], support: ['shield', 'Versterking'], trade: ['cart', 'Karavaan'], tribute: ['crown', 'Schatting'], return: ['home', 'Terugkeer'] };
 
 export function marchesHtml(app) {
   const d = app.data;
@@ -686,7 +813,7 @@ function targetMarchesHtml(app, kind, id) {
 
 function marchCargo(m) {
   const res = m.res && RES.filter((r) => m.res[r] > 0).map((r) => `${fmt(m.res[r])} ${RES_NAMES[r].toLowerCase()}`).join(', ');
-  if (m.kind === 'trade') return `lading: ${res || '—'}`;
+  if (m.kind === 'trade' || m.kind === 'tribute') return `lading: ${res || '—'}`;
   const units = m.units ? unitsText(m.units) : 'onbekende troepen';
   return res ? `${units} · buit: ${res}` : units;
 }
@@ -795,12 +922,16 @@ export function sendSummaryHtml(app, live, target, kind, units, res) {
     html += `<span>${icon('swords')} Aanvalskracht <b>${fmt(p.total)}</b></span><span>${icon('cart')} Draagvermogen <b>${fmt(carryCapacity(units))}</b></span>`;
   }
   if (kind === 'trade') html += `<span>Totaal <b>${fmt(Object.values(res).reduce((a, b) => a + b, 0))}</b></span>`;
-  if ((kind === 'attack' || kind === 'scout') && target.kind === 'town' && app.now() + ms > d.world.warEnd) html += '<span class="req">Komt pas na het einde van het seizoen aan!</span>';
+  if ((kind === 'attack' || kind === 'scout') && target.kind === 'town') {
+    const peace = Math.max(d.me.peaceEnd, target.peaceEnd || 0);
+    if (app.now() + ms > d.world.warEnd) html += '<span class="req">Komt pas na het einde van het seizoen aan!</span>';
+    else if (app.now() + ms < peace) html += `<span class="req">${icon('dove')} Komt aan tijdens de vrede (die eindigt ${clockTime(peace - (app.offset || 0))}): dat mag niet.</span>`;
+  }
   return html;
 }
 
 // ---------- rapporten ----------
-const RICON = { attack: 'swords', defense: 'shield', scout: 'magnifier', support: 'team', trade: 'cart', info: 'bell' };
+const RICON = { attack: 'swords', defense: 'shield', scout: 'magnifier', support: 'team', trade: 'cart', info: 'bell', vassal: 'crown' };
 
 export function reportsHtml(list, activeId, detail) {
   return `<h2>${icon('scroll')} Rapporten</h2>
@@ -832,7 +963,11 @@ export function reportDetailHtml(r) {
       <p class="small">Verdedigingskracht: <b>${fmt(d.D)}</b>${d.supporters && d.supporters.length ? ` · met steun van ${d.supporters.map(esc).join(', ')}` : ''}</p>
       ${d.attWins ? `<h3>Buit</h3>${costHtml(d.loot)}` : ''}
       ${d.wallDamage ? `<p class="req">De muur werd ${d.wallDamage} niveau(s) beschadigd.</p>` : ''}
-      ${d.monumentDamage ? `<p class="req">Het monument werd beschadigd!</p>` : ''}`;
+      ${d.monumentDamage ? `<p class="req">Het monument werd beschadigd!</p>` : ''}
+      ${d.noble ? `<h3>${icon('crown')} Trouw van ${esc(d.defender.town)}</h3>${d.noble.blocked ? `<p class="small">${esc(d.noble.blocked)}</p>`
+        : `<div class="row small"><span>${d.noble.before}</span><span class="grow">${loyBar(d.noble.after, d.noble.after < 50 ? 'low' : '')}</span></div>
+        <p class="small">${d.noble.conquered ? `<b>${esc(d.defender.town)} is nu vazal van ${esc(d.attacker.name)}!</b>` : `De edelm${d.noble.nobles > 1 ? 'annen' : 'an'} verlaagde${d.noble.nobles > 1 ? 'n' : ''} de trouw van ${d.noble.before} naar ${d.noble.after}.`}</p>`}` : ''}
+      ${d.freed ? `<p class="outcome win">${icon('crown')} ${d.freed > 1 ? `${d.freed} vazallen zijn` : 'Een vazal is'} bevrijd!</p>` : ''}`;
   }
   if (d.type === 'scout') {
     let html = `<p class="outcome ${d.success ? 'win' : 'lose'}">${d.success ? 'Verkenning geslaagd' : 'Verkenners gevangen'}</p><p class="small muted">${when} · ${esc(d.target)} · ${d.left}/${d.sent} verkenners terug</p>`;
@@ -849,7 +984,12 @@ export function reportDetailHtml(r) {
   }
   if (d.type === 'scouted') return `<p class="outcome ${d.success ? 'lose' : 'win'}">${d.success ? 'Je werd bespioneerd' : 'Spionnen gevangen!'}</p><p>${esc(d.attacker)} stuurde ${d.sent} verkenners.</p>`;
   if (d.type === 'support') return `<p class="outcome win">Versterking aangekomen</p><p>${esc(d.from)} stuurde: ${unitsText(d.units)}.</p>`;
-  if (d.type === 'trade') return `<p class="outcome win">Karavaan aangekomen</p><p>${esc(d.from)} stuurde:</p>${costHtml(d.res)}`;
+  if (d.type === 'trade') return `<p class="outcome win">${d.tribute ? 'Schatting aangekomen' : 'Karavaan aangekomen'}</p><p>${esc(d.from)} stuurde${d.tribute ? ' (als vazal)' : ''}:</p>${costHtml(d.res)}`;
+  if (d.type === 'vassal') {
+    const why = { time: 'De tijd als vazal is voorbij.', ransom: 'Er werd losgeld betaald.', attack: 'Een clanlid versloeg de heer.' }[d.why] || '';
+    return `<p class="outcome win">${icon('crown')} ${esc(d.town)} is vrij</p><p>${why} Heer was: ${esc(d.lord)}.</p>
+      <p class="small muted">De stad is nu ${LOYALTY.shieldMs / 3600000} uur beschermd tegen edelmannen.</p>`;
+  }
   if (d.type === 'info') return `<p class="outcome">Bericht van de spelleider</p><p>${esc(d.text)}</p>`;
   return '<p>Onbekend rapport.</p>';
 }
@@ -899,16 +1039,17 @@ export function leaderboardHtml(app, lb) {
     ${lb.teams.map((t, i) => `<div class="teambar"><b>${i + 1}.</b><div class="tb"><i style="width:${(t.score / max) * 100}%;background:${t.color}"></i><span>${esc(t.name)} — ${t.members.map(esc).join(' & ')}</span></div><b>${fmt(t.score)}</b></div>`).join('')}
     <h3>Spelers</h3>
     <table class="lb"><tr><th>#</th><th>Speler</th><th>Burcht</th><th class="n">Opbouw</th><th class="n">Gevecht</th><th class="n">Totaal</th></tr>
-    ${lb.players.map((p, i) => `<tr class="${p.name === d.me.name ? 'me' : ''}"><td>${i + 1}</td><td><span class="pill" style="background:${(lb.teams.find((t) => t.id === p.teamId) || {}).color || '#888'}">${esc(p.name)}</span></td><td>${esc(p.town)}</td><td class="n">${fmt(p.build)}</td><td class="n">${fmt(p.kills)}</td><td class="n">${fmt(p.score)}</td></tr>`).join('')}
+    ${lb.players.map((p, i) => `<tr class="${p.name === d.me.name ? 'me' : ''}"><td>${i + 1}</td><td><span class="pill" style="background:${(lb.teams.find((t) => t.id === p.teamId) || {}).color || '#888'}">${esc(p.name)}</span>${p.bot ? ` <span class="bot-tag">computer${p.botTier ? ` · ${p.botTier}` : ''}</span>` : ''}${p.lord ? ` <span class="vassal-mini" title="Vazal van ${esc(p.lord)}">${icon('crown')} vazal van ${esc(p.lord)}</span>` : ''}${p.vassals ? ` <span class="vassal-mini lord" title="${p.vassals} vazal(len): +${fmt(p.vassalPts)} punten">${icon('crown')} ${p.vassals}</span>` : ''}</td><td>${esc(p.town)}</td><td class="n">${fmt(p.build + (p.vassalPts || 0))}</td><td class="n">${fmt(p.kills)}</td><td class="n">${fmt(p.score)}</td></tr>`).join('')}
     </table>
-    <p class="small muted">Opbouwpunten komen uit gebouwen, dorpelingen, troepen en vooral het Monument. Gevechtspunten verdien je door vijanden en rovers te verslaan.</p>`;
+    <p class="small muted">Opbouwpunten komen uit gebouwen, onderzoek, dorpelingen, troepen, het Monument en de Kathedraal, plus ${Math.round(VASSAL.scoreShare * 100)}% van de punten van je vazallen. Gevechtspunten verdien je door vijanden en rovers te verslaan.</p>`;
 }
 
 // ---------- hulp ----------
-export function helpHtml(w) {
+export function helpHtml(w, peaceEnd) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const pt = peaceText(w.peaceMs);
   return `<div class="help"><h2>${icon('book')} Hoe speel je?</h2>
-    <div class="timeline"><div class="tp">${icon('dove')} Vredestijd<br><small>${f(w.startAt)}</small></div><div class="tw">${icon('swords')} Oorlog<br><small>${f(w.prepEnd)}</small></div></div>
+    <div class="timeline"><div class="tp">${icon('dove')} Vrede (${pt})<br><small>${f(peaceEnd - w.peaceMs)}</small></div><div class="tw">${icon('swords')} Oorlog<br><small>${f(peaceEnd)}</small></div></div>
     <p>Het seizoen eindigt op <b>${f(w.warEnd)}</b>. Het team met de meeste punten wint.</p>
     <h3>1. Bouw je economie</h3>
     <ul><li>Je <b>dorpelingen</b> verzamelen voedsel, hout, steen en goud — ook als je offline bent.</li>
@@ -920,6 +1061,24 @@ export function helpHtml(w) {
     <p>Elk rijk hoort bij een volk met een eigen bouwstijl. Zodra je stadscentrum een <b>kasteel</b> wordt (${AGES[CASTLE_LEVEL].name}),
     train je daar twee elite-eenheden die enkel jouw volk heeft:</p>
     <ul>${CIV_IDS.map((c) => `<li>${civEmblem(c, 15)} <b>${CIVS[c].name}</b>: ${CIVS[c].units.map((k) => `<b>${UNITS[k].name}</b> (${UNITS[k].desc.charAt(0).toLowerCase()}${UNITS[k].desc.slice(1).replace(/\.$/, '')})`).join(' en ')}.</li>`).join('')}</ul>
+    <h3>Vijf tijdperken</h3>
+    <ul>${AGES.slice(1).map((a, i) => `<li><b>${a.name}</b>${['', ': schietbaan, stal, smidse, markt, wachttorens en de <b>molen</b>', ': het kasteel, ridders, rammen en de <b>Academie</b>', ': het monument, het <b>gildehuis</b> en de <b>bouwloods</b>', ': het <b>Adelshof</b> (edelmannen) en de <b>kathedraal</b>'][i] || ': je begint met huizen, werkplekken, een opslagplaats en een kazerne'}.</li>`).join('')}</ul>
+    <p>Gebouwen verbeter je <b>één niveau per tijdperk</b> (niveau 4 vraagt het Tijdperk van de Gilden, niveau 5 de Kroon). Hoge niveaus zie je ook: vaandels, gouden pieken, aanbouwen.</p>
+    <ul><li><b>Molen</b>: +5% voedsel per niveau. <b>Gildehuis</b>: +3% van alle grondstoffen per niveau. <b>Bouwloods</b>: een bouwer extra en sneller bouwen.</li>
+    <li><b>Smidse</b>: +5% aanval en verdediging per niveau, en betere uitrusting: leer en brons, dan ijzer en maliën (niveau 3), dan plaatharnas (niveau 5).</li>
+    <li><b>Academie</b>: onderzoek in vier soorten (voetvolk, schutters, ruiterij, stad), drie rijen diep. Geen ruwe kracht maar nieuwe vaardigheden:
+    ${Object.values(TECHS).map((T) => `<b>${T.name}</b>`).join(', ')}. Je ziet het aan je troepen: grotere schilden, gouden pluimen, brandende pijlen, lange bogen, kleden en lansen.</li>
+    <li><b>Kathedraal</b>: punten en een trouw die sneller herstelt.</li></ul>
+    <h3>Edelmannen en vazallen</h3>
+    <p>In de Kroon train je in het <b>Adelshof</b> een <b>edelman</b> (één per niveau van het Adelshof). Stuur hem mee met een aanval op een speler.
+    Wint je leger en overleeft hij, dan daalt de <b>trouw</b> van die stad met ${LOYALTY.hit} per edelman (de trouw herstelt vanzelf met ${LOYALTY.regen} per uur).
+    Bij 0 wordt de stad <b>${VASSAL.ms / 86400000} dagen je vazal</b>: niemand verliest zijn stad, maar een vazal</p>
+    <ul><li>stuurt om de ${VASSAL.tributeMs / 3600000} uur een karavaan met <b>schatting</b> (${Math.round(VASSAL.tribute * 100)}% van zijn productie);</li>
+    <li>kan zijn heer niet aanvallen (en de heer hem niet); een computerspeler helpt zijn heer ook met versterking;</li>
+    <li>geeft zijn heer ${Math.round(VASSAL.scoreShare * 100)}% van zijn punten.</li></ul>
+    <p>Vrij komen kan door te wachten, door <b>losgeld</b> te betalen (${fmt(VASSAL.ransom)} van elke grondstof per tijdperk), of doordat een <b>clanlid de heer verslaat</b>.
+    Daarna is de stad ${LOYALTY.shieldMs / 3600000} uur beschermd. Je hebt hooguit ${VASSAL.maxPerLord} vazallen, en edelmannen werken niet tegen een stad met minder dan
+    ${Math.round(LOYALTY.minScore * 100)}% van jouw punten.</p>
     <h3>Gevechten</h3>
     <p>Elke eenheid heeft <b>levenspunten</b> (${icon('heart')}): een dorpeling ${UNITS.villager.hp}, een speerdrager ${UNITS.spear.hp},
     een ridder ${UNITS.knight.hp}, een oorlogsolifant ${UNITS.elephant.hp}. In je eigen gebied zie je elk gevecht gebeuren: de mannetjes
@@ -943,19 +1102,32 @@ export function helpHtml(w) {
     <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
     (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,
     haalt de buit op en gaat daarna terug aan zijn vorige taak. Vondsten blijven liggen tot je ze ophaalt (maximaal 4 tegelijk).</p>
-    <h3>2. Vredestijd (eerste weken)</h3>
-    <p>Spelers kunnen elkaar nog niet aanvallen. Train wel al troepen en versla de <b>roverskampen</b> op de kaart: dat levert buit en punten op. Kampen dicht bij het midden zijn sterker.</p>
-    <h3>3. Oorlogsweek</h3>
-    <p>Nu mag je vijandelijke steden aanvallen en plunderen. Stuur eerst <b>verkenners</b>. Rammen beschadigen muren en monumenten. Een opslagplaats verbergt een deel van je grondstoffen.</p>
+    <h3>2. Vrede (je eerste ${pt})</h3>
+    <p>De eerste ${pt} nadat je begint, kan niemand je aanvallen en kan jij zelf geen spelers aanvallen. Gebruik die tijd om je economie op te bouwen,
+    een muur te zetten en troepen te trainen. <b>Roverskampen</b> mag je altijd aanvallen: dat levert buit en punten op. Kampen dicht bij het midden zijn sterker.</p>
+    <h3>3. Oorlog</h3>
+    <p>Na je vrede mag je op eender welk moment vijandelijke steden aanvallen en plunderen, en zij jou. Wie later begint, krijgt ook ${pt} vrede:
+    zo'n stad toont op de kaart hoelang nog. Stuur eerst <b>verkenners</b>. Rammen beschadigen muren en monumenten. Een opslagplaats verbergt een deel van je grondstoffen.</p>
     <h3>4. Bondgenoten</h3>
     <p>Je wordt automatisch aan een bondgenoot gekoppeld. Stuur elkaar <b>versterking</b> (die verdedigt mee) en <b>karavanen</b> met grondstoffen via de markt. Overleg in de teamchat!</p>
     <h3>Veldslagen: zelf besturen of automatisch</h3>
     <p>Komt je leger aan bij een stad of roverskamp terwijl jij (of de verdediger) online bent, dan kies je: <b>zelf besturen</b> of <b>automatisch</b>.
     Wie niets kiest of offline is, laat de slag automatisch verlopen. Is de verdediger online, dan krijgt hij een melding en mag hij zijn stad zelf verdedigen.</p>
-    <ul><li>Klik op je troepen of sleep een kader; <b>dubbelklik</b> kiest alle troepen van die soort. Op een gsm tik je, en veeg je om rond te kijken.</li>
-    <li>Klik daarna op de <b>grond</b> om te lopen (ze houden daar hun plek) of op een <b>vijand, toren of muur</b> om die aan te vallen. <b>Stormloop</b> stuurt ze op de dichtstbijzijnde vijand af.</li>
-    <li>Tactieken: stuur speerdragers op ruiters, laat schutters achter je voetvolk, sloop torens met rammen of stenenwerpers, zoek een gat in de muur.
-    Als aanvaller kan je je op elk moment <b>terugtrekken</b>; na 4 minuten trekt je leger zich vanzelf terug.</li>
+    <p>Je vecht met <b>regimenten</b>, zoals in Rome: Total War: elk kaartje onderaan en elk vaandel boven het slagveld is één eenheid die samen loopt en samen vecht.</p>
+    <ul><li><b>Kiezen</b>: tik op een kaartje, een vaandel of een soldaat (dan kies je zijn hele regiment). Twee keer tikken = alle regimenten van die soort,
+    lang drukken = je hele leger. Met Shift of Ctrl voeg je er een toe. Op een gsm veeg je om rond te kijken.</li>
+    <li><b>Bevelen</b>: tik (of klik rechts) op de <b>grond</b> om er in formatie heen te lopen, op een <b>vijand</b> om dat regiment aan te vallen, op een <b>muur of poort</b> om een bres te slaan.
+    Meerdere regimenten stellen zich op in slagorde: voetvolk vooraan, schutters erachter, ruiters op de flanken.
+    <b>Stormloop</b> = op de dichtstbijzijnde vijand af, <b>Halt</b> = blijven staan en in formatie gaan.</li>
+    <li><b>Lijn trekken</b>: sleep met de rechtermuisknop (op een gsm: knop <b>Lijn</b>, dan met je vinger). Daar komen ze te staan, zo breed als de lijn, met het front naar de vijand.
+    De groene stippen tonen waar elke soldaat komt te staan.</li>
+    <li><b>Formaties</b> (knoppen onderaan, of de toetsen 1 tot 5): <b>Linie</b> (breed, veel soldaten tegelijk in het gevecht), <b>Blok</b> (minder schade, moeilijk te flankeren, iets trager),
+    <b>Wig</b> (harde stormloop, vooral voor ruiters), <b>Los</b> (veel minder last van pijlen en torens) en <b>Kring</b> (niet te flankeren, sterk tegen ruiters, traag).</li>
+    <li><b>Flanken en stormlopen</b>: wie een regiment van opzij of in de rug aanvalt, doet meer schade en breekt zijn moed. De eerste klap na een aanloop is extra hard.</li>
+    <li><b>Moed</b>: het gouden balkje onder je vaandel. Een regiment dat zwaar verliest of omsingeld wordt, <b>slaat op de vlucht</b> (witte vlag) en luistert even niet;
+    na wat rust hergroepeert het. Slaat een heel leger op de vlucht, dan is de slag verloren.</li>
+    <li>Tactieken: stuur speerdragers op ruiters, laat schutters achter je voetvolk, val met ruiters in de flank, sloop torens met rammen of stenenwerpers, zoek een gat in de muur.
+    Als aanvaller kan je je op elk moment <b>terugtrekken</b>; na 10 minuten trekt je leger zich vanzelf terug.</li>
     <li><b>Wachttorens</b> (vanaf het Tijdperk van het Brons) schieten op de dichtstbijzijnde vijand. Hogere niveaus doen meer schade en hebben meer levens. Een gesloopte toren verliest een niveau.</li>
     <li><b>Muren</b> houden aanvallers tegen tot ze een bres slaan; verdedigers kunnen er net overheen vechten. Een open muur heeft een poort in het midden.</li></ul>
     <h3>Gevechten</h3>
@@ -975,7 +1147,8 @@ export function helpHtml(w) {
     updates van het spel krijg je vanzelf. <b>iPhone of iPad:</b> open de site in <b>Safari</b>, tik onderaan op <b>Delen</b> en kies
     <b>Zet op beginscherm</b>. Het spel krijgt dan een eigen icoon en opent volledig scherm, net als een app.</p>
     <h3>Punten</h3>
-    <p>Gebouwen, dorpelingen en troepen geven opbouwpunten; het <b>Monument</b> levert per niveau 1500 extra punten. Verslagen vijanden en rovers geven gevechtspunten.</p></div>`;
+    <p>Gebouwen, onderzoek, dorpelingen en troepen geven opbouwpunten; het <b>Monument</b> levert per niveau 1500 extra punten en de <b>Kathedraal</b> 600.
+    Vazallen geven je ${Math.round(VASSAL.scoreShare * 100)}% van hun punten. Verslagen vijanden en rovers geven gevechtspunten.</p></div>`;
 }
 
 export { fmtDuration };

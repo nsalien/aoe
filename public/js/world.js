@@ -191,7 +191,7 @@ export class WorldView {
       const pos = this.marchPos(m, now);
       if (!pos) continue;
       items.push({ d: pos.gx + pos.gy, kind: 'march', o: m, pos });
-      if (emit && m.kind !== 'trade') {
+      if (emit && m.kind !== 'trade' && m.kind !== 'tribute') {
         const w = toWorld(pos.gx, pos.gy);
         this.particles.dust(w.x - pos.dir * 8, w.y - this.hAt(pos.gx, pos.gy) + 1, 1);
       }
@@ -216,7 +216,7 @@ export class WorldView {
 
     // labels in schermruimte
     ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);
-    for (const tw of this.towns) this.drawTownLabel(ctx, tw);
+    for (const tw of this.towns) this.drawTownLabel(ctx, tw, now);
     if (cam.zoom > 0.75) for (const c of this.camps) this.drawCampLabel(ctx, c, now);
   }
 
@@ -280,7 +280,7 @@ export class WorldView {
     ctx.save();
     ctx.translate(w.x, y);
     if (pos.dir < 0) ctx.scale(-1, 1);
-    if (m.kind === 'trade') {
+    if (m.kind === 'trade' || m.kind === 'tribute') {
       ctx.fillStyle = '#7a5129'; ctx.fillRect(-6, -9, 12, 6);
       ctx.fillStyle = '#e6c45a'; ctx.beginPath(); ctx.ellipse(0, -9, 5, 2.5, 0, Math.PI, 0); ctx.fill();
       ctx.fillStyle = '#3a2716'; ctx.beginPath(); ctx.arc(-4, -2.5, 2.4, 0, 7); ctx.arc(4, -2.5, 2.4, 0, 7); ctx.fill();
@@ -386,14 +386,15 @@ export class WorldView {
     if (sub) { ctx.font = '500 10.5px "Inter", system-ui, sans-serif'; ctx.fillStyle = '#e4d6b4'; ctx.fillText(sub, x + 3, y - 6); }
   }
 
-  drawTownLabel(ctx, tw) {
+  drawTownLabel(ctx, tw, now) {
     const p = this.townPos(tw);
     const s = this.cam.worldToScreen(p.x, p.y - 44);
     const col = this.teamColor(tw.teamId);
     const mine = tw.id === this.myTownId;
     const sel = this.selected && this.selected.kind === 'town' && this.selected.obj.id === tw.id;
     if (this.cam.zoom < 0.6 && !mine && !sel) return;
-    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player} · ${tw.score} ptn${tw.online ? ' · ●' : ''}` : null;
+    const peace = (now < (tw.peaceEnd || 0) ? ' · vrede' : '') + (tw.vassal && tw.vassal.until > now ? ` · vazal van ${tw.vassal.lname}` : '');
+    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player}${tw.bot ? ` (computer${tw.botTier ? `, ${tw.botTier}` : ''})` : ''} · ${tw.score} ptn${peace}${tw.online ? ' · ●' : ''}` : null;
     this.label(ctx, s.x, s.y, tw.name, sub, col, mine);
   }
 

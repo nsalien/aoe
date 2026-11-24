@@ -60,7 +60,18 @@ const P = {
   menu: `<path d="M4 7h16M4 12h16M4 17h16" stroke="${O}" stroke-width="2.2" stroke-linecap="round"/>`,
   horse: `<path d="M5 20l1-6c-1.5-1-2-3-1-4.5l3-3.5 1.5-3 1.5 2.5c3 .2 6 2 7.5 5.5l1.5 3.5-2 1-1.8-2.5-1.2 1.6 1 5.4h-2l-1-4.2-3 .7-.8 3.5z" fill="#8b5a2b" ${S}/><circle cx="9" cy="7.2" r=".7" fill="${O}"/>`,
   anvil: `<path d="M3 7h13c0 2.5 2 3.5 5 3.5v1.5H15l-1.5 3.5H17V19H6v-3.5h3.5L8 12H5c-1.5 0-2-1-2-2.5z" fill="#6b717c" ${S}/><path d="M5 8.2h9" stroke="#a9afb8" stroke-width="1" stroke-linecap="round"/>`,
+  // formaties (bovenaanzicht, vooraan = boven)
+  fline: `<path d="M12 2.2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[3.5, 10], [8.2, 10], [12.9, 10], [17.6, 10], [3.5, 15.5], [8.2, 15.5], [12.9, 15.5], [17.6, 15.5]].map(([x, y]) => [x + 1.4, y]))}`,
+  fblock: `<path d="M12 2.2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[8, 8], [12, 8], [16, 8], [8, 12.2], [12, 12.2], [16, 12.2], [8, 16.4], [12, 16.4], [16, 16.4], [8, 20.6], [12, 20.6], [16, 20.6]], 1.5)}`,
+  fwedge: `<path d="M12 2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[12, 8], [9, 12.5], [15, 12.5], [6, 17], [12, 17], [18, 17], [3, 21.2], [9, 21.2], [15, 21.2], [21, 21.2]], 1.45)}`,
+  floose: `<path d="M12 2.2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[3.5, 10], [12, 10], [20.5, 10], [7.7, 17.5], [16.3, 17.5]])}`,
+  fring: dots([[6, 6], [12, 6], [18, 6], [18, 12], [18, 18], [12, 18], [6, 18], [6, 12]]) + `<path d="M12 9.6v4.8M9.6 12h4.8" stroke="#d9a43a" stroke-width="1.6" stroke-linecap="round"/>`,
 };
+
+// stippen voor de formatie-iconen
+function dots(list, r = 1.9) {
+  return list.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#b2372a" stroke="${O}" stroke-width=".9"/>`).join('');
+}
 
 export function icon(name, cls = '') {
   const body = P[name] || P.star;
