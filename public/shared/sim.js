@@ -1400,12 +1400,13 @@ export function occupied(s, ignoreId = null) {
   return grid;
 }
 
-export function canPlaceAt(s, type, x, y) {
+// ignoreId: dit gebouw telt niet mee (bij verplaatsen mag het over zijn eigen oude plek schuiven)
+export function canPlaceAt(s, type, x, y, ignoreId = null) {
   const size = BUILDINGS[type].size;
   if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
   const cl = clearedSet(s);
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
-  const grid = occupied(s);
+  const grid = occupied(s, ignoreId);
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (grid.has(`${x + dx},${y + dy}`)) return false;
   if ((s.walls || []).length) {
     const walls = wallSet(s);
@@ -1437,6 +1438,26 @@ export function doBuild(s, type, x, y, now, speed) {
   const b = { id: s.nextId++, type, x, y, level: 0 };
   s.buildings.push(b);
   s.builds.push({ bid: b.id, to: 1, start: now, end: now + buildTime(s, type, 1, speed) });
+  return b;
+}
+
+// Gebouw verplaatsen (gratis): enkel naar vrije bouwgrond. Het stadscentrum staat vast in het midden (plein en straten).
+export function checkMove(s, bid, x, y) {
+  const b = s.buildings.find((q) => q.id === bid);
+  if (!b) return 'Gebouw niet gevonden.';
+  if (b.type === 'tc') return 'Je stadscentrum blijft in het midden van je stad.';
+  if (!isPlaced(b)) return 'Muren verplaats je niet: breek ze af en zet ze opnieuw.';
+  if (!Number.isInteger(x) || !Number.isInteger(y)) return 'Ongeldige plaats.';
+  if (b.x === x && b.y === y) return 'Het gebouw staat daar al.';
+  if (!canPlaceAt(s, b.type, x, y, b.id)) return 'Daar kan het gebouw niet staan.';
+  return null;
+}
+
+export function doMove(s, bid, x, y) {
+  const err = checkMove(s, bid, x, y);
+  if (err) throw new GameError(err);
+  const b = s.buildings.find((q) => q.id === bid);
+  b.x = x; b.y = y;
   return b;
 }
 

@@ -678,6 +678,9 @@ export function buildingPanelHtml(app, live, b) {
     html += `<p class="small muted">${icon('star')} Maximaal niveau bereikt.</p>`;
   }
   if (b.type !== 'tc' && b.type !== 'wall') {
+    html += `<div class="card"><h3>${icon('hammer')} Verplaatsen</h3>
+      <p class="small muted" style="margin:0">Gratis, naar vrije bouwgrond. Tip: houd het gebouw in je stad ingedrukt en sleep het.</p>
+      <div class="actions"><button class="btn small" data-action="moveBuilding" data-id="${b.id}" ${canAct ? '' : 'disabled'}>Verplaatsen</button></div></div>`;
     // afbreken (of een bouw stoppen): een deel van de grondstoffen komt terug
     const err = checkDemolish(live, b.id);
     const back = demolishRefund(live, b);
@@ -1194,6 +1197,8 @@ export function helpHtml(w, peaceEnd) {
     <ul>${CIV_IDS.map((c) => `<li>${civEmblem(c, 15)} <b>${CIVS[c].name}</b>: ${CIVS[c].units.map((k) => `<b>${UNITS[k].name}</b> (${UNITS[k].desc.charAt(0).toLowerCase()}${UNITS[k].desc.slice(1).replace(/\.$/, '')})`).join(' en ')}.</li>`).join('')}</ul>
     <h3>Vijf tijdperken</h3>
     <ul>${AGES.slice(1).map((a, i) => `<li><b>${a.name}</b>${['', ': schietbaan, stal, smidse, markt, wachttorens en de <b>molen</b>', ': het kasteel, ridders, rammen en de <b>Academie</b>', ': het monument, het <b>gildehuis</b> en de <b>bouwloods</b>', ': het <b>Adelshof</b> (edelmannen) en de <b>kathedraal</b>'][i] || ': je begint met huizen, werkplekken, een opslagplaats en een kazerne'}.</li>`).join('')}</ul>
+    <p><b>Verplaatsen:</b> houd een gebouw ingedrukt en sleep het naar vrije bouwgrond (op pc kan het ook met de knop
+    <b>Verplaatsen</b> in het gebouwpaneel). Dat is gratis. Het stadscentrum blijft in het midden van je stad.</p>
     <p>Gebouwen verbeter je <b>één niveau per tijdperk</b> (niveau 4 vraagt het Tijdperk van de Gilden, niveau 5 de Kroon). Hoge niveaus zie je ook: vaandels, gouden pieken, aanbouwen.</p>
     <ul><li><b>Molen</b>: +5% voedsel per niveau. <b>Gildehuis</b>: +3% van alle grondstoffen per niveau. <b>Bouwloods</b>: een bouwer extra en sneller bouwen.</li>
     <li><b>Smidse</b>: +5% aanval en verdediging per niveau, en betere uitrusting: leer en brons, dan ijzer en maliën (niveau 3), dan plaatharnas (niveau 5).</li>

@@ -8,7 +8,7 @@ import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -260,10 +260,13 @@ export class TownView {
     this.cam.onHover = (sx, sy) => {
       this.hoverTile = sx < 0 ? null : this.screenGrid(sx, sy);
       this.hoverW = sx < 0 ? null : this.cam.screenToWorld(sx, sy);
+      if (this.moveB && this.moveB.click && sx >= 0) this.updateMove(sx, sy);
       this.updateCursor();
     };
     this.cam.onLongPress = (sx, sy) => this.longPress(sx, sy);
+    this.cam.onHoldDrag = (ph, sx, sy) => this.holdDrag(ph, sx, sy);
     this.cam.onRightClick = (sx, sy) => {
+      if (this.moveB) { this.moveB = null; return; }
       if (this.placing) { if (this.onCancelPlace) this.onCancelPlace(); return; }
       if (this.sel) this.click(sx, sy, null, true);
     };
@@ -1604,6 +1607,7 @@ export class TownView {
 
   click(sx, sy, e, order) {
     if (!this.state) return;
+    if (this.moveB) { if (this.moveB.click && !order) { this.updateMove(sx, sy); this.dropMove(); } else this.moveB = null; return; }
     const w = this.cam.screenToWorld(sx, sy);
     const tnow = performance.now();
     const dbl = !order && this.lastTap && tnow - this.lastTap.t < 420 && Math.hypot(sx - this.lastTap.x, sy - this.lastTap.y) < 28;
@@ -1738,12 +1742,100 @@ export class TownView {
     if (key(sel) !== before && this.onSelChange) this.onSelChange(sel);
   }
 
+  // ingedrukt houden: op een gebouw = het oppakken om te verplaatsen, elders = je hele leger kiezen.
+  // Geeft true terug als er iets vastgepakt is (de camera stuurt dan het slepen naar holdDrag).
   longPress(sx, sy) {
-    if (this.placing || this.landMode || this.wallMode || !this.state) return;
-    if (!this.selectArmy()) return;
+    if (this.placing || this.landMode || this.wallMode || !this.state || this.battleMode) return false;
+    const b = this.onMove ? this.pick(sx, sy) : null;
+    if (b && b.type !== 'wall') {
+      if (b.type === 'tc') { if (this.onNotice) this.onNotice('Je stadscentrum blijft in het midden van je stad.'); return false; }
+      this.startMove(b, false, sx, sy);
+      if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
+      return true;
+    }
+    if (!this.selectArmy()) return false;
     const w = this.cam.screenToWorld(sx, sy);
     this.pressMark = { x: w.x, y: w.y, at: performance.now() };
     if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
+    return false;
+  }
+
+  // ---------- gebouw verplaatsen ----------
+  // click = met de knop Verplaatsen (volgt de muis, klikken zet neer); anders slepen na ingedrukt houden.
+  // Het gebouw blijft op dezelfde plek onder je vinger of muis als waar je het vastpakte.
+  startMove(b, click = false, sx = null, sy = null) {
+    if (!b || b.type === 'tc' || !isPlaced(b)) return;
+    const size = BUILDINGS[b.type].size;
+    let gdx = 0; let gdy = 0;
+    if (sx != null && !click) {
+      const c = toWorld(b.x + size / 2, b.y + size / 2);
+      const sc = this.cam.worldToScreen(c.x, c.y);
+      gdx = sc.x - sx; gdy = sc.y - sy;
+    }
+    this.setSel(null);
+    this.selected = b.id;
+    this.moveB = { id: b.id, size, x: b.x, y: b.y, ok: false, same: true, click, gdx, gdy, sx, sy };
+    if (sx != null) this.updateMove(sx, sy);
+    if (this.onMoveStart) this.onMoveStart(b, click);
+  }
+
+  updateMove(sx, sy) {
+    const m = this.moveB;
+    if (!m || !this.state) return;
+    m.sx = sx; m.sy = sy;
+    const w = this.cam.screenToWorld(sx + m.gdx, sy + m.gdy);
+    const g = toGrid(w.x, w.y);
+    m.x = Math.floor(g.gx - m.size / 2 + 0.5); m.y = Math.floor(g.gy - m.size / 2 + 0.5);
+    const b = this.state.buildings.find((q) => q.id === m.id);
+    if (!b) { this.moveB = null; return; }
+    m.same = b.x === m.x && b.y === m.y;
+    m.ok = !m.same && !checkMove(this.state, m.id, m.x, m.y);
+  }
+
+  holdDrag(ph, sx, sy) {
+    if (!this.moveB) return;
+    if (ph === 'move') this.updateMove(sx, sy);
+    else if (ph === 'end') { this.updateMove(sx, sy); this.dropMove(); } else this.moveB = null;
+  }
+
+  dropMove() {
+    const m = this.moveB;
+    this.moveB = null;
+    if (!m) return;
+    if (m.ok && this.onMove) this.onMove(m.id, m.x, m.y);
+    else if (!m.same && this.onNotice) this.onNotice('Daar kan het gebouw niet staan: kies vrije bouwgrond.');
+  }
+
+  // tijdens het slepen: kaart mee laten schuiven aan de rand van het scherm
+  moveEdgePan(dt) {
+    const m = this.moveB;
+    if (!m || m.sx == null) return;
+    const cam = this.cam; const e = 44;
+    let vx = 0; let vy = 0;
+    if (m.sx < e) vx = -1; else if (m.sx > cam.w - e) vx = 1;
+    if (m.sy < e + 30) vy = -1; else if (m.sy > cam.h - e) vy = 1;
+    if (!vx && !vy) return;
+    const sp = (0.45 * dt) / cam.zoom;
+    cam.x += vx * sp; cam.y += vy * sp;
+    cam.clamp();
+    this.updateMove(m.sx, m.sy);
+  }
+
+  // het gebouw op zijn nieuwe plek (doorschijnend), met een groene of rode voet
+  drawMoveGhost(ctx, t, now) {
+    const m = this.moveB;
+    if (!m || !this.state) return;
+    const b = this.state.buildings.find((q) => q.id === m.id);
+    if (!b) { this.moveB = null; return; }
+    const c = toWorld(m.x + m.size / 2, m.y + m.size / 2);
+    const ok = m.ok || m.same;
+    A.diamond(ctx, c.x, c.y, m.size * A.TW, m.size * A.TH, ok ? 'rgba(80,220,90,0.35)' : 'rgba(230,60,50,0.4)', ok ? '#5fe06a' : '#e64a3c');
+    ctx.save();
+    ctx.globalAlpha = ok ? 0.82 : 0.5;
+    const sel = this.selected; this.selected = null;
+    this.drawBuilding(ctx, { ...b, x: m.x, y: m.y }, null, t, now, false);
+    this.selected = sel;
+    ctx.restore();
   }
 
   // waar staat het eerste figuurtje van die soort in een groep?
@@ -2182,6 +2274,7 @@ export class TownView {
     this.birds.update(dt);
     this.clouds.update(dt);
     this.adaptQuality(dt);
+    if (this.moveB && !this.moveB.click) this.moveEdgePan(dt);
     if (!this.battleMode && (now - this.fogAt > 120 || now < this.fogAt)) this.updateFog(now);
     cam.apply(ctx);
     const gnd = this.ground;
@@ -2202,7 +2295,7 @@ export class TownView {
     this.treeMip = cam.zoom * cam.dpr < 0.95;
     this.treeNeed = cam.zoom * cam.dpr;
     if (this.battleMode) this.underlay(ctx, t, now); // slagveld: opstelplaats en looplijnen op de grond
-    else if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
+    else if (this.placing || this.moveB) this.drawGrid(ctx); else this.drawBuildArea(ctx);
     if (this.landMode) this.drawLandLots(ctx);
     if (this.wallMode) this.drawWallPreview(ctx);
     if (this.gateMode) this.drawGatePreview(ctx);
@@ -2284,7 +2377,9 @@ export class TownView {
         case 'tree': this.drawTree(ctx, it.tr, t, it.shake); break;
         case 'stump': this.drawStump(ctx, it.st); break;
         case 'wall': this.drawWallPiece(ctx, it.seg, wallLevel); break;
-        case 'building': this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, emit); break;
+        case 'building':
+          if (this.moveB && it.b.id === this.moveB.id) { ctx.save(); ctx.globalAlpha = 0.35; this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, false); ctx.restore(); } else this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, emit);
+          break;
         case 'walker': this.drawWalker(ctx, it.w, t); break;
         case 'sheep': this.drawSheep(ctx, it.sh, t); break;
         case 'node': this.drawNode(ctx, it.n, t, emit); break;
@@ -2317,6 +2412,7 @@ export class TownView {
     if (this.flutter && night >= 0.5) this.flutter.draw(ctx, t, night);
 
     if (this.placing && this.hoverTile) this.drawGhost(ctx);
+    if (this.moveB) this.drawMoveGhost(ctx, t, now);
     for (const b of s.buildings) {
       const job = jobs.get(b.id);
       if (!job || !isPlaced(b)) continue;

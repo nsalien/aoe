@@ -1603,3 +1603,20 @@ test('verbeterpaneel toont voor elk gebouw wat het volgende niveau oplevert', as
   const house = s.buildings.find((b) => b.type === 'house');
   assert.match(gainsHtml(app, s, house, 2), new RegExp(`${popCap(s)}.*${popCap(s) + 5}`, 's'));
 });
+
+test('gebouwen verplaatsen: enkel naar vrije bouwgrond, het stadscentrum blijft staan', async () => {
+  const { doMove, checkMove } = await import('../public/shared/sim.js');
+  const s = newTownState(0);
+  const tc = s.buildings.find((b) => b.type === 'tc');
+  s.buildings.push({ id: 90, type: 'house', x: 1, y: 1, level: 1 }, { id: 91, type: 'farm', x: 3, y: 1, level: 1 });
+  assert.match(checkMove(s, tc.id, 1, 9), /stadscentrum/);
+  assert.match(checkMove(s, 90, 3, 1), /niet staan/, 'bezet door de boerderij');
+  assert.match(checkMove(s, 90, tc.x, tc.y), /niet staan/, 'bezet door het stadscentrum');
+  assert.match(checkMove(s, 90, 1, 1), /staat daar al/);
+  assert.match(checkMove(s, 90, -40, -40), /niet staan/, 'buiten de bouwgrond');
+  doMove(s, 90, 2, 1); // één tegel opschuiven over zijn eigen oude plek
+  const h = s.buildings.find((b) => b.id === 90);
+  assert.deepEqual([h.x, h.y], [2, 1]);
+  assert.throws(() => doMove(s, 90, 3, 1), GameError);
+  assert.equal(h.level, 1, 'niveau blijft');
+});
