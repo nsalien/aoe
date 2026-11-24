@@ -146,7 +146,12 @@ Daarom:
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
   ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`), bewaart ze
   in Cache Storage (verhoog `VERSION` als modellen veranderen) en geeft `null` tot ze klaar zijn: dan tekent het spel de
-  oude versie uit `art.js`/`figures.js`. De akker, kameel/strijdwagen/olifant en rammen zijn nog getekend.
+  oude versie uit `art.js`/`figures.js`. De boerderij is ook 3D (akker met ruggen, graan, hek; de wieken van het molentje
+  tekent `drawOverlay3d` via het anker `blades`). Kameel/strijdwagen/olifant en rammen zijn nog getekend.
+  **Alles scherp bij inzoomen**: gebouwen (`S3.get(..., need)`), muren/torens (`S3.getWall(..., need)`), figuren, spullen en
+  bomen gaan via `tiered()` (4 of 6 px per wereldpixel, sleutel `…@6`, geheugen `HI_BUDGET` in pixels, scherpe gebouwen
+  en muren met anti-aliasing). Getekende (2D) stukken die als afbeelding bewaard worden, krijgen ook een resolutie volgens
+  de zoom: `A.buildingSprite(..., need)` en `spriteQ(need)` voor poortbogen en 2D-muren in `town.js`.
   **Aankleding in 3D** (`propmodels.js`, `S3.getProp(kind, v, need)`, tekenen met `A.prop3d(ctx, kind, v, x, y, s)`):
   spullen uit `towndress.js` (lantaarn, put, struik, bloemen, fruitboom, tonnen, kisten, hooi, kar, bank, houtstapel,
   vogelverschrikker, hekjes), rotsen (`A.rock`, `A.bush`, `A.broadleaf` proberen eerst 3D), goudaders, stronken, brandhout,
@@ -165,7 +170,10 @@ Daarom:
   (`HD_TIERS` 2–6 px per wereldpixel, cache `HDGround` met LRU, hooguit 2 nieuwe stukken per beeld, `hdPatterns` = fijne
   texturen per resolutie, `stone()` = één kassei/kinderkopje/stapsteen). De aankleding (`buildDress`) heeft ook `paint(g, R, S)`.
   Nieuwe grondversiering hoort in die tekenfuncties, op vaste (gehashte) plaatsen en met een uitsnede-test: geen Math.random
-  of oplopende `rnd()`, anders verschillen de stukken.
+  of oplopende `rnd()`, anders verschillen de stukken. Lijsten één keer uitrekenen in `bakeGround` (zoals `grains`, `tuftHD`,
+  `fineClumps`, `wildFlowers`, `rockList`) en in bulk tekenen (`GH.grassClumps`, `GH.flowers`: één pad per kleur).
+  Reliëf: hoogte uit ruis, belicht van linksboven, zit in de bodemkleur (`HG`). Meren in de scherpe stukken: `lakeHD`
+  zet het zachte diepte-beeld (`lakeImage().field`) per pixel om naar kleur (`lakeLUT`) en tekent golfjes in wereldcoördinaten.
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
   `worldmap.js` bakt de wereldkaart (hoogteveld uit `worldgen.fieldAt`, kolom per kolom getekend, bossen, akkers, wegen).
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.

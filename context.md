@@ -324,6 +324,13 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     fijne grasprietjes/bosbodem/aarde-texturen per resolutie en een fijne korrel over alles. Tijd per stuk in headless
     Chromium (zonder GPU) 15–50 ms; op een toestel met GPU sneller.
 
+36. **Alles scherp, terrein nog mooier** (gevraagd: "alles moet scherp zijn, maak het terrein nog veel mooier").
+    Gebouwen, muren en torens krijgen scherpe versies bij inzoomen (zoals de figuren; 6x van een stadscentrum duurt in een
+    werker enkele seconden, daarna bewaard in de browser), poortbogen en 2D-stukken volgen de zoom. De boerderij is nu een
+    3D-model. Meren scherp in de HD-stukken. Terrein: zacht reliëf met warm licht en koele schaduw, sappige plekken, veel
+    meer wilde bloemen in groepjes, grasplukjes met echte sprieten, extra fijn gras van dichtbij, stenen met mos, kiezels
+    op de vijveroever, struiken en varens met echte blaadjes.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
