@@ -17,6 +17,7 @@ import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
 import { buildDress, drawProp, dressKey } from './towndress.js';
 import * as S3 from './sprite3d.js';
+import * as GH from './groundhd.js';
 import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
@@ -154,37 +155,6 @@ function drawSub(ctx, cv, scale, ox, oy, W, H, v) {
   const sw = Math.min(cv.width - sx, (x1 - x0) * scale); const sh = Math.min(cv.height - sy, (y1 - y0) * scale);
   if (sw <= 0 || sh <= 0) return;
   ctx.drawImage(cv, sx, sy, sw, sh, x0, y0, sw / scale, sh / scale);
-}
-
-// naadloze detailtextuur (neutraal grijs = geen kleurverschil bij 'soft-light'): korte sprietjes en korrels
-let detailCv = null;
-function groundDetail() {
-  if (detailCv) return detailCv;
-  const S = 192;
-  const cv = document.createElement('canvas');
-  cv.width = S; cv.height = S;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#808080'; g.fillRect(0, 0, S, S);
-  let seed = 7;
-  const r = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  g.lineCap = 'round';
-  for (let i = 0; i < 2600; i++) {
-    const x = r() * S; const y = r() * S;
-    const light = r() < 0.45;
-    const len = 1.2 + r() * 2.6; const lean = (r() - 0.5) * 1.6;
-    g.strokeStyle = light ? `rgba(255,255,255,${0.25 + r() * 0.35})` : `rgba(0,0,0,${0.25 + r() * 0.35})`;
-    g.lineWidth = 0.45 + r() * 0.4;
-    for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
-      if (x + ox < -6 || x + ox > S + 6 || y + oy < -6 || y + oy > S + 6) continue;
-      g.beginPath(); g.moveTo(x + ox, y + oy); g.lineTo(x + ox + lean, y + oy - len); g.stroke();
-    }
-  }
-  for (let i = 0; i < 900; i++) {
-    g.fillStyle = r() < 0.5 ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
-    g.fillRect(r() * S, r() * S, 0.8, 0.8);
-  }
-  detailCv = cv;
-  return cv;
 }
 
 // kleine gebouwen iets groter tekenen dan hun tegel, zodat de stad voller en gedetailleerder oogt
@@ -426,15 +396,8 @@ export class TownView {
     const sd = this.seed;
     const terr = this.terr;
     const W = T_W * A.TW; const H = T_W * A.TH + 20;
-    const cv = document.createElement('canvas');
-    cv.width = Math.round(W * BAKE); cv.height = Math.round(H * BAKE);
-    const g = cv.getContext('2d');
     const origin = toWorld(T_MIN, T_MIN); // bovenste hoek
     this.groundOrigin = { x: origin.x - W / 2, y: origin.y };
-    g.scale(BAKE, BAKE);
-    g.translate(W / 2, 0);
-    g.translate(-origin.x, -origin.y);
-    const WM = g.getTransform(); // wereldruimte
     const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
     const mid = N / 2;
     // naadloze texturen (één keer per sessie)
@@ -442,24 +405,13 @@ export class TownView {
       const ts = FX.LOW_POWER ? 128 : 256;
       this.tex = { grass: NAT.groundTexture('grass', ts), forest: NAT.groundTexture('forest', ts), dirt: NAT.groundTexture('dirt', ts), water: NAT.groundTexture('water', ts) };
     }
-    // textuur over een vorm leggen; de vorm wordt in tegelruimte opgebouwd, de textuur ligt in wereldpixels
-    const texture = (kind, alpha, shape) => {
-      g.save();
-      g.setTransform(WM); g.transform(...ISO);
-      g.beginPath(); shape();
-      g.setTransform(WM);
-      g.globalCompositeOperation = 'overlay'; g.globalAlpha = alpha;
-      g.fillStyle = g.createPattern(this.tex[kind], 'repeat');
-      g.fill('nonzero');
-      g.restore();
-    };
     this.pond = terr.pond;
     this.near = terr.near;
     this.pasture = terr.pasture;
     const pd = this.pond;
     const inPond = (x, y) => Math.hypot(x - pd.x, (y - pd.y) / 0.8) < pd.r + 0.6;
 
-    // bodemkleur: zachte overgangen (geen zichtbare tegels), donkere bosgrond, droge plekjes in de wei
+    // ---------- voorbereiden (één keer per stad): alles wat de tekenfunctie nodig heeft ----------
     this.lakeWaves = [];
     const lakes = [];
     for (let j = T_MIN; j < T_MAX; j++) {
@@ -469,6 +421,7 @@ export class TownView {
         if (hashInt(i, j, sd + 2) < 0.35) this.lakeWaves.push({ gx: i + 0.5, gy: j + 0.5, p: hashInt(i, j, sd + 3) * 6.28 });
       }
     }
+    const lakeImg = lakes.length ? this.lakeImage(lakes, sd) : null;
     const tileAt = (i, j) => (i < T_MIN || j < T_MIN || i >= T_MAX || j >= T_MAX ? -1 : terr.tiles[tileIndex(i, j)]);
     const forestD = new Float32Array(T_W * T_W);
     for (let j = T_MIN; j < T_MAX; j++) {
@@ -484,10 +437,11 @@ export class TownView {
       const v = (a, b) => forestD[tileIndex(Math.min(T_MAX - 1, a), Math.min(T_MAX - 1, b))];
       return (v(i, j) * (1 - fx) + v(i + 1, j) * fx) * (1 - fy) + (v(i, j + 1) * (1 - fx) + v(i + 1, j + 1) * fx) * fy;
     };
+    // bodemkleur: zachte overgangen (geen zichtbare tegels), donkere bosgrond, droge plekjes in de wei
+    const base = document.createElement('canvas');
     {
       const RS = FX.LOW_POWER ? 3 : 4;
       const NW = T_W * RS;
-      const base = document.createElement('canvas');
       base.width = NW; base.height = NW;
       const bc = base.getContext('2d');
       const img = bc.createImageData(NW, NW);
@@ -515,234 +469,325 @@ export class TownView {
         }
       }
       bc.putImageData(img, 0, 0);
-      g.save();
-      g.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-      g.imageSmoothingEnabled = true;
-      g.drawImage(base, T_MIN, T_MIN, T_W, T_W);
-      g.restore();
     }
-    texture('grass', 0.62, () => g.rect(T_MIN, T_MIN, T_W, T_W));
-    texture('forest', 0.75, () => {
-      for (let j = T_MIN; j < T_MAX; j++) {
-        for (let i = T_MIN; i < T_MAX; i++) {
-          if (forestD[tileIndex(i, j)] < 0.45) continue;
-          g.moveTo(i + 0.5 + 0.9, j + 0.5); g.arc(i + 0.5, j + 0.5, 0.9, 0, Math.PI * 2);
-        }
-      }
-    });
-    // fijne korrel in het gras (anders oogt de grond te glad)
-    {
-      const n = FX.LOW_POWER ? 9000 : 22000;
-      for (const [col, from] of [['rgba(25,55,12,0.16)', 0], ['rgba(255,255,205,0.10)', 1], ['rgba(70,100,25,0.14)', 2]]) {
-        g.fillStyle = col;
-        for (let k = from; k < n; k += 3) {
-          const i = T_MIN + hashInt(k, 61, sd) * T_W; const j = T_MIN + hashInt(k, 62, sd) * T_W;
-          if (terr.tiles[tileIndex(Math.floor(i), Math.floor(j))] === TILE.WATER) continue;
-          const p = toWorld(i, j);
-          g.fillRect(p.x, p.y, 1.8, 0.9);
-        }
-      }
-    }
-    // grote, zachte kleurvlekken voor een natuurlijke look
-    for (let k = 0; k < 140; k++) {
-      const i = T_MIN + hashInt(k, 21, sd) * T_W; const j = T_MIN + hashInt(k, 22, sd) * T_W;
-      const p = toWorld(i, j);
-      const r = 30 + hashInt(k, 23, sd) * 80;
-      const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-      const light = k % 2 === 0;
-      gr.addColorStop(0, light ? 'rgba(200,230,120,0.13)' : 'rgba(40,80,20,0.12)');
-      gr.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = gr; g.beginPath(); g.ellipse(p.x, p.y, r, r * 0.5, 0, 0, Math.PI * 2); g.fill();
-    }
-
-    // in grid-ruimte tekenen (cirkels worden isometrische ellipsen)
-    g.save();
-    g.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-    // meertjes in de wildernis: zachte vormen met een zandrand
-    const blob = (list, r, col) => {
-      g.fillStyle = col; g.beginPath();
-      for (const [x, y] of list) { g.moveTo(x + r, y); g.arc(x, y, r, 0, Math.PI * 2); }
-      g.fill();
-    };
-    if (lakes.length) g.drawImage(...this.lakeImage(lakes, sd));
     const roads = [[mid, mid, mid, T_MAX], [mid, mid, mid, T_MIN], [mid, mid, T_MAX, mid], [mid, mid, T_MIN, mid]];
-    g.lineCap = 'round';
-    for (const [w, col] of [[1.3, 'rgba(95,80,40,0.22)'], [0.98, '#a88a58'], [0.8, '#bfa06b'], [0.36, 'rgba(226,206,160,0.35)']]) {
-      g.strokeStyle = col; g.lineWidth = w;
-      for (const [x0, y0, x1, y1] of roads) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
-    }
-    // karrensporen, licht golvend, met een grasstrookje ertussen buiten de stad
-    for (const [x0, y0, x1, y1] of roads) {
-      const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      for (const [o, col, w] of [[-0.19, 'rgba(105,78,42,0.42)', 0.075], [0.19, 'rgba(105,78,42,0.42)', 0.075], [0, 'rgba(105,150,55,0.22)', 0.1]]) {
-        g.strokeStyle = col; g.lineWidth = w;
-        g.beginPath();
-        for (let t = o === 0 ? 4.5 : 3.2; t <= len; t += 0.25) {
-          const wob = (fbm(t * 0.7, o * 9 + x1 * 0.1 + y1 * 0.13, sd + 40, 2) - 0.5) * 0.12;
-          const x = x0 + ((x1 - x0) / len) * t + vx * (o + wob); const y = y0 + ((y1 - y0) / len) * t + vy * (o + wob);
-          if (t <= (o === 0 ? 4.5 : 3.2)) g.moveTo(x, y); else g.lineTo(x, y);
-        }
-        g.stroke();
-      }
-    }
-    const grad = g.createRadialGradient(mid, mid, 0.5, mid, mid, 3.3);
-    grad.addColorStop(0, '#c9b088'); grad.addColorStop(0.8, '#c2a674'); grad.addColorStop(1, 'rgba(194,166,116,0)');
-    g.fillStyle = grad; g.beginPath(); g.arc(mid, mid, 3.3, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#a99a62'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.55, pd.r * 0.8 + 0.55, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#dccb92'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.38, pd.r * 0.8 + 0.38, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(245,250,255,0.75)'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.1, pd.r * 0.8 + 0.1, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#2f6f9e'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(20,50,90,0.35)'; g.beginPath(); g.ellipse(pd.x + 0.2, pd.y + 0.15, pd.r * 0.6, pd.r * 0.45, 0.4, 0, Math.PI * 2); g.fill();
-    texture('dirt', 0.8, () => {
-      g.rect(mid - 0.45, T_MIN, 0.9, T_W); g.rect(T_MIN, mid - 0.45, T_W, 0.9);
-      g.moveTo(mid + 3.3, mid); g.arc(mid, mid, 3.3, 0, Math.PI * 2);
-    });
-    texture('water', 0.5, () => {
-      g.moveTo(pd.x + pd.r, pd.y); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2);
-    });
-    g.setTransform(WM); g.transform(...ISO);
-    for (const k of ['stone', 'gold']) {
-      const d = this.near[k];
-      g.fillStyle = k === 'gold' ? 'rgba(140,110,65,0.45)' : 'rgba(150,145,130,0.45)';
-      g.beginPath(); g.arc(d.x, d.y, 1.5, 0, Math.PI * 2); g.fill();
-    }
-    g.fillStyle = 'rgba(170,215,100,0.25)'; g.beginPath(); g.arc(this.pasture.x, this.pasture.y, 2.3, 0, Math.PI * 2); g.fill();
-    // plekken van wilde bronnen en het kamp: kale grond
-    for (const d of terr.deposits) {
-      g.fillStyle = d.kind === 'food' ? 'rgba(120,150,60,0.25)' : d.kind === 'wood' ? 'rgba(60,90,30,0.3)' : 'rgba(130,120,100,0.35)';
-      g.beginPath(); g.arc(d.x, d.y, 1.3, 0, Math.PI * 2); g.fill();
-    }
-    if (terr.camp) {
-      g.fillStyle = 'rgba(120,95,60,0.45)'; g.beginPath(); g.arc(terr.camp.x, terr.camp.y, 2.4, 0, Math.PI * 2); g.fill();
-    }
-    g.restore();
-
-    // kasseien op het plein
-    for (let gy = mid - 3.4; gy < mid + 3.4; gy += 0.2) {
-      for (let gx = mid - 3.4; gx < mid + 3.4; gx += 0.2) {
-        const jx = gx + (hashInt(Math.round(gx * 10), Math.round(gy * 10), sd) - 0.5) * 0.08;
-        const jy = gy + (hashInt(Math.round(gy * 10), Math.round(gx * 10), sd + 3) - 0.5) * 0.08;
-        const dist = Math.hypot(jx - mid, jy - mid);
-        if (dist > 3.2 || hashInt(Math.round(gx * 10), Math.round(gy * 10), sd + 4) < (dist - 2.2) * 0.9) continue;
-        const p = toWorld(jx, jy);
-        const v = hashInt(Math.round(gx * 10), Math.round(gy * 10), sd + 5);
-        g.fillStyle = A.mix('#b9aa8c', '#d8cbb0', v);
-        g.beginPath(); g.ellipse(p.x, p.y, 4.6, 2.3, 0, 0, Math.PI * 2); g.fill();
-        g.strokeStyle = 'rgba(90,75,50,0.45)'; g.lineWidth = 0.6; g.stroke();
-        g.fillStyle = 'rgba(255,255,255,0.18)'; g.beginPath(); g.ellipse(p.x - 1, p.y - 0.7, 2, 0.9, 0, 0, Math.PI * 2); g.fill();
-      }
-    }
-    // rafelige wegranden: plukjes zand en gras die over de rand gaan
-    for (const [x0, y0, x1, y1] of roads) {
-      const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      for (let t = 3.4; t < len; t += 0.17) {
-        for (const side of [-1, 1]) {
-          const h = hashInt(Math.round(t * 10), side + x1 * 3 + y1 * 7, sd + 44);
-          const off = side * (0.44 + (h - 0.5) * 0.14);
-          const gx = x0 + ((x1 - x0) / len) * t + vx * off; const gy = y0 + ((y1 - y0) / len) * t + vy * off;
-          const p = toWorld(gx, gy);
-          if (h < 0.55) { g.fillStyle = h < 0.25 ? 'rgba(168,138,88,0.75)' : 'rgba(190,160,108,0.6)'; g.beginPath(); g.ellipse(p.x, p.y, 3 + h * 5, 1.4 + h * 2, 0, 0, Math.PI * 2); g.fill(); }
-          else if (h > 0.78) NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null);
-        }
-      }
-    }
-    // kiezels langs de wegen
-    for (let k = 0; k < 500; k++) {
-      const along = T_MIN + hashInt(k, 31, sd) * T_W;
-      const side = (hashInt(k, 32, sd) - 0.5) * 0.9;
-      const vertical = k % 2 === 0;
-      const gx = vertical ? mid + side : along; const gy = vertical ? along : mid + side;
-      if (Math.hypot(gx - mid, gy - mid) < 3.4) continue;
-      const p = toWorld(gx, gy);
-      g.fillStyle = hashInt(k, 33, sd) < 0.5 ? 'rgba(140,125,100,0.8)' : 'rgba(205,190,160,0.8)';
-      g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.8, 0, 0, Math.PI * 2); g.fill();
-    }
-    // gras, bloemenweitjes, steentjes en een rijke bosbodem
-    this.flowerSpots = [];
     const onRoad = (i, j) => (Math.abs(i - mid) < 0.62 || Math.abs(j - mid) < 0.62);
     const okGround = (i, j) => {
       const t = terr.tiles[tileIndex(Math.floor(i), Math.floor(j))];
       return t !== TILE.WATER && t !== TILE.SAND && !inPond(i, j) && Math.hypot(i - mid, j - mid) > 3.4 && !onRoad(i, j);
     };
-    const tufts = FX.LOW_POWER ? 4200 : 9500;
-    for (let k = 0; k < tufts; k++) {
-      const i = T_MIN + hashInt(k, 3, sd) * T_W; const j = T_MIN + hashInt(k, 4, sd) * T_W;
-      if (!okGround(i, j)) continue;
-      const r = hashInt(k, 5, sd);
-      const forest = fAt(i, j) > 0.45;
-      const p = toWorld(i, j);
-      NAT.tuft(g, p.x, p.y, 0.75 + r * 0.55, forest || r < 0.45 ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', r > 0.82 ? 'rgba(232,240,170,0.7)' : null);
-    }
-    const FLOWERS = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43', '#f2f2f2', '#7fb0f0'];
     const meadows = FX.LOW_POWER ? 45 : 90;
+    this.flowerSpots = [];
     for (let k = 0; k < meadows; k++) {
       const ci = T_MIN + hashInt(k, 71, sd) * T_W; const cj = T_MIN + hashInt(k, 72, sd) * T_W;
       if (!okGround(ci, cj) || fAt(ci, cj) > 0.35) continue;
-      const col = FLOWERS[k % FLOWERS.length]; const col2 = FLOWERS[(k + 3) % FLOWERS.length];
-      const n = 6 + Math.floor(hashInt(k, 73, sd) * 12);
-      for (let q = 0; q < n; q++) {
-        const a = hashInt(k, 80 + q, sd) * Math.PI * 2; const d = Math.sqrt(hashInt(k, 120 + q, sd)) * 1.1;
-        const i = ci + Math.cos(a) * d; const j = cj + Math.sin(a) * d;
-        if (!okGround(i, j)) continue;
-        const p = toWorld(i, j);
-        NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
-      }
       if (ringOf(Math.floor(ci), Math.floor(cj)) <= 6) this.flowerSpots.push(toWorld(ci, cj));
-    }
-    for (let k = 0; k < (FX.LOW_POWER ? 160 : 300); k++) {
-      const i = T_MIN + hashInt(k, 91, sd) * T_W; const j = T_MIN + hashInt(k, 92, sd) * T_W;
-      if (!okGround(i, j)) continue;
-      const p = toWorld(i, j);
-      NAT.pebble(g, p.x, p.y, 0.45 + hashInt(k, 93, sd) * 0.6, hashInt(k, 94, sd) < 0.5 ? '#9c978b' : '#b3ad9f');
-    }
-    // bosbodem: gevallen blad, varens, struikjes, paddenstoelen en een omgevallen stam
-    const LEAVES = ['rgba(150,95,35,0.55)', 'rgba(190,130,45,0.5)', 'rgba(95,85,35,0.5)', 'rgba(120,60,30,0.45)'];
-    for (let j = T_MIN; j < T_MAX; j++) {
-      for (let i = T_MIN; i < T_MAX; i++) {
-        if (terr.tiles[tileIndex(i, j)] !== TILE.FOREST || ringOf(i, j) === 0 || onRoad(i + 0.5, j + 0.5)) continue;
-        for (let q = 0; q < 7; q++) {
-          const p = toWorld(i + hashInt(i * 7 + q, j, sd + 101), j + hashInt(i, j * 7 + q, sd + 102));
-          g.fillStyle = LEAVES[q % 4]; g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.7, q, 0, Math.PI * 2); g.fill();
-        }
-        const r1 = hashInt(i, j, sd + 103); const r2 = hashInt(i, j, sd + 104); const r3 = hashInt(i, j, sd + 105);
-        if (r1 < 0.6) { const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6); NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34'); }
-        if (r2 < 0.3) { const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2); NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28'); }
-        if (r3 < 0.06) { const p = toWorld(i + 0.5, j + 0.6); NAT.mushroom(g, p.x, p.y, 1); NAT.mushroom(g, p.x + 3, p.y + 1, 0.75); }
-        if (r3 > 0.975) { const p = toWorld(i + 0.5, j + 0.5); NAT.log(g, p.x, p.y, 0.9); }
-      }
-    }
-    // riet en waterlelies bij de meertjes
-    for (const [x, y] of lakes) {
-      const i = Math.floor(x); const j = Math.floor(y);
-      const h = hashInt(i, j, sd + 111);
-      const dry = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => tileAt(i + dx, j + dy) !== TILE.WATER);
-      if (dry.length && h < 0.55) {
-        const [dx, dy] = dry[Math.floor(h * 10) % dry.length];
-        const p = toWorld(x + dx * 0.62, y + dy * 0.62);
-        NAT.reed(g, p.x, p.y, 0.8 + h * 0.5);
-      } else if (!dry.length && h < 0.14) {
-        const p = toWorld(x + (h - 0.07) * 4, y);
-        NAT.lily(g, p.x, p.y, 1, h < 0.05);
-      }
-    }
-    // riet en waterlelies rond de vijver
-    for (let k = 0; k < 34; k++) {
-      const a = hashInt(k, 9, sd) * Math.PI * 2;
-      const rr = pd.r * (0.95 + hashInt(k, 10, sd) * 0.25);
-      const p = toWorld(pd.x + Math.cos(a) * rr, pd.y + Math.sin(a) * rr * 0.8);
-      g.strokeStyle = k % 2 ? '#4f7d2c' : '#6a9a3a'; g.lineWidth = 1.2;
-      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - 1.5, p.y - 9); g.moveTo(p.x + 2, p.y); g.lineTo(p.x + 3, p.y - 7); g.moveTo(p.x - 1, p.y); g.lineTo(p.x - 4, p.y - 6); g.stroke();
-      if (k % 3 === 0) { g.fillStyle = '#6b4523'; g.fillRect(p.x - 2.3, p.y - 12, 2, 4.5); }
     }
     this.lilies = [];
     for (let k = 0; k < 7; k++) {
       const a = hashInt(k, 41, sd) * Math.PI * 2; const rr = pd.r * (0.35 + hashInt(k, 42, sd) * 0.5);
       this.lilies.push({ gx: pd.x + Math.cos(a) * rr, gy: pd.y + Math.sin(a) * rr * 0.8, f: k % 3 === 0 });
     }
+    // kasseien op het plein: in kringen rond het midden, met een sierring van donkere stenen
+    const plaza = [];
+    {
+      const SP = 0.14;
+      const PAL = [[186, 174, 148], [204, 193, 168], [170, 162, 144], [195, 181, 151], [178, 170, 158], [210, 200, 178]];
+      for (let k = 0; ; k++) {
+        const r = 0.16 + k * SP;
+        if (r > 3.22) break;
+        const n = Math.max(5, Math.round((Math.PI * 2 * r) / 0.16));
+        const off = hashInt(k, 5, sd + 501) * Math.PI * 2;
+        const band = k % 7 === 4 || k === 1;
+        for (let q = 0; q < n; q++) {
+          const id = k * 131 + q;
+          const h = hashInt(id, 7, sd + 502);
+          if (r > 2.45 && h < (r - 2.45) * 1.05) continue; // rafelige rand: buiten het plein zand
+          const a0 = off + (q / n) * Math.PI * 2; const a1 = off + ((q + 1) / n) * Math.PI * 2;
+          const ga = (a1 - a0) * 0.045; const gr = 0.011;
+          const ri = Math.max(0.02, r - SP / 2 + gr); const ro = r + SP / 2 - gr;
+          const jit = (u) => (hashInt(id, u, sd + 503) - 0.5) * 0.016;
+          const P = [];
+          let cx = 0; let cy = 0;
+          [[ri, a0 + ga], [ri, a1 - ga], [ro, a1 - ga], [ro, a0 + ga]].forEach(([rr, aa], c) => {
+            const w = toWorld(mid + Math.cos(aa) * rr + jit(c * 2), mid + Math.sin(aa) * rr + jit(c * 2 + 1));
+            P.push(w.x, w.y); cx += w.x / 4; cy += w.y / 4;
+          });
+          const v = hashInt(id, 9, sd + 504);
+          let col = PAL[Math.floor(hashInt(id, 11, sd + 505) * PAL.length)];
+          if (band) col = v < 0.5 ? [150, 132, 112] : [166, 128, 104];
+          const b = 0.92 + v * 0.14;
+          plaza.push({ P, col: [col[0] * b, col[1] * b, col[2] * b], cx, cy });
+        }
+      }
+      plaza.sort((a, b) => a.cy - b.cy);
+    }
+    // korrels en grasplukjes: plaatsen één keer uitrekenen (elk stuk overloopt dan enkel een lijst)
+    const grains = [[], [], []];
+    {
+      const n = FX.LOW_POWER ? 9000 : 22000;
+      for (let k = 0; k < n; k++) {
+        const i = T_MIN + hashInt(k, 61, sd) * T_W; const j = T_MIN + hashInt(k, 62, sd) * T_W;
+        if (terr.tiles[tileIndex(Math.floor(i), Math.floor(j))] === TILE.WATER) continue;
+        const p = toWorld(i, j);
+        grains[k % 3].push(p.x, p.y);
+      }
+    }
+    const tuftList = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 4200 : 9500); k++) {
+      const i = T_MIN + hashInt(k, 3, sd) * T_W; const j = T_MIN + hashInt(k, 4, sd) * T_W;
+      if (!okGround(i, j)) continue;
+      const r = hashInt(k, 5, sd);
+      const p = toWorld(i, j);
+      tuftList.push({ x: p.x, y: p.y, s: 0.75 + r * 0.55, col: fAt(i, j) > 0.45 || r < 0.45 ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', tip: r > 0.82 ? 'rgba(232,240,170,0.7)' : null });
+    }
+    const FLOWERS = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43', '#f2f2f2', '#7fb0f0'];
+    const LEAVES = ['rgba(150,95,35,0.55)', 'rgba(190,130,45,0.5)', 'rgba(95,85,35,0.5)', 'rgba(120,60,30,0.45)'];
+
+    // ---------- tekenen: g staat in wereldcoördinaten (schaal S), R = het stuk dat getekend moet worden ----------
+    // S = 0: de gebakken grond op lage resolutie (zonder de fijne texturen).
+    this.paintGround = (g, R, S = 0) => {
+      const WM = g.getTransform();
+      const vis = (x, y, m) => x > R.x0 - m && x < R.x1 + m && y > R.y0 - m && y < R.y1 + m;
+      const gvis = (gx, gy, m) => { const p = toWorld(gx, gy); return vis(p.x, p.y, m); };
+      // textuur over een vorm leggen; de vorm wordt in tegelruimte opgebouwd, de textuur ligt in wereldpixels
+      const texture = (kind, alpha, shape) => {
+        g.save();
+        g.setTransform(WM); g.transform(...ISO);
+        g.beginPath(); shape();
+        g.setTransform(WM);
+        g.globalCompositeOperation = 'overlay'; g.globalAlpha = S ? alpha * 0.7 : alpha;
+        g.fillStyle = g.createPattern(this.tex[kind], 'repeat');
+        g.fill('nonzero');
+        if (S) for (const [pat, a] of GH.hdPatterns(g, kind, S)) { g.globalAlpha = a; g.fillStyle = pat; g.fill('nonzero'); }
+        g.restore();
+      };
+      const ell = (x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill(); };
+      g.save();
+      g.transform(...ISO);
+      g.imageSmoothingEnabled = true;
+      if (S) g.imageSmoothingQuality = 'high';
+      g.drawImage(base, T_MIN, T_MIN, T_W, T_W);
+      g.restore();
+      texture('grass', 0.62, () => g.rect(T_MIN, T_MIN, T_W, T_W));
+      texture('forest', 0.75, () => {
+        for (let j = T_MIN; j < T_MAX; j++) {
+          for (let i = T_MIN; i < T_MAX; i++) {
+            if (forestD[tileIndex(i, j)] < 0.45 || !gvis(i + 0.5, j + 0.5, 70)) continue;
+            g.moveTo(i + 0.5 + 0.9, j + 0.5); g.arc(i + 0.5, j + 0.5, 0.9, 0, Math.PI * 2);
+          }
+        }
+      });
+      // fijne korrel in het gras (anders oogt de grond te glad)
+      ['rgba(25,55,12,0.16)', 'rgba(255,255,205,0.10)', 'rgba(70,100,25,0.14)'].forEach((col, c) => {
+        g.fillStyle = col;
+        const L = grains[c];
+        for (let k = 0; k < L.length; k += 2) {
+          const x = L[k]; const y = L[k + 1];
+          if (x < R.x0 - 3 || x > R.x1 + 3 || y < R.y0 - 3 || y > R.y1 + 3) continue;
+          if (S) ell(x + 0.9, y + 0.45, 0.95, 0.5); else g.fillRect(x, y, 1.8, 0.9);
+        }
+      });
+      // grote, zachte kleurvlekken voor een natuurlijke look
+      for (let k = 0; k < 140; k++) {
+        const i = T_MIN + hashInt(k, 21, sd) * T_W; const j = T_MIN + hashInt(k, 22, sd) * T_W;
+        const p = toWorld(i, j);
+        const r = 30 + hashInt(k, 23, sd) * 80;
+        if (!vis(p.x, p.y, r)) continue;
+        const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        const light = k % 2 === 0;
+        gr.addColorStop(0, light ? 'rgba(200,230,120,0.13)' : 'rgba(40,80,20,0.12)');
+        gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.beginPath(); g.ellipse(p.x, p.y, r, r * 0.5, 0, 0, Math.PI * 2); g.fill();
+      }
+
+      // in grid-ruimte tekenen (cirkels worden isometrische ellipsen)
+      g.save();
+      g.transform(...ISO);
+      if (lakeImg) g.drawImage(...lakeImg);
+      g.lineCap = 'round';
+      for (const [w, col] of [[1.3, 'rgba(95,80,40,0.22)'], [0.98, '#a88a58'], [0.8, '#bfa06b'], [0.36, 'rgba(226,206,160,0.35)']]) {
+        g.strokeStyle = col; g.lineWidth = w;
+        for (const [x0, y0, x1, y1] of roads) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+      }
+      // karrensporen, licht golvend, met een grasstrookje ertussen buiten de stad
+      for (const [x0, y0, x1, y1] of roads) {
+        const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        for (const [o, col, w] of [[-0.19, 'rgba(105,78,42,0.42)', 0.075], [0.19, 'rgba(105,78,42,0.42)', 0.075], [0, 'rgba(105,150,55,0.22)', 0.1]]) {
+          g.strokeStyle = col; g.lineWidth = w;
+          g.beginPath();
+          for (let t = o === 0 ? 4.5 : 3.2; t <= len; t += 0.25) {
+            const wob = (fbm(t * 0.7, o * 9 + x1 * 0.1 + y1 * 0.13, sd + 40, 2) - 0.5) * 0.12;
+            const x = x0 + ((x1 - x0) / len) * t + vx * (o + wob); const y = y0 + ((y1 - y0) / len) * t + vy * (o + wob);
+            if (t <= (o === 0 ? 4.5 : 3.2)) g.moveTo(x, y); else g.lineTo(x, y);
+          }
+          g.stroke();
+        }
+      }
+      const grad = g.createRadialGradient(mid, mid, 0.5, mid, mid, 3.3);
+      grad.addColorStop(0, '#c9b088'); grad.addColorStop(0.8, '#c2a674'); grad.addColorStop(1, 'rgba(194,166,116,0)');
+      g.fillStyle = grad; g.beginPath(); g.arc(mid, mid, 3.3, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#a99a62'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.55, pd.r * 0.8 + 0.55, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#dccb92'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.38, pd.r * 0.8 + 0.38, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(245,250,255,0.75)'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.1, pd.r * 0.8 + 0.1, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#2f6f9e'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(20,50,90,0.35)'; g.beginPath(); g.ellipse(pd.x + 0.2, pd.y + 0.15, pd.r * 0.6, pd.r * 0.45, 0.4, 0, Math.PI * 2); g.fill();
+      texture('dirt', 0.8, () => {
+        g.rect(mid - 0.45, T_MIN, 0.9, T_W); g.rect(T_MIN, mid - 0.45, T_W, 0.9);
+        g.moveTo(mid + 3.3, mid); g.arc(mid, mid, 3.3, 0, Math.PI * 2);
+      });
+      texture('water', 0.5, () => {
+        g.moveTo(pd.x + pd.r, pd.y); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2);
+      });
+      g.setTransform(WM); g.transform(...ISO);
+      for (const k of ['stone', 'gold']) {
+        const d = this.near[k];
+        g.fillStyle = k === 'gold' ? 'rgba(140,110,65,0.45)' : 'rgba(150,145,130,0.45)';
+        g.beginPath(); g.arc(d.x, d.y, 1.5, 0, Math.PI * 2); g.fill();
+      }
+      g.fillStyle = 'rgba(170,215,100,0.25)'; g.beginPath(); g.arc(this.pasture.x, this.pasture.y, 2.3, 0, Math.PI * 2); g.fill();
+      // plekken van wilde bronnen en het kamp: kale grond
+      for (const d of terr.deposits) {
+        g.fillStyle = d.kind === 'food' ? 'rgba(120,150,60,0.25)' : d.kind === 'wood' ? 'rgba(60,90,30,0.3)' : 'rgba(130,120,100,0.35)';
+        g.beginPath(); g.arc(d.x, d.y, 1.3, 0, Math.PI * 2); g.fill();
+      }
+      if (terr.camp) {
+        g.fillStyle = 'rgba(120,95,60,0.45)'; g.beginPath(); g.arc(terr.camp.x, terr.camp.y, 2.4, 0, Math.PI * 2); g.fill();
+      }
+      // plein: voegen (donker zand) onder de kasseien, naar de rand toe zachter
+      if (gvis(mid, mid, 230)) {
+        const mo = g.createRadialGradient(mid, mid, 0, mid, mid, 3.25);
+        mo.addColorStop(0, 'rgba(104,92,72,0.95)'); mo.addColorStop(0.74, 'rgba(110,96,74,0.92)'); mo.addColorStop(1, 'rgba(120,102,76,0)');
+        g.fillStyle = mo; g.beginPath(); g.arc(mid, mid, 3.25, 0, Math.PI * 2); g.fill();
+      }
+      g.restore();
+
+      // mos en grasjes in de voegen, dan de kasseien (van achter naar voor)
+      for (let k = 0; k < 420; k++) {
+        const a = hashInt(k, 601, sd) * Math.PI * 2; const r = 0.4 + Math.sqrt(hashInt(k, 602, sd)) * 2.8;
+        const p = toWorld(mid + Math.cos(a) * r, mid + Math.sin(a) * r);
+        if (!vis(p.x, p.y, 3)) continue;
+        g.fillStyle = k % 3 ? 'rgba(88,118,48,0.55)' : 'rgba(120,150,60,0.5)';
+        ell(p.x, p.y, 1.1, 0.55);
+      }
+      for (const st of plaza) if (vis(st.cx, st.cy, 9)) GH.stone(g, st.P, st.col, 1, 1);
+      // rafelige wegranden: plukjes zand en gras die over de rand gaan
+      for (const [x0, y0, x1, y1] of roads) {
+        const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        for (let t = 3.4; t < len; t += 0.17) {
+          for (const side of [-1, 1]) {
+            const h = hashInt(Math.round(t * 10), side + x1 * 3 + y1 * 7, sd + 44);
+            const off = side * (0.44 + (h - 0.5) * 0.14);
+            const gx = x0 + ((x1 - x0) / len) * t + vx * off; const gy = y0 + ((y1 - y0) / len) * t + vy * off;
+            const p = toWorld(gx, gy);
+            if (!vis(p.x, p.y, 10)) continue;
+            if (h < 0.55) { g.fillStyle = h < 0.25 ? 'rgba(168,138,88,0.75)' : 'rgba(190,160,108,0.6)'; g.beginPath(); g.ellipse(p.x, p.y, 3 + h * 5, 1.4 + h * 2, 0, 0, Math.PI * 2); g.fill(); }
+            else if (h > 0.78) NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null);
+          }
+        }
+      }
+      // grind op de aardewegen: kleine steentjes met een schaduwkant
+      for (let k = 0; k < (FX.LOW_POWER ? 1600 : 3400); k++) {
+        const along = T_MIN + hashInt(k, 34, sd) * T_W;
+        const side = (hashInt(k, 35, sd) - 0.5) * 0.84;
+        const vertical = k % 2 === 0;
+        const gx = vertical ? mid + side : along; const gy = vertical ? along : mid + side;
+        if (Math.hypot(gx - mid, gy - mid) < 3.4) continue;
+        const p = toWorld(gx, gy);
+        if (!vis(p.x, p.y, 3)) continue;
+        const r = 0.3 + hashInt(k, 36, sd) * 0.6;
+        g.fillStyle = 'rgba(70,52,30,0.5)'; ell(p.x + r * 0.3, p.y + r * 0.4, r, r * 0.6);
+        g.fillStyle = hashInt(k, 37, sd) < 0.5 ? 'rgba(150,136,112,0.95)' : 'rgba(208,194,164,0.95)'; ell(p.x, p.y, r * 0.85, r * 0.5);
+      }
+      // kiezels langs de wegen
+      for (let k = 0; k < 500; k++) {
+        const along = T_MIN + hashInt(k, 31, sd) * T_W;
+        const side = (hashInt(k, 32, sd) - 0.5) * 0.9;
+        const vertical = k % 2 === 0;
+        const gx = vertical ? mid + side : along; const gy = vertical ? along : mid + side;
+        if (Math.hypot(gx - mid, gy - mid) < 3.4) continue;
+        const p = toWorld(gx, gy);
+        if (!vis(p.x, p.y, 3)) continue;
+        if (S) { NAT.pebble(g, p.x, p.y, 0.55, hashInt(k, 33, sd) < 0.5 ? '#8f8573' : '#c9bb9c'); continue; }
+        g.fillStyle = hashInt(k, 33, sd) < 0.5 ? 'rgba(140,125,100,0.8)' : 'rgba(205,190,160,0.8)';
+        ell(p.x, p.y, 1.4, 0.8);
+      }
+      // gras, bloemenweitjes, steentjes en een rijke bosbodem
+      for (const t of tuftList) if (vis(t.x, t.y, 7)) NAT.tuft(g, t.x, t.y, t.s, t.col, t.tip);
+      for (let k = 0; k < meadows; k++) {
+        const ci = T_MIN + hashInt(k, 71, sd) * T_W; const cj = T_MIN + hashInt(k, 72, sd) * T_W;
+        if (!gvis(ci, cj, 80) || !okGround(ci, cj) || fAt(ci, cj) > 0.35) continue;
+        const col = FLOWERS[k % FLOWERS.length]; const col2 = FLOWERS[(k + 3) % FLOWERS.length];
+        const n = 6 + Math.floor(hashInt(k, 73, sd) * 12);
+        for (let q = 0; q < n; q++) {
+          const a = hashInt(k, 80 + q, sd) * Math.PI * 2; const d = Math.sqrt(hashInt(k, 120 + q, sd)) * 1.1;
+          const i = ci + Math.cos(a) * d; const j = cj + Math.sin(a) * d;
+          if (!okGround(i, j)) continue;
+          const p = toWorld(i, j);
+          if (!vis(p.x, p.y, 4)) continue;
+          NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
+        }
+      }
+      for (let k = 0; k < (FX.LOW_POWER ? 160 : 300); k++) {
+        const i = T_MIN + hashInt(k, 91, sd) * T_W; const j = T_MIN + hashInt(k, 92, sd) * T_W;
+        const p = toWorld(i, j);
+        if (!vis(p.x, p.y, 4) || !okGround(i, j)) continue;
+        NAT.pebble(g, p.x, p.y, 0.45 + hashInt(k, 93, sd) * 0.6, hashInt(k, 94, sd) < 0.5 ? '#9c978b' : '#b3ad9f');
+      }
+      // bosbodem: gevallen blad, varens, struikjes, paddenstoelen en een omgevallen stam
+      for (let j = T_MIN; j < T_MAX; j++) {
+        for (let i = T_MIN; i < T_MAX; i++) {
+          if (terr.tiles[tileIndex(i, j)] !== TILE.FOREST || ringOf(i, j) === 0 || onRoad(i + 0.5, j + 0.5)) continue;
+          if (!gvis(i + 0.5, j + 0.5, 48)) continue;
+          for (let q = 0; q < 7; q++) {
+            const p = toWorld(i + hashInt(i * 7 + q, j, sd + 101), j + hashInt(i, j * 7 + q, sd + 102));
+            g.fillStyle = LEAVES[q % 4]; g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.7, q, 0, Math.PI * 2); g.fill();
+          }
+          const r1 = hashInt(i, j, sd + 103); const r2 = hashInt(i, j, sd + 104); const r3 = hashInt(i, j, sd + 105);
+          if (r1 < 0.6) { const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6); NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34'); }
+          if (r2 < 0.3) { const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2); NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28'); }
+          if (r3 < 0.06) { const p = toWorld(i + 0.5, j + 0.6); NAT.mushroom(g, p.x, p.y, 1); NAT.mushroom(g, p.x + 3, p.y + 1, 0.75); }
+          if (r3 > 0.975) { const p = toWorld(i + 0.5, j + 0.5); NAT.log(g, p.x, p.y, 0.9); }
+        }
+      }
+      // riet en waterlelies bij de meertjes
+      for (const [x, y] of lakes) {
+        if (!gvis(x, y, 60)) continue;
+        const i = Math.floor(x); const j = Math.floor(y);
+        const h = hashInt(i, j, sd + 111);
+        const dry = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => tileAt(i + dx, j + dy) !== TILE.WATER);
+        if (dry.length && h < 0.55) {
+          const [dx, dy] = dry[Math.floor(h * 10) % dry.length];
+          const p = toWorld(x + dx * 0.62, y + dy * 0.62);
+          NAT.reed(g, p.x, p.y, 0.8 + h * 0.5);
+        } else if (!dry.length && h < 0.14) {
+          const p = toWorld(x + (h - 0.07) * 4, y);
+          NAT.lily(g, p.x, p.y, 1, h < 0.05);
+        }
+      }
+      // riet rond de vijver
+      for (let k = 0; k < 34; k++) {
+        const a = hashInt(k, 9, sd) * Math.PI * 2;
+        const rr = pd.r * (0.95 + hashInt(k, 10, sd) * 0.25);
+        const p = toWorld(pd.x + Math.cos(a) * rr, pd.y + Math.sin(a) * rr * 0.8);
+        if (!vis(p.x, p.y, 14)) continue;
+        g.strokeStyle = k % 2 ? '#4f7d2c' : '#6a9a3a'; g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - 1.5, p.y - 9); g.moveTo(p.x + 2, p.y); g.lineTo(p.x + 3, p.y - 7); g.moveTo(p.x - 1, p.y); g.lineTo(p.x - 4, p.y - 6); g.stroke();
+        if (k % 3 === 0) { g.fillStyle = '#6b4523'; g.fillRect(p.x - 2.3, p.y - 12, 2, 4.5); }
+      }
+    };
+
+    // de gebakken grond (uitgezoomd)
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(W * BAKE); cv.height = Math.round(H * BAKE);
+    const g = cv.getContext('2d');
+    g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
+    this.paintGround(g, { x0: this.groundOrigin.x, y0: this.groundOrigin.y, x1: this.groundOrigin.x + W, y1: this.groundOrigin.y + H }, 0);
     this.ground = { cv, W, H };
     this.groundComp = null;
+    if (this.hdg) this.hdg.clear();
 
     // vaste versiering: struiken, rotsen en de grondstofplekjes vlak bij de stad
     const decor = [];
@@ -1828,39 +1873,54 @@ export class TownView {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, cv.width, cv.height);
     g.drawImage(gnd.cv, 0, 0);
-    if (alpha >= 0.02) {
-      g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
-      g.beginPath();
-      const Ls = 26 * (Math.round(len * 10) / 10);
-      const rx = Ls * 0.55 + 6;
-      for (const d of this.visTrees) {
-        const p = toWorld(d.gx, d.gy);
-        const ex = p.x + 4 + Ls * 0.5; const ey = p.y + 2 + Ls * 0.2;
-        g.moveTo(ex + rx * Math.cos(0.38), ey + rx * Math.sin(0.38));
-        g.ellipse(ex, ey, rx, 5, 0.38, 0, Math.PI * 2);
-      }
-      g.fillStyle = `rgba(20,32,8,${Math.round(alpha * 40) / 40})`;
-      g.fill('nonzero');
-    }
+    g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
+    this.paintTreeShadows(g, null, len, alpha);
     if (dress) {
       g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
       g.drawImage(dress.cv, dress.x, dress.y, dress.W, dress.H);
     }
-    this.groundComp = { cv, key };
+    this.groundComp = { cv, key, len, alpha };
     return cv;
   }
 
-  // fijne grassprietjes en korrels over de grond zodra je dichtbij kijkt (de gebakken grond wordt dan wazig)
-  drawGroundDetail(ctx, v) {
-    const zf = this.cam.zoom * this.cam.dpr;
-    if (zf < 1.3 || (FX.LOW_POWER && this.cam.zoom < 1.8)) return;
-    if (!this.detailPat) this.detailPat = ctx.createPattern(groundDetail(), 'repeat');
-    ctx.save();
-    ctx.globalCompositeOperation = 'soft-light';
-    ctx.globalAlpha = Math.min(0.85, (zf - 1.3) * 0.9);
-    ctx.fillStyle = this.detailPat;
-    ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
-    ctx.restore();
+  // schaduwen van de bomen op de grond (R = enkel dit stuk, null = alles)
+  paintTreeShadows(g, R, len, alpha) {
+    if (alpha < 0.02) return;
+    g.beginPath();
+    const Ls = 26 * (Math.round(len * 10) / 10);
+    const rx = Ls * 0.55 + 6;
+    for (const d of this.visTrees) {
+      const p = toWorld(d.gx, d.gy);
+      const ex = p.x + 4 + Ls * 0.5; const ey = p.y + 2 + Ls * 0.2;
+      if (R && (ex < R.x0 - rx || ex > R.x1 + rx || ey < R.y0 - 8 || ey > R.y1 + 8)) continue;
+      g.moveTo(ex + rx * Math.cos(0.38), ey + rx * Math.sin(0.38));
+      g.ellipse(ex, ey, rx, 5, 0.38, 0, Math.PI * 2);
+    }
+    g.fillStyle = `rgba(20,32,8,${Math.round(alpha * 40) / 40})`;
+    g.fill('nonzero');
+  }
+
+  // Ingezoomd: de grond in scherpe stukken op schermresolutie (zie groundhd.js), over de gebakken grond heen.
+  drawGroundHD(ctx, vis, dress) {
+    const need = this.cam.zoom * this.cam.dpr;
+    if (!GH.hdTier(need) || !this.groundComp) return;
+    if (!this.hdg) this.hdg = new GH.HDGround();
+    const L = this.groundComp;
+    const o = this.groundOrigin;
+    const bounds = { x0: o.x, y0: o.y, x1: o.x + this.ground.W, y1: o.y + this.ground.H };
+    const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
+    this.hdPending = this.hdg.draw(ctx, vis, need, bounds, L.key, (g, R, S) => {
+      this.paintGround(g, R, S);
+      this.paintTreeShadows(g, R, L.len, L.alpha);
+      if (dress) dress.paint(g, R, S);
+      // fijne korrel over alles (stenen, aarde, gras), enkel binnen het gebied
+      const WM = g.getTransform();
+      g.save();
+      g.transform(...ISO); g.beginPath(); g.rect(T_MIN, T_MIN, T_W, T_W); g.setTransform(WM); g.clip();
+      g.globalCompositeOperation = 'overlay';
+      for (const [pat, a] of GH.hdPatterns(g, 'grain', S)) { g.globalAlpha = a; g.fillStyle = pat; g.fillRect(R.x0, R.y0, R.x1 - R.x0, R.y1 - R.y0); }
+      g.restore();
+    });
   }
 
   // ligt er in beeld ergens mist? (anders hoeft die laag niet getekend te worden)
@@ -1958,7 +2018,7 @@ export class TownView {
     // aankleding (straten, paadjes, tuintjes, zachte schaduwen) zit mee in de grondafbeelding; in een slag gewone schaduwen
     const dress = this.battleMode ? null : this.townDress(segs, wallLevel, light);
     drawSub(ctx, this.groundLayer(this.light, dress), BAKE, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H, vis);
-    this.drawGroundDetail(ctx, vis);
+    this.drawGroundHD(ctx, vis, dress);
     this.drawPond(ctx, t);
     this.drawLakes(ctx, t);
 

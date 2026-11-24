@@ -10,6 +10,7 @@ import { isoFns, hashInt } from './iso.js';
 import { BUILDINGS, TOWN_GRID } from '../shared/rules.js';
 import { ringOf, ringForAge } from '../shared/territory.js';
 import * as S3 from './sprite3d.js';
+import { stone } from './groundhd.js';
 
 const { toWorld } = isoFns(A.TW, A.TH);
 const N = TOWN_GRID;
@@ -292,49 +293,18 @@ export function buildDress(o) {
   const xa = toWorld(L, R).x - 20; const xb = toWorld(R, L).x + 140;
   const ya = toWorld(L, L).y - 30; const yb = toWorld(R, R).y + 30;
   const W = xb - xa; const H = yb - ya;
-  const cv = document.createElement('canvas');
-  cv.width = Math.round(W * DS); cv.height = Math.round(H * DS);
-  const g = cv.getContext('2d');
-  g.scale(DS, DS); g.translate(-xa, -ya);
-  const WM = g.getTransform();
-  const grid = () => { g.setTransform(WM); g.transform(...ISO); };
-  const world = () => g.setTransform(WM);
-  let rs = (seed * 7919) % 2147483647 || 1;
-  const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
+  const H3 = (a, b, k) => hashInt(a, b, seed + k);
   const inTown = (gx, gy) => ringOf(Math.floor(gx), Math.floor(gy)) <= ring;
+  const corners = (pts) => { const P = []; let cx = 0; let cy = 0; for (const [gx, gy] of pts) { const w = toWorld(gx, gy); P.push(w.x, w.y); cx += w.x / 4; cy += w.y / 4; } return { P, cx, cy }; };
 
+  // ---------- voorbereiden: alles op vaste (gehashte) plaatsen, zodat elk stuk apart getekend kan worden ----------
   // 1. bewoonde grond: wat droger, plekjes aangestampte aarde
-  grid();
+  const patches = [];
   for (let k = 0; k < 140; k++) {
-    const gx = -ring + rnd() * (N + 2 * ring); const gy = -ring + rnd() * (N + 2 * ring);
-    const r = 0.4 + rnd() * 1.2;
-    const gr = g.createRadialGradient(gx, gy, 0, gx, gy, r);
-    const dry = rnd() < 0.6;
-    gr.addColorStop(0, dry ? 'rgba(186,170,96,0.16)' : 'rgba(70,95,35,0.14)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr; g.beginPath(); g.arc(gx, gy, r, 0, Math.PI * 2); g.fill();
+    patches.push({ gx: -ring + H3(k, 1, 201) * (N + 2 * ring), gy: -ring + H3(k, 2, 201) * (N + 2 * ring), r: 0.4 + H3(k, 3, 201) * 1.2, dry: H3(k, 4, 201) < 0.6 });
   }
 
-  // 2. erven voor de deur en zachte donkere voet (ambient occlusion) onder elk gebouw
-  for (const b of placed) {
-    const size = BUILDINGS[b.type].size || 1;
-    const cx = b.x + size / 2; const cy = b.y + size / 2;
-    if (b.type !== 'farm') {
-      const yard = ['barracks', 'range', 'stable'].includes(b.type) ? 0.75 : b.type === 'tc' || b.type === 'monument' ? 0 : 0.5;
-      if (yard) {
-        const yx = cx; const yy = b.y + size + 0.15;
-        const gr = g.createRadialGradient(yx, yy, 0, yx, yy, yard);
-        gr.addColorStop(0, 'rgba(160,128,84,0.6)'); gr.addColorStop(0.7, 'rgba(160,128,84,0.35)'); gr.addColorStop(1, 'rgba(160,128,84,0)');
-        g.fillStyle = gr; g.beginPath(); g.ellipse(yx, yy, yard, yard * 0.75, 0, 0, Math.PI * 2); g.fill();
-      }
-    }
-    if (S3.has(b.type)) continue; // 3D-gebouwen hebben hun eigen schaduw en voet
-    const ao = size * 0.78;
-    const gr = g.createRadialGradient(cx, cy, size * 0.25, cx, cy, ao);
-    gr.addColorStop(0, 'rgba(25,20,8,0.42)'); gr.addColorStop(0.6, 'rgba(25,20,8,0.22)'); gr.addColorStop(1, 'rgba(25,20,8,0)');
-    g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, ao, 0, Math.PI * 2); g.fill();
-  }
-
-  // 3. moestuintjes naast huizen (rijen groenten), hooiveldjes bij boerderijen
+  // 3. moestuintjes naast huizen (rijen groenten)
   const gardens = [];
   for (const b of placed) {
     if (b.type !== 'house') continue;
@@ -342,28 +312,9 @@ export function buildDress(o) {
       const i = b.x + dx; const j = b.y + dy;
       if (!free(i, j) || onRoad(i + 0.5, j + 0.5) || inPlaza(i + 0.5, j + 0.5) || !inTown(i + 0.5, j + 0.5)) continue;
       if (hashInt(i, j, seed + 5) > 0.42 || gardens.some((q) => q.i === i && q.j === j)) continue;
-      gardens.push({ i, j, b });
+      gardens.push({ i, j, b, along: hashInt(i, j, seed + 6) < 0.5, crop: Math.floor(hashInt(j, i, seed + 7) * 4) });
       break;
     }
-  }
-  for (const q of gardens) {
-    const { i, j } = q;
-    const x0 = i + 0.14; const y0 = j + 0.14; const w = 0.72; const h = 0.72;
-    g.fillStyle = 'rgba(105,74,44,0.9)'; g.fillRect(x0, y0, w, h);
-    const along = hashInt(i, j, seed + 6) < 0.5;
-    const crop = ['#5f9a3a', '#7fae46', '#3f7a2c', '#9a8a3a'][Math.floor(hashInt(j, i, seed + 7) * 4)];
-    for (let r = 0; r < 5; r++) {
-      const t = 0.08 + r * 0.14;
-      g.fillStyle = 'rgba(70,48,28,0.6)';
-      if (along) g.fillRect(x0, y0 + t - 0.02, w, 0.04); else g.fillRect(x0 + t - 0.02, y0, 0.04, h);
-      for (let k = 0; k < 6; k++) {
-        const u = 0.08 + k * 0.12;
-        const px = along ? x0 + u : x0 + t + 0.06; const py = along ? y0 + t + 0.06 : y0 + u;
-        g.fillStyle = crop; g.beginPath(); g.arc(px, py, 0.045, 0, Math.PI * 2); g.fill();
-        g.fillStyle = 'rgba(200,240,140,0.5)'; g.beginPath(); g.arc(px - 0.012, py - 0.012, 0.018, 0, Math.PI * 2); g.fill();
-      }
-    }
-    g.strokeStyle = 'rgba(70,50,30,0.6)'; g.lineWidth = 0.03; g.strokeRect(x0, y0, w, h);
   }
 
   // 4. paadjes van de deur (voorkant, +y) naar de dichtstbijzijnde straat of het plein
@@ -403,61 +354,221 @@ export function buildDress(o) {
     }
     paths.push(sm);
   }
-  g.lineCap = 'round'; g.lineJoin = 'round';
-  for (const [w, col] of [[0.42, 'rgba(110,88,52,0.3)'], [0.3, 'rgba(162,132,88,0.8)'], [0.12, 'rgba(204,180,132,0.45)']]) {
-    g.strokeStyle = col; g.lineWidth = w;
-    for (const p of paths) { g.beginPath(); g.moveTo(...p[0]); for (const q of p.slice(1)) g.lineTo(...q); g.stroke(); }
-  }
-  for (const p of paths) {
+  // stapstenen en kiezels langs de paadjes
+  const flags = [];
+  const pebbles = [];
+  paths.forEach((p, pi) => {
+    let acc = 0.08; let n = 0;
     for (let k = 1; k < p.length; k++) {
-      if (rnd() < 0.5) continue;
-      const [x, y] = p[k]; const side = rnd() < 0.5 ? -1 : 1;
-      g.fillStyle = rnd() < 0.5 ? 'rgba(120,112,98,0.7)' : 'rgba(196,186,164,0.7)';
-      g.beginPath(); g.arc(x + side * (0.12 + rnd() * 0.06), y + (rnd() - 0.5) * 0.2, 0.025 + rnd() * 0.02, 0, Math.PI * 2); g.fill();
-    }
-  }
-
-  // 5. geplaveide straten vanaf het Bronstijdperk, met stoeprand
-  if (age >= 2) {
-    const pave = (horiz) => {
-      for (let t = -ring; t < N + ring; t += 0.16) {
-        const along = t + 0.08;
-        for (let u = -0.42; u < 0.44; u += 0.17) {
-          const off = (Math.round(t / 0.16) % 2) * 0.085;
-          const gx = horiz ? along : MID + u + off - 0.04; const gy = horiz ? MID + u + off - 0.04 : along;
-          if (!horiz && Math.abs(gx - MID) > 0.44) continue;
-          if (horiz && Math.abs(gy - MID) > 0.44) continue;
-          if (!inTown(gx, gy)) continue;
-          const v = rnd();
-          g.fillStyle = `rgb(${150 + v * 50},${140 + v * 46},${118 + v * 40})`;
-          g.beginPath(); g.ellipse(gx, gy, 0.075, 0.065, 0, 0, Math.PI * 2); g.fill();
-          g.fillStyle = 'rgba(255,255,240,0.22)'; g.beginPath(); g.ellipse(gx - 0.015, gy - 0.02, 0.04, 0.03, 0, 0, Math.PI * 2); g.fill();
+      const [ax, ay] = p[k - 1]; const [bx, by] = p[k];
+      const L = Math.hypot(bx - ax, by - ay);
+      if (L < 1e-6) continue;
+      const ux = (bx - ax) / L; const uy = (by - ay) / L;
+      for (; acc < L; acc += 0.2) {
+        const x = ax + ux * acc; const y = ay + uy * acc; n++;
+        if (goal(Math.floor(x), Math.floor(y)) && onRoad(x, y)) continue;
+        const h = H3(pi * 977 + n, 1, 301); const h2 = H3(pi * 977 + n, 2, 301);
+        if (h < 0.12) continue; // hier en daar ontbreekt een steen
+        const a = 0.065 + h2 * 0.02; const w = 0.075 + h * 0.025; const jx = (h2 - 0.5) * 0.04; const jy = (h - 0.5) * 0.04;
+        const cx = x + jx; const cy = y + jy;
+        const c = corners([[cx - ux * a - uy * w, cy - uy * a + ux * w], [cx + ux * a - uy * w, cy + uy * a + ux * w], [cx + ux * a + uy * w, cy + uy * a - ux * w], [cx - ux * a + uy * w, cy - uy * a - ux * w]]);
+        const v = 0.9 + h2 * 0.18;
+        c.col = [168 * v, 158 * v, 136 * v];
+        flags.push(c);
+        if (h > 0.55) {
+          const side = h2 < 0.5 ? -1 : 1;
+          const w2 = toWorld(x - uy * side * (0.16 + h * 0.05), y + ux * side * (0.16 + h * 0.05));
+          pebbles.push({ x: w2.x, y: w2.y, r: 0.6 + h2 * 0.7, light: h2 < 0.5 });
         }
       }
-    };
-    g.save();
-    g.beginPath(); g.rect(-ring, -ring, N + 2 * ring, N + 2 * ring); g.arc(MID, MID, PLAZA - 0.12, 0, Math.PI * 2); g.clip('evenodd');
-    g.fillStyle = 'rgba(96,86,70,0.55)';
-    g.fillRect(-ring, MID - 0.5, N + 2 * ring, 1); g.fillRect(MID - 0.5, -ring, 1, N + 2 * ring);
-    pave(true); pave(false);
-    g.strokeStyle = 'rgba(120,112,100,0.95)'; g.lineWidth = 0.06;
-    for (const side of [-0.5, 0.5]) {
-      g.beginPath(); g.moveTo(-ring, MID + side); g.lineTo(N + ring, MID + side); g.moveTo(MID + side, -ring); g.lineTo(MID + side, N + ring); g.stroke();
+      acc -= L;
     }
-    g.restore();
-    // plein: een rand van grotere stenen
-    g.strokeStyle = 'rgba(110,100,86,0.9)'; g.lineWidth = 0.08;
-    g.beginPath(); g.arc(MID, MID, PLAZA - 0.15, 0, Math.PI * 2); g.stroke();
-    g.strokeStyle = 'rgba(220,210,186,0.6)'; g.lineWidth = 0.03;
-    g.beginPath(); g.arc(MID, MID, PLAZA - 0.22, 0, Math.PI * 2); g.stroke();
+  });
+  flags.sort((a, b) => a.cy - b.cy);
+
+  // 5. geplaveide straten vanaf het Bronstijdperk: kinderkopjes in verband, stoeprand van lange stenen
+  const setts = [];
+  const kerbs = [];
+  if (age >= 2) {
+    const ROWS = 6; const WID = 0.88; const LEN = 0.2;
+    const PAL = [[158, 150, 136], [172, 164, 148], [146, 140, 130], [184, 174, 156], [164, 152, 132]];
+    for (const horiz of [true, false]) {
+      for (let r = 0; r < ROWS; r++) {
+        const u = -WID / 2 + (r + 0.5) * (WID / ROWS);
+        for (let t = -ring - (r % 2) * LEN * 0.5; t < N + ring; t += LEN) {
+          const id = (horiz ? 0 : 50000) + r * 1000 + Math.round((t + ring + 1) * 10);
+          const h = H3(id, 1, 401); const h2 = H3(id, 2, 401);
+          const a = LEN * 0.43 + (h - 0.5) * 0.015; const w = (WID / ROWS) * 0.4 + (h2 - 0.5) * 0.012;
+          const c0 = t + LEN / 2; const jx = (h2 - 0.5) * 0.012;
+          const gx = horiz ? c0 : MID + u + jx; const gy = horiz ? MID + u + jx : c0;
+          if (!inTown(gx, gy) || Math.hypot(gx - MID, gy - MID) < PLAZA - 0.1) continue;
+          const q = horiz ? [[gx - a, gy - w], [gx + a, gy - w], [gx + a, gy + w], [gx - a, gy + w]]
+            : [[gx - w, gy - a], [gx + w, gy - a], [gx + w, gy + a], [gx - w, gy + a]];
+          const c = corners(q.map(([x, y], k) => [x + (H3(id, 3 + k, 402) - 0.5) * 0.014, y + (H3(id, 7 + k, 402) - 0.5) * 0.014]));
+          const col = PAL[Math.floor(H3(id, 4, 401) * PAL.length)]; const v = 0.92 + h * 0.14;
+          c.col = [col[0] * v, col[1] * v, col[2] * v];
+          setts.push(c);
+        }
+      }
+      // stoeprand aan beide kanten
+      for (const side of [-1, 1]) {
+        for (let t = -ring; t < N + ring; t += 0.34) {
+          const id = (horiz ? 0 : 9000) + (side > 0 ? 4500 : 0) + Math.round((t + ring + 1) * 10);
+          const c0 = t + 0.17; const off = side * 0.475;
+          const gx = horiz ? c0 : MID + off; const gy = horiz ? MID + off : c0;
+          if (!inTown(gx, gy) || Math.hypot(gx - MID, gy - MID) < PLAZA - 0.05) continue;
+          const a = 0.158; const w = 0.034;
+          const q = horiz ? [[gx - a, gy - w], [gx + a, gy - w], [gx + a, gy + w], [gx - a, gy + w]]
+            : [[gx - w, gy - a], [gx + w, gy - a], [gx + w, gy + a], [gx - w, gy + a]];
+          const c = corners(q);
+          const v = 0.94 + H3(id, 1, 403) * 0.1;
+          c.col = [196 * v, 192 * v, 182 * v];
+          kerbs.push(c);
+        }
+      }
+    }
+    setts.sort((a, b) => a.cy - b.cy);
+    kerbs.sort((a, b) => a.cy - b.cy);
   }
 
-  // 6. zachte slagschaduwen van gebouwen en muren
-  world();
-  g.save();
-  if ('filter' in g) g.filter = 'blur(2.5px)';
-  o.shadows(g);
-  g.restore();
+  // ---------- tekenen (R = het stuk in wereldpixels, S = pixels per wereldpixel) ----------
+  const CROPS = [
+    [[70, 120, 46], [128, 176, 84]], // kool
+    [[62, 112, 40], [112, 162, 66]], // sla
+    [[58, 102, 38], [96, 146, 58]], // bonen
+    [[66, 112, 42], [216, 128, 44]], // pompoenen
+  ];
+  const paint = (g, R, S) => {
+    const WM = g.getTransform();
+    const grid = () => { g.setTransform(WM); g.transform(...ISO); };
+    const world = () => g.setTransform(WM);
+    const vis = (x, y, m) => x > R.x0 - m && x < R.x1 + m && y > R.y0 - m && y < R.y1 + m;
+    const gvis = (gx, gy, m) => { const p = toWorld(gx, gy); return vis(p.x, p.y, m); };
+    g.save();
+    grid();
+    // 1. bewoonde grond
+    for (const p of patches) {
+      if (!gvis(p.gx, p.gy, p.r * 40 + 4)) continue;
+      const gr = g.createRadialGradient(p.gx, p.gy, 0, p.gx, p.gy, p.r);
+      gr.addColorStop(0, p.dry ? 'rgba(186,170,96,0.16)' : 'rgba(70,95,35,0.14)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(p.gx, p.gy, p.r, 0, Math.PI * 2); g.fill();
+    }
+    // 2. erven voor de deur en zachte donkere voet (ambient occlusion) onder elk gebouw
+    for (const b of placed) {
+      const size = BUILDINGS[b.type].size || 1;
+      const cx = b.x + size / 2; const cy = b.y + size / 2;
+      if (!gvis(cx, cy + size / 2, 110)) continue;
+      if (b.type !== 'farm') {
+        const yard = ['barracks', 'range', 'stable'].includes(b.type) ? 0.75 : b.type === 'tc' || b.type === 'monument' ? 0 : 0.5;
+        if (yard) {
+          const yx = cx; const yy = b.y + size + 0.15;
+          const gr = g.createRadialGradient(yx, yy, 0, yx, yy, yard);
+          gr.addColorStop(0, 'rgba(160,128,84,0.6)'); gr.addColorStop(0.7, 'rgba(160,128,84,0.35)'); gr.addColorStop(1, 'rgba(160,128,84,0)');
+          g.fillStyle = gr; g.beginPath(); g.ellipse(yx, yy, yard, yard * 0.75, 0, 0, Math.PI * 2); g.fill();
+        }
+      }
+      if (S3.has(b.type)) continue; // 3D-gebouwen hebben hun eigen schaduw en voet
+      const ao = size * 0.78;
+      const gr = g.createRadialGradient(cx, cy, size * 0.25, cx, cy, ao);
+      gr.addColorStop(0, 'rgba(25,20,8,0.42)'); gr.addColorStop(0.6, 'rgba(25,20,8,0.22)'); gr.addColorStop(1, 'rgba(25,20,8,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, ao, 0, Math.PI * 2); g.fill();
+    }
+    // 3. moestuintjes: omgespitte aarde in ruggen, een houten boord, en plantjes
+    const gvisG = gardens.filter((q) => gvis(q.i + 0.5, q.j + 0.5, 50));
+    for (const q of gvisG) {
+      const x0 = q.i + 0.14; const y0 = q.j + 0.14; const w = 0.72; const h = 0.72;
+      g.fillStyle = 'rgb(98,68,40)'; g.fillRect(x0, y0, w, h);
+      for (let r = 0; r < 5; r++) {
+        const t = 0.08 + r * 0.14;
+        // rug (licht) en voor (donker)
+        g.fillStyle = 'rgba(150,112,72,0.55)';
+        if (q.along) g.fillRect(x0, y0 + t + 0.01, w, 0.05); else g.fillRect(x0 + t + 0.01, y0, 0.05, h);
+        g.fillStyle = 'rgba(52,34,18,0.65)';
+        if (q.along) g.fillRect(x0, y0 + t - 0.035, w, 0.035); else g.fillRect(x0 + t - 0.035, y0, 0.035, h);
+      }
+      g.strokeStyle = 'rgba(122,90,56,0.95)'; g.lineWidth = 0.04; g.strokeRect(x0, y0, w, h);
+      g.strokeStyle = 'rgba(70,48,28,0.6)'; g.lineWidth = 0.015; g.strokeRect(x0 + 0.025, y0 + 0.025, w - 0.05, h - 0.05);
+    }
+    world();
+    for (const q of gvisG) {
+      const x0 = q.i + 0.14; const y0 = q.j + 0.14; const w = 0.72;
+      const [dark, light] = CROPS[q.crop];
+      for (let r = 0; r < 5; r++) {
+        const t = 0.08 + r * 0.14;
+        for (let k = 0; k < 6; k++) {
+          const u = 0.08 + k * 0.12;
+          const px = q.along ? x0 + u : x0 + t + 0.035; const py = q.along ? y0 + t + 0.035 : y0 + u;
+          if (px > x0 + w) continue;
+          const p = toWorld(px, py);
+          const s = 0.85 + H3(r * 7 + k, q.i * 31 + q.j, 501) * 0.35;
+          g.fillStyle = 'rgba(30,20,8,0.35)'; g.beginPath(); g.ellipse(p.x + 0.6, p.y + 0.4, 2.2 * s, 1.1 * s, 0, 0, Math.PI * 2); g.fill();
+          if (q.crop === 3) { // pompoen met blad
+            g.fillStyle = `rgb(${dark})`; g.beginPath(); g.ellipse(p.x - 1, p.y - 0.6, 1.9 * s, 1 * s, -0.4, 0, Math.PI * 2); g.fill();
+            if ((r + k) % 2 === 0) {
+              g.fillStyle = `rgb(${light})`; g.beginPath(); g.ellipse(p.x + 0.6, p.y - 0.7, 1.4 * s, 1.05 * s, 0, 0, Math.PI * 2); g.fill();
+              g.fillStyle = 'rgba(255,230,170,0.45)'; g.beginPath(); g.ellipse(p.x + 0.2, p.y - 1.2, 0.6 * s, 0.35 * s, 0, 0, Math.PI * 2); g.fill();
+            }
+            continue;
+          }
+          if (q.crop === 2) { // bonenstaakjes
+            g.strokeStyle = 'rgba(120,88,50,0.9)'; g.lineWidth = 0.35;
+            g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x + 0.3, p.y - 4.2 * s); g.stroke();
+          }
+          for (const [dx, dy, rr, c] of [[-0.9, -0.3, 1.25, dark], [0.9, -0.3, 1.25, dark], [0, -1.1, 1.3, dark], [-0.35, -0.9, 0.95, light], [0.45, -1.2, 0.8, light]]) {
+            g.fillStyle = `rgb(${c})`;
+            g.beginPath(); g.ellipse(p.x + dx * s, p.y + dy * s - (q.crop === 2 ? 1.4 * s : 0), rr * s, rr * 0.62 * s, 0, 0, Math.PI * 2); g.fill();
+          }
+          g.fillStyle = 'rgba(235,255,190,0.35)'; g.beginPath(); g.ellipse(p.x - 0.3 * s, p.y - 1.5 * s, 0.5 * s, 0.3 * s, 0, 0, Math.PI * 2); g.fill();
+        }
+      }
+    }
+    // 4. paadjes: aangestampte aarde, dan stapstenen en kiezels
+    grid();
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const [w, col] of [[0.42, 'rgba(110,88,52,0.3)'], [0.3, 'rgba(162,132,88,0.8)'], [0.12, 'rgba(204,180,132,0.45)']]) {
+      g.strokeStyle = col; g.lineWidth = w;
+      for (const p of paths) { g.beginPath(); g.moveTo(...p[0]); for (const q of p.slice(1)) g.lineTo(...q); g.stroke(); }
+    }
+    world();
+    for (const c of flags) if (vis(c.cx, c.cy, 8)) stone(g, c.P, c.col, 0.6, 0.8);
+    for (const p of pebbles) {
+      if (!vis(p.x, p.y, 3)) continue;
+      g.fillStyle = 'rgba(60,45,28,0.45)'; g.beginPath(); g.ellipse(p.x + 0.3, p.y + 0.4, p.r, p.r * 0.6, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = p.light ? 'rgb(196,186,164)' : 'rgb(128,120,104)'; g.beginPath(); g.ellipse(p.x, p.y, p.r * 0.85, p.r * 0.52, 0, 0, Math.PI * 2); g.fill();
+    }
+    // 5. geplaveide straten
+    if (age >= 2) {
+      grid();
+      g.save();
+      g.beginPath(); g.rect(-ring, -ring, N + 2 * ring, N + 2 * ring); g.arc(MID, MID, PLAZA - 0.12, 0, Math.PI * 2); g.clip('evenodd');
+      g.fillStyle = 'rgba(92,82,66,0.86)'; // voegen
+      g.fillRect(-ring, MID - 0.5, N + 2 * ring, 1); g.fillRect(MID - 0.5, -ring, 1, N + 2 * ring);
+      g.restore();
+      world();
+      for (const c of setts) if (vis(c.cx, c.cy, 8)) stone(g, c.P, c.col, 0.8, 0.9);
+      for (const c of kerbs) if (vis(c.cx, c.cy, 14)) stone(g, c.P, c.col, 1.1, 1);
+      // plein: een rand van grotere stenen
+      grid();
+      g.strokeStyle = 'rgba(110,100,86,0.9)'; g.lineWidth = 0.08;
+      g.beginPath(); g.arc(MID, MID, PLAZA - 0.15, 0, Math.PI * 2); g.stroke();
+      g.strokeStyle = 'rgba(220,210,186,0.6)'; g.lineWidth = 0.03;
+      g.beginPath(); g.arc(MID, MID, PLAZA - 0.22, 0, Math.PI * 2); g.stroke();
+    }
+    g.restore();
+
+    // 6. zachte slagschaduwen van gebouwen en muren
+    world();
+    g.save();
+    if ('filter' in g) g.filter = `blur(${(2 * S).toFixed(2)}px)`;
+    o.shadows(g);
+    g.restore();
+  };
+
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(W * DS); cv.height = Math.round(H * DS);
+  const g = cv.getContext('2d');
+  g.setTransform(DS, 0, 0, DS, -xa * DS, -ya * DS);
+  paint(g, { x0: xa, y0: ya, x1: xb, y1: yb }, DS);
 
   // ---------- losse spullen ----------
   const props = [];
@@ -528,5 +639,5 @@ export function buildDress(o) {
       }
     }
   }
-  return { cv, x: xa, y: ya, W, H, scale: DS, props, lamps };
+  return { cv, x: xa, y: ya, W, H, scale: DS, props, lamps, paint };
 }
