@@ -286,7 +286,7 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     vazalcyclus via de echte routes (onderwerpen, schatting, geen aanvallen, ranglijst, bevrijding, bescherming, losgeld, na 3 dagen vrij).
     Tempo (botbrein, zeer actief): IJzer dag 2,6, Gilden dag 6,3, Kroon dag 11,2.
 
-30. **Mist en pijlen** (feedback van de gebruiker met een screenshot op zijn gsm): de mist begon in een vast vierkant
+30. **Mist en pijlen** (feedback van de gebruiker met een screenshot op de gsm): de mist begon in een vast vierkant
     (bouwring + 3), waardoor gekochte loten en gekapt bos binnen je muren in de mist lagen. Nu volgt ze je echte bouwgrond
     en muren (`homeSight`, gedeeld: `exploredNow` en `updateFog` gebruiken ze). Pijlen waren op een iPhone niet te zien
     (1 dun donker streepje, bij uitzoomen en lagere resolutie < 1 pixel): nu `A.shot` in `art.js` met lichte rand, spoor
@@ -306,6 +306,14 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     everzwijnen en het barbarenkamp zijn nu 3D-modellen in dezelfde stijl (`propmodels.js`), met slagschaduw, gladde randen
     en scherpe versies bij inzoomen. Renderer: anti-aliasing met grondschaduw, materialen `leaf`, `bark`, `water`.
     Nog getekend: de akker, het water/de vijver, kameel/strijdwagen/olifant en rammen.
+
+34. **Wat een verbetering oplevert** (gevraagd: "er staat enkel 'verbeteren' en de prijs; toon wat het verbetert, zodat
+    de speler weet of het de moeite waard is"): het verbeterpaneel (en de lopende bouw) toont "Wat levert het op?" met
+    nu → straks (`gainsHtml` in `ui.js`). Het rekent de stad uit met het gebouw één niveau hoger, met dezelfde functies als
+    de simulatie (`popCap`, `capacity`, `slots`, `rates`, `maxBuilds`, `townBaseDef`, `towerDefense`, `townScore`, …), en
+    toont per soort: werkplekken en productie als ze bezet zijn, trainingstijden en nieuwe eenheden, smidse, markt,
+    torens, muren (`wallHp`), molen/gildehuis, bouwloods, academie (nieuwe rij), punten. Plus een tip of het nu zin heeft
+    (vrije werkplekken, bevolking in gebruik, voorraad t.o.v. opslag, muur nog open).
 
 ## 8. Bekende beperkingen en ideeën
 

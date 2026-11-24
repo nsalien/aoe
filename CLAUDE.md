@@ -162,7 +162,8 @@ Daarom:
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
   `worldmap.js` bakt de wereldkaart (hoogteveld uit `worldgen.fieldAt`, kolom per kolom getekend, bossen, akkers, wegen).
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.
-- `public/js/ui.js` — HTML-sjablonen; `icons.js` — SVG-iconen (gebruik deze, geen emoji); `main.js` — spelverloop in de browser.
+- `public/js/ui.js` — HTML-sjablonen (`gainsHtml` = wat een niveau hoger oplevert: rekent de stad uit met het gebouw +1 niveau;
+  nieuwe effecten van gebouwen daar ook tonen); `icons.js` — SVG-iconen (gebruik deze, geen emoji); `main.js` — spelverloop in de browser.
 
 ## Android-app
 
