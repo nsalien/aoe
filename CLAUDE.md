@@ -73,7 +73,8 @@ Daarom:
   `s.gates`; `gateList()` groepeert ze, `gateSpan()` kiest bij een tik de 2 tegels) en staat in een recht stuk muur.
   Oude poorten van 1 tegel worden in `ensureTerritory()` gratis verbreed; afbreken gaat altijd per hele poort.
   Een stad helemaal dichtmaken zonder poort mag niet; oude dichte steden krijgen in `ensureTerritory()` een poort.
-  Groepen en dorpelingen lopen via `gateRoute()` door de poort (tussenstops in `g.via`, `fieldArrive` loopt verder).
+  Routes: `routeTo(s, from, to)` (A* over de tegels: water en muren blokkeren, poorten zijn doorgang; daarna enkel de bochten
+  als tussenstops in `g.via`, `fieldArrive` loopt verder). Gebruikt door groepen (`travel`) én de dorpelingen in de stad.
   Gebouwen afbreken: `doDemolish` (deel van de kosten terug, zie `DEMOLISH` in `rules.js`).
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
@@ -146,6 +147,11 @@ Daarom:
   ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`), bewaart ze
   in Cache Storage (verhoog `VERSION` als modellen veranderen) en geeft `null` tot ze klaar zijn: dan tekent het spel de
   oude versie uit `art.js`/`figures.js`. De akker, dieren, kameel/strijdwagen/olifant en rammen zijn nog getekend.
+  Figuren in meerdere resoluties: `getFig(..., need)` (need = schermpixels per wereldpixel, `needOf` in `figures.js`) vraagt
+  bij inzoomen een scherpe versie (`HI` = 4 of 6, sleutel `…@6`) en toont tot dan de beste die er is; wachtrij met voorrang
+  (gewone eerst), hooguit `MAX_HI` scherpe beelden in het geheugen. Figuren krijgen anti-aliasing (`aa`) in `render()`.
+  `render3d.js` versnelt exact met lijsten per vorm (`buildAccel`: schaduw, omgevingsschaduw, schermvak per beeldlijn).
+  Materialen voor figuren: `cloth`, `leather`, `mail` (maliën), `plain`/`metal`/`gold`.
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
   `worldmap.js` bakt de wereldkaart (hoogteveld uit `worldgen.fieldAt`, kolom per kolom getekend, bossen, akkers, wegen).
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.

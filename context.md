@@ -292,7 +292,19 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     (1 dun donker streepje, bij uitzoomen en lagere resolutie < 1 pixel): nu `A.shot` in `art.js` met lichte rand, spoor
     en een schaal `1 / zoom` bij uitzoomen, in de belegering (`siegeview.js`) en in gevechten in je gebied (`town.js`).
 
+31. **Troepen scherp en gedetailleerd, routes rond water en muren** (gevraagd: "troepen veel gedetailleerder, ingezoomd
+    wazig; niet over water of door muren, naar buiten via de poort"). Figuren in meerdere resoluties (tot 6 px per
+    wereldpixel bij inzoomen) met anti-aliasing; modellen met gezicht, kledij, maliën, harnas, schild met embleem, echte
+    wapens, schede, pijlkoker en een paard met tuig. Renderer 2–4× sneller (exact hetzelfde beeld voor gebouwen).
+    Routes in je gebied met A* (`routeTo`), ±0,05 ms per route; ook de dorpelingen in de stad.
+
+32. **Idee: haven, boten en eilanden** — uitgewerkt in `docs/idee-haven.md`, **nog niet gebouwd** (wacht op de keuzes
+    van de gebruiker, zie de open vragen onderaan dat bestand).
+
 ## 8. Bekende beperkingen en ideeën
+
+- Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
+  in een rechte lijn, ook over water.
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
 - Aanvallen wachten niet tot de aanvaller online komt (zie §3); er is nu wel een melding + aftelling. Mogelijke
