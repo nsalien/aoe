@@ -14,7 +14,7 @@ import {
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
   townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder, doFieldSplit,
-  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish,
+  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -319,6 +319,12 @@ async function townAction(ctx, fn) {
 route('POST', '/build', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   return townAction(ctx, (s) => doBuild(s, String(body.type), int(body.x, -1), int(body.y, -1), ctx.now, ctx.world.speed));
+});
+
+// gebouw verplaatsen (gratis, naar vrije bouwgrond)
+route('POST', '/move', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  return townAction(ctx, (s) => doMove(s, int(body.id), int(body.x, -9999), int(body.y, -9999)));
 });
 
 // gebouw afbreken (een deel van de kosten komt terug)

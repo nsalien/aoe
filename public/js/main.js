@@ -6,7 +6,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -232,6 +232,10 @@ function startGame(data) {
     town.onGate = async (i, j) => { const r = await act('/gate', { i, j }, 'Poort gebouwd'); if (r) setMode(null); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
+    town.onMove = moveBuilding;
+    town.onNotice = (msg) => toast(msg, '', 'hammer');
+    town.onMoveStart = (b, click) => toast(click ? `Klik op een vrije plek voor ${BUILDINGS[b.type].name.toLowerCase()} (Esc of rechts klikken = stoppen).`
+      : `Sleep ${BUILDINGS[b.type].name.toLowerCase()} naar een vrije plek en laat los.`, '', 'hammer');
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
     town.onSelChange = (sel) => {
       const g = sel && (sel.type === 'group' || sel.type === 'unit') ? sel.id : null;
@@ -416,7 +420,7 @@ function computeLive(force) {
   const sig = [
     s.builds.map((j) => `${j.bid}:${j.to}`).join(','),
     Object.entries(s.queues).map(([k, q]) => `${k}${q.length}:${q[0].done}`).join(','),
-    s.buildings.map((b) => b.level).join(''),
+    s.buildings.map((b) => `${b.level}@${b.x},${b.y}`).join(''),
     JSON.stringify(s.units), JSON.stringify(s.villagers), s.rally,
     s.research ? s.research.id : '', Object.keys(s.tech || {}).join(','), Math.floor(s.loy ?? 100), s.vas ? s.vas.until : '',
     (s.nodes || []).map((n) => `${n.id}${n.claimed ? 'c' : ''}`).join(','),
@@ -901,6 +905,21 @@ async function placeBuilding(type, x, y, keep) {
   if (!r || !keep) cancelPlace();
 }
 
+// Gebouw verplaatsen: meteen in de browser (zelfde regels als de server), dan de server. Weigert die, dan terug.
+async function moveBuilding(id, x, y) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const base = app.serverState || app.data.town.state;
+  try {
+    const c = structuredClone(base);
+    doMove(c, id, x, y);
+    setBaseState(c);
+    computeLive(true);
+    renderAll();
+  } catch (e) { toast(e.message, 'err'); return; }
+  const r = await act('/move', { id, x, y }, 'Gebouw verplaatst');
+  if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
+}
+
 function cancelPlace() {
   app.placing = null;
   town.placing = null;
@@ -1145,6 +1164,12 @@ const actions = {
     const r = await act('/walls', { tiles: [[Number(el.dataset.i), Number(el.dataset.j)]], remove: true }, app.selWall && app.selWall.gate ? 'Poort afgebroken' : 'Muurstuk afgebroken');
     if (r) { town.selWall = null; app.selWall = null; renderPanel(true); }
   },
+  moveBuilding(el) {
+    const b = app.live && app.live.buildings.find((x) => x.id === Number(el.dataset.id));
+    if (!b || !town) return;
+    openPanelMobile(false);
+    town.startMove(b, true);
+  },
   async demolish(el) {
     const stop = el.dataset.stop === '1';
     if (!confirm(stop ? `De bouw van ${el.dataset.name} stoppen? Je krijgt de helft van de grondstoffen terug.` : `${el.dataset.name} afbreken? Je krijgt een deel van de grondstoffen terug.`)) return;
@@ -1353,6 +1378,7 @@ document.addEventListener('keydown', (e) => {
   if (battle && battle.open) return; // het slagveld heeft zijn eigen toetsen
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
+    else if (town && town.moveB) town.moveB = null;
     else if (app.placing) cancelPlace();
     else if (app.mode) setMode(null);
     else if (town && town.sel) actions.cancelVillager();
