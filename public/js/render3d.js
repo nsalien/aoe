@@ -435,6 +435,41 @@ const MAT = {
     alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k;
     return 2;
   },
+  // bladeren: kleine vlekjes licht en donker (struiken, fruitbomen)
+  leaf(m, p, n, u, v) {
+    const c = m.c || [0.3, 0.55, 0.2];
+    const k = 0.62 + 0.5 * vnoise(p[0] * 160 + p[2] * 40, p[1] * 160 - p[2] * 40, 61) + 0.18 * vnoise(p[0] * 40, p[1] * 40 + p[2] * 30, 62);
+    alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k * 0.95;
+    return 1;
+  },
+  // boomstam: schors met groeven in de lengte, op de zaagkant licht hout met jaarringen (prim = liggende/staande cilinder)
+  bark(m, p, n, u, v, prim) {
+    const c = m.c || [0.36, 0.24, 0.14];
+    let axial = 0; let rr = 0;
+    if (prim && prim.t === 4) { axial = prim.ax === 'x' ? Math.abs(n[0]) : Math.abs(n[1]); const a = prim.ax === 'x' ? p[1] - prim.c1 : p[0] - prim.c1; const b = p[2] - prim.cz; rr = Math.sqrt(a * a + b * b) / prim.r; }
+    else if (prim && prim.t === 1) { axial = Math.abs(n[2]); const a = p[0] - prim.cx; const b = p[1] - prim.cy; rr = Math.sqrt(a * a + b * b) / prim.r; }
+    if (axial > 0.9) { // zaagkant
+      const ring = 0.5 + 0.5 * Math.sin(rr * 26 + vnoise(p[0] * 30, p[1] * 30 + p[2] * 30, 63) * 2);
+      const edge = rr > 0.86 ? 0.55 : 1;
+      const k = (0.85 + 0.12 * ring) * edge;
+      alb[0] = 0.84 * k; alb[1] = 0.66 * k; alb[2] = 0.42 * k;
+      return 1;
+    }
+    let along = p[2]; let ang;
+    if (prim && prim.t === 4) { along = prim.ax === 'x' ? p[0] : p[1]; ang = Math.atan2(p[2] - prim.cz, prim.ax === 'x' ? p[1] - prim.c1 : p[0] - prim.c1); }
+    else if (prim && prim.t === 5) ang = Math.atan2(p[1] - prim.a[1], p[0] - prim.a[0]);
+    else ang = Math.atan2(p[1] - (prim && prim.cy !== undefined ? prim.cy : 0), p[0] - (prim && prim.cx !== undefined ? prim.cx : 0));
+    const k = 0.7 + 0.3 * vnoise(ang * 9, along * 14, 64) + 0.12 * vnoise(ang * 30, along * 60, 65);
+    alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k;
+    return 1;
+  },
+  // water: donkerblauw met een lichte rimpeling, glanzend
+  water(m, p) {
+    const c = m.c || [0.13, 0.28, 0.38];
+    const k = 0.85 + 0.3 * vnoise(p[0] * 50 + p[1] * 20, p[1] * 50, 66);
+    alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k;
+    return 2;
+  },
   // leer: warme kleur met vlekjes en fijne nerf
   leather(m, p, n, u, v) {
     const c = m.c || [0.42, 0.27, 0.15];
@@ -580,9 +615,38 @@ export function render(scene, scale = 2, opts = {}) {
     return sun;
   };
   const col = [0, 0, 0];
-  // anti-aliasing (enkel zonder grond, voor figuren): per pixel onthouden welke vorm geraakt werd; waar buren verschillen,
-  // daarna 4 extra stralen per pixel en het gemiddelde nemen (gladde randen, ook als het beeld vergroot getekend wordt)
-  const ids = opts.aa && opts.ground === false ? new Int32Array(W * H).fill(-1) : null;
+  // de grond (z = 0) onder een kijkstraal: aarde rond het gebouw en de slagschaduw; out = [r, g, b, a] (0..255)
+  const GR = [0, 0, 0, 0];
+  const ground = (ox, oy, oz, out) => {
+    out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0;
+    const tg = oz / VZ;
+    const gx = ox - VX * tg; const gy = oy - VY * tg;
+    const inShadow = blocked(prims, gx, gy, 0.001, SUN[0], SUN[1], SUN[2], 20);
+    let aoG = 0;
+    for (const [ca, sa] of dirs) if (blocked(prims, gx, gy, 0.003, ca * 0.6, sa * 0.6, 0.8, 0.3)) aoG++;
+    aoG = AO_N ? aoG / AO_N : 0;
+    let a = 0;
+    if (ap) {
+      const d = Math.max(Math.abs(gx), Math.abs(gy));
+      const edge = ap * (0.9 + 0.2 * fbm(gx * 4, gy * 4, 31, 2));
+      a = 1 - sstep(edge - 0.1, edge, d);
+    }
+    if (a > 0.01) {
+      shade(gx, gy, 0, [0, 0, 1], apronMat, null, col);
+      const sh = inShadow ? 0.55 : 1;
+      const k = (1 - aoG * 0.5);
+      const f = (c) => tone(c);
+      out[0] = f(col[0] * (inShadow ? sh : 1) * k); out[1] = f(col[1] * (inShadow ? sh : 1) * k); out[2] = f(col[2] * (inShadow ? sh * 1.05 : 1) * k);
+      out[3] = Math.round(a * 255);
+      if (inShadow) { out[0] = f(col[0] * 0.5 * k); out[1] = f(col[1] * 0.52 * k); out[2] = f(col[2] * 0.6 * k); }
+    } else {
+      const s = (inShadow ? 0.42 : 0) + aoG * 0.3;
+      if (s > 0.01) { out[0] = 18; out[1] = 24; out[2] = 10; out[3] = Math.round(Math.min(0.6, s) * 255); }
+    }
+  };
+  // anti-aliasing (figuren en spullen): per pixel onthouden welke vorm geraakt werd (-1 = niets, -2 = schaduw op de grond);
+  // waar buren verschillen, daarna 4 extra stralen per pixel en het gemiddelde nemen (gladde randen, ook vergroot)
+  const ids = opts.aa ? new Int32Array(W * H).fill(-1) : null;
   // per pixelrij: de vormen waarvan het schermvak die rij raakt
   const rowList = (j) => { const ya = y0 + j / scale; const yb = y0 + (j + 1) / scale; return prims.filter((p) => accel.sb[p.id][1] <= yb && accel.sb[p.id][3] >= ya); };
   const apronMat = { k: 'dirt', c: opts.apronC || [0.52, 0.43, 0.3] };
@@ -608,31 +672,9 @@ export function render(scene, scale = 2, opts = {}) {
       } else if (opts.ground === false) {
         // geen grond: blijft doorzichtig (de schaduw tekent het spel zelf)
       } else {
-        // de grond (z = 0): aarde rond het gebouw en de slagschaduw
-        const tg = oz / VZ;
-        const gx = ox - VX * tg; const gy = oy - VY * tg;
-        const inShadow = blocked(prims, gx, gy, 0.001, SUN[0], SUN[1], SUN[2], 20);
-        let aoG = 0;
-        for (const [ca, sa] of dirs) if (blocked(prims, gx, gy, 0.003, ca * 0.6, sa * 0.6, 0.8, 0.3)) aoG++;
-        aoG = AO_N ? aoG / AO_N : 0;
-        let a = 0;
-        if (ap) {
-          const d = Math.max(Math.abs(gx), Math.abs(gy));
-          const edge = ap * (0.9 + 0.2 * fbm(gx * 4, gy * 4, 31, 2));
-          a = 1 - sstep(edge - 0.1, edge, d);
-        }
-        if (a > 0.01) {
-          shade(gx, gy, 0, [0, 0, 1], apronMat, null, col);
-          const sh = inShadow ? 0.55 : 1;
-          const k = (1 - aoG * 0.5);
-          const f = (c) => tone(c);
-          data[o] = f(col[0] * (inShadow ? sh : 1) * k); data[o + 1] = f(col[1] * (inShadow ? sh : 1) * k); data[o + 2] = f(col[2] * (inShadow ? sh * 1.05 : 1) * k);
-          data[o + 3] = Math.round(a * 255);
-          if (inShadow) { data[o] = f(col[0] * 0.5 * k); data[o + 1] = f(col[1] * 0.52 * k); data[o + 2] = f(col[2] * 0.6 * k); }
-        } else {
-          const s = (inShadow ? 0.42 : 0) + aoG * 0.3;
-          if (s > 0.01) { data[o] = 18; data[o + 1] = 24; data[o + 2] = 10; data[o + 3] = Math.round(Math.min(0.6, s) * 255); }
-        }
+        ground(ox, oy, oz, GR);
+        if (GR[3]) { data[o] = GR[0]; data[o + 1] = GR[1]; data[o + 2] = GR[2]; data[o + 3] = GR[3]; }
+        if (ids) ids[j * W + i] = GR[3] ? -2 : -1;
       }
     }
   }
@@ -652,12 +694,19 @@ export function render(scene, scale = 2, opts = {}) {
       const i = k % W; const j = (k - i) / W;
       if (j !== rj) { rj = j; row = rowList(j); }
       let r = 0; let g = 0; let b = 0; let n = 0;
+      const GS = opts.ground !== false;
       for (const [du, dv] of SUB) {
         const sx = x0 + (i + 0.5 + du) / scale; const sy = y0 + (j + 0.5 + dv) / scale;
         const dxy = sx / 32; const sxy = (sy + ZT * ZPX) / 16;
         const ox = (sxy + dxy) / 2; const oy = (sxy - dxy) / 2; const oz = ZT;
         const t = nearestAt(row, accel.sb, sx, ox, oy, oz, nrm);
-        if (!(t > 0)) continue;
+        if (!(t > 0)) {
+          if (!GS) continue;
+          ground(ox, oy, oz, GR);
+          const w = GR[3] / 255;
+          r += GR[0] * w; g += GR[1] * w; b += GR[2] * w; n += w;
+          continue;
+        }
         const hit = lastHit;
         n++;
         let src = ids[k] === hit.id ? k : -1;
@@ -670,7 +719,7 @@ export function render(scene, scale = 2, opts = {}) {
         r += tone(col[0]); g += tone(col[1]); b += tone(col[2]);
       }
       const o = k * 4;
-      if (!n) { data[o + 3] = 0; continue; }
+      if (n < 1e-6) { data[o + 3] = 0; continue; }
       data[o] = Math.round(r / n); data[o + 1] = Math.round(g / n); data[o + 2] = Math.round(b / n); data[o + 3] = Math.round((n / SUB.length) * 255);
     }
   }

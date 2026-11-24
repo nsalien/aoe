@@ -3,6 +3,7 @@
 // Elk volk heeft een eigen stijl (muren, daken, kleuren); `build()` geeft een Scene met ankerpunten
 // (rook, vlag, gloed) die het spel gebruikt voor bewegende stukjes.
 import { Scene, rgb } from './render3d.js';
+import { rockShape } from './propmodels.js';
 
 const mat = {
   stone: (c = '#bdb5a6') => ({ k: 'stone', c: rgb(c) }),
@@ -179,15 +180,15 @@ function lumber(s, st, L) {
   return {};
 }
 
-// een hoop rotsblokken (overlappende afgeplatte bollen) in plaats van één gladde bol
+// een hoop gefacetteerde rotsblokken (zoals de losse rotsen in de stad)
 function rocks(s, cx, cy, R, H, c, seed) {
   let k = seed;
   const r = () => { k = (k * 16807) % 2147483647; return k / 2147483647; };
-  s.ell(cx, cy, 0, R * 0.8, R * 0.7, H, mat.rock(c));
+  rockShape(s, seed, cx, cy, R * 0.8, R * 0.7, H, mat.rock(c));
   for (let i = 0; i < 7; i++) {
     const a = r() * Math.PI * 2; const d = R * (0.35 + r() * 0.5);
     const rr = R * (0.28 + r() * 0.3);
-    s.ell(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.9, 0, rr, rr * (0.7 + r() * 0.4), H * (0.35 + r() * 0.45), mat.rock(c));
+    rockShape(s, seed * 13 + i, cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.9, rr, rr * (0.7 + r() * 0.4), H * (0.35 + r() * 0.45), mat.rock(c));
   }
 }
 

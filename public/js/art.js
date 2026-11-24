@@ -2,6 +2,16 @@
 // Alles wordt met Canvas 2D getekend, zonder externe afbeeldingen.
 // Coördinaten: (x, y) in tegels t.o.v. het midden van het grondvlak, z in pixels omhoog.
 import { groundTexture } from './nature.js';
+import * as S3 from './sprite3d.js';
+
+// een 3D-model van een stuk aankleding (propmodels.js) tekenen met zijn voet op (x, y); false = nog niet klaar
+export function prop3d(ctx, kind, v, x, y, s = 1) {
+  const m = ctx.getTransform();
+  const d3 = S3.getProp(kind, v, Math.hypot(m.a, m.b) * s);
+  if (!d3) return false;
+  ctx.drawImage(d3.cv, x - d3.ax * s, y - d3.ay * s, d3.w * s, d3.h * s);
+  return true;
+}
 
 export const TW = 64;
 export const TH = 32;
@@ -1462,6 +1472,7 @@ export function conifer(ctx, x, y, s = 1, tint = 0) {
 export function broadleaf(ctx, x, y, s = 1, tint = 0) {
   ctx.fillStyle = 'rgba(20,40,10,0.25)';
   ctx.beginPath(); ctx.ellipse(x + 2 * s, y, 8 * s, 3.2 * s, 0, 0, Math.PI * 2); ctx.fill();
+  if (prop3d(ctx, 'tree', [4, 0, 2][Math.abs(Math.round(x * 0.7 + y * 1.3)) % 3], x, y, s * 0.95)) return;
   ctx.fillStyle = '#6b4523'; ctx.fillRect(x - 1.4 * s, y - 9 * s, 2.8 * s, 9 * s);
   const base = mix('#4f9a3a', '#86a83a', tint);
   const blobs = [[-4, -14, 6], [4, -15, 6], [0, -20, 7], [0, -13, 6]];
@@ -1475,6 +1486,7 @@ export function broadleaf(ctx, x, y, s = 1, tint = 0) {
 }
 
 export function bush(ctx, x, y, s = 1) {
+  if (prop3d(ctx, 'bush', Math.abs(Math.round(x * 1.7 + y * 3.1)) % 3, x, y, s * 0.55)) return;
   ctx.fillStyle = '#4d8a35';
   for (const [dx, dy, r] of [[-2.5, -2, 3], [2.5, -2, 3], [0, -4, 3.2]]) { ctx.beginPath(); ctx.arc(x + dx * s, y + dy * s, r * s, 0, Math.PI * 2); ctx.fill(); }
   ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.beginPath(); ctx.arc(x - 1 * s, y - 5 * s, 1.5 * s, 0, Math.PI * 2); ctx.fill();
@@ -1519,6 +1531,7 @@ export function rock(ctx, x, y, s = 1) {
   const sc = Math.hypot(m.a, m.b) * s;
   const R = sc <= 1.5 ? 1.5 : sc <= 3 ? 3 : sc <= 5 ? 5 : 8;
   const v = Math.abs(Math.round(x * 3.7 + y * 7.3)) % 8;
+  if (prop3d(ctx, 'rock', v, x, y + 1.2 * s, s)) return;
   ctx.drawImage(rockSprite(v, R), x - 8 * s, y - 9.5 * s, 16 * s, 11 * s);
 }
 
