@@ -227,7 +227,7 @@ test('oude steden zonder vondsten worden netjes bijgewerkt', () => {
 import {
   ensureTerritory, doFieldSend, doFieldOrder, canChop, groupPos, isBuildable as tileBuildable, depLeft, campSize, raidSize,
 } from '../public/shared/sim.js';
-import { territory, exHas, exDecode, T_MIN, tileIndex } from '../public/shared/territory.js';
+import { territory, exHas, exDecode, T_MIN, tileIndex, TILE } from '../public/shared/territory.js';
 import { WILD, FIELD } from '../public/shared/rules.js';
 
 function terrTown(seed = 5) {
@@ -238,6 +238,18 @@ function terrTown(seed = 5) {
   return s;
 }
 const arrive = (s, g) => advance(s, g.t1 + 1, 1);
+// tot het einde van de route (alle tussenstops)
+const arriveAll = (s, g) => { for (let k = 0; k < 50 && g.pending; k++) advance(s, g.t1 + 1, 1); };
+// alle tegels waar een groep over loopt (de hele route met tussenstops)
+function routeTiles(g) {
+  const pts = [{ x: g.x0, y: g.y0 }, { x: g.x1, y: g.y1 }, ...(g.via || [])];
+  const out = [];
+  for (let k = 1; k < pts.length; k++) {
+    const a = pts[k - 1]; const b = pts[k]; const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.05) + 1;
+    for (let q = 0; q <= n; q++) out.push([Math.floor(a.x + ((b.x - a.x) * q) / n), Math.floor(a.y + ((b.y - a.y) * q) / n)]);
+  }
+  return out;
+}
 const fightOver = (s) => advance(s, s.t + 5 * 60000, 1); // gevechten duren hooguit enkele minuten
 
 test('het bouwvierkant groeit mee met het tijdperk', () => {
@@ -261,11 +273,13 @@ test('een dorpeling verkent de mist en komt daarna terug aan het werk', () => {
   const g = doFieldSend(s, { villager: 'wood' }, null, { x: -14, y: 6 }, null, s.t);
   assert.equal(s.villagers.wood, before - 1);
   assert.equal(totalVillagers(s), 6, 'de verkenner telt nog mee als dorpeling');
-  arrive(s, g);
+  const terr = territory(s.terr.seed);
+  assert.ok(routeTiles(g).every(([i, j]) => terr.tiles[tileIndex(i, j)] !== TILE.WATER), 'niet door het water');
+  arriveAll(s, g);
   assert.ok(exHas(exDecode(s.terr.ex), -14, 6), 'het doel is ontdekt');
   assert.ok(exHas(exDecode(s.terr.ex), -10, 6), 'de weg ernaartoe ook');
   doFieldOrder(s, g.id, null, { type: 'home' }, s.t);
-  arrive(s, g);
+  arriveAll(s, g);
   assert.equal(s.field.length, 0);
   assert.equal(s.villagers.wood, before, 'terug aan het werk');
 });
@@ -574,6 +588,28 @@ test('muren tegel per tegel; een gesloten muur verdedigt volledig', () => {
   assert.throws(() => doPlaceGate(s, 0, 0), /recht stuk/, 'niet in een hoek');
 });
 
+test('troepen lopen rond een los stuk muur en rond water; een doel in het water = zo dicht mogelijk aan de oever', () => {
+  const s = terrTown();
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  s.buildings.find((b) => b.type === 'wall').level = 1;
+  doPlaceWalls(s, [[2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2], [9, 2]]); // een muur dwars door de stad, open aan de zijkanten
+  s.units = { spear: 2 };
+  const g = doFieldSend(s, { units: { spear: 2 } }, { x: 5.5, y: 3.5 }, { x: 5.5, y: 0.5 }, null, s.t);
+  const walls = new Set(s.walls);
+  assert.ok(g.via && g.via.length, 'een omweg');
+  assert.ok(routeTiles(g).every(([i, j]) => !walls.has(tileIndex(i, j))), 'niet door de muur');
+  arriveAll(s, g);
+  assert.equal(g.x1, 5.5); assert.equal(g.y1, 0.5);
+  // naar het midden van de vijver: blijft aan de oever staan
+  const terr = territory(s.terr.seed);
+  const p = terr.pond;
+  doFieldOrder(s, g.id, { x: p.x, y: p.y }, null, s.t);
+  assert.ok(routeTiles(g).every(([i, j]) => terr.tiles[tileIndex(i, j)] !== TILE.WATER), 'niet door het water');
+  arriveAll(s, g);
+  assert.notEqual(terr.tiles[tileIndex(Math.floor(g.x1), Math.floor(g.y1))], TILE.WATER);
+  assert.ok(Math.hypot(g.x1 - p.x, g.y1 - p.y) < p.r + 1.6, `aan de oever (${g.x1}, ${g.y1})`);
+});
+
 test('in een ommuurde stad gaan troepen enkel via de poort naar buiten en binnen', () => {
   const s = terrTown();
   s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
@@ -584,18 +620,19 @@ test('in een ommuurde stad gaan troepen enkel via de poort naar buiten en binnen
   doPlaceGate(s, 5, 11);
   s.units = { spear: 3 };
   const g = doFieldSend(s, { units: { spear: 3 } }, null, { x: 15.5, y: 15.5 }, null, s.t);
-  // de poort is 2 tegels breed (5 en 6): eerst naar de binnenkant van de poort, daarna erdoor (door het midden) en verder
+  // de poort is 2 tegels breed (5 en 6, onderaan): de route gaat erdoor en nooit door een muur
   assert.equal(s.gates.length, 2);
-  assert.ok(Math.abs(g.x1 - 6) < 1e-9 && Math.abs(g.y1 - 10.6) < 1e-9, `naar de poort (${g.x1}, ${g.y1})`);
-  arrive(s, g);
-  assert.ok(Math.abs(g.x1 - 6) < 1e-9 && Math.abs(g.y1 - 12.4) < 1e-9, 'door de poort');
-  arrive(s, g);
+  const walls = new Set(s.walls); const gates = new Set(s.gates);
+  const out = routeTiles(g).map(([i, j]) => tileIndex(i, j));
+  assert.ok(out.every((k) => !walls.has(k)), 'niet door de muur');
+  assert.ok(out.some((k) => gates.has(k)), 'door de poort');
+  arriveAll(s, g);
   assert.equal(g.x1, 15.5); assert.equal(g.y1, 15.5);
-  arrive(s, g);
   assert.ok(!g.pending && !g.via, 'aangekomen');
   // en terug naar huis: weer via de poort
   doFieldOrder(s, g.id, null, { type: 'home' }, s.t);
-  assert.ok(Math.abs(g.x1 - 6) < 1e-9 && Math.abs(g.y1 - 12.4) < 1e-9, 'eerst naar de buitenkant van de poort');
+  const back = routeTiles(g).map(([i, j]) => tileIndex(i, j));
+  assert.ok(back.every((k) => !walls.has(k)) && back.some((k) => gates.has(k)), 'terug via de poort');
   // binnen blijven = rechtstreeks
   s.units = { spear: 1 };
   const h = doFieldSend(s, { units: { spear: 1 } }, null, { x: 8.5, y: 8.5 }, null, s.t);

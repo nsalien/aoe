@@ -8,7 +8,7 @@ import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, gateRoute, gateList, gateSpan,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -897,9 +897,9 @@ export class TownView {
         } else {
           tg = { gx: door.gx + (Math.random() - 0.5) * 0.8, gy: door.gy + Math.random() * 0.3 };
         }
-        // in een ommuurde stad: via de poort naar buiten en weer binnen
-        const via = gateRoute(this.state, { x: w.gx, y: w.gy }, { x: tg.gx, y: tg.gy });
-        if (via) { w.target = { gx: via[0].x, gy: via[0].y }; w.queue = [{ gx: via[1].x, gy: via[1].y }, tg]; } else { w.target = tg; w.queue = null; }
+        // rond water en muren; in een ommuurde stad via de poort naar buiten en weer binnen
+        const q = routeTo(this.state, { x: w.gx, y: w.gy }, { x: tg.gx, y: tg.gy }).map((p) => ({ gx: p.x, gy: p.y }));
+        w.target = q.shift() || tg; w.queue = q.length ? q : null;
       }
       const dx = w.target.gx - w.gx; const dy = w.target.gy - w.gy;
       const d = Math.hypot(dx, dy);
