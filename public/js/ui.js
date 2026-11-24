@@ -4,15 +4,16 @@ import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
-  fmtDuration, campUnits, campLoot,
+  fmtDuration, campUnits, campLoot, unitTime, COMBAT,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
-  isVassal, noblesOwned, noblesMax, boost,
+  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall,
 } from '../shared/sim.js';
+import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
 import { attackPower, carryCapacity, slowestSpeed } from '../shared/battle.js';
 import { icon } from './icons.js';
@@ -516,6 +517,137 @@ function refundHtml(res) {
   return parts.length ? parts.join(' ') : 'niets';
 }
 
+// ---------- wat een niveau erbij oplevert ----------
+// Rekent de stad uit met dit gebouw één niveau hoger (zelfde functies als de simulatie) en toont wat verandert.
+const pct = (x) => `${Math.round(x * 100)}%`;
+const per = (n) => `${fmt(n)}/u`;
+
+// trainingstijden (elk niveau 15% sneller) en eenheden die op het nieuwe niveau vrijkomen
+function trainRows(rows, notes, live, nx, units, lvlNow, lvlNext, speed) {
+  for (const k of units) {
+    const u = UNITS[k];
+    if (!u || (u.civ && u.civ !== live.civ)) continue;
+    if (u.bl > lvlNext) continue;
+    if (u.bl > lvlNow) {
+      // het stadscentrum toont nieuwe eenheden al bij 'Ontgrendelt'
+      if (u.building !== 'tc') notes.push(`<b>Nieuw:</b> ${u.name}${age(nx) < u.age ? ` (vraagt het ${AGES[u.age].name})` : ''}.`);
+      continue;
+    }
+    if (age(live) < u.age) continue;
+    const lv = (x) => (u.queue === 'castle' ? x - CASTLE_LEVEL + 1 : x);
+    rows.push([`${u.name} trainen`, fmtDuration(unitTime(k, lv(lvlNow), speed)), fmtDuration(unitTime(k, lv(lvlNext), speed))]);
+  }
+}
+
+export function gainsHtml(app, live, b, to) {
+  const d = app.data;
+  const speed = d.world.speed;
+  const L = b.level;
+  const nx = { ...live, buildings: live.buildings.map((x) => (x.id === b.id ? { ...x, level: to } : x)) };
+  const rows = [];
+  const notes = [];
+  const add = (label, a, z) => { if (a !== z) rows.push([label, a, z]); };
+
+  // productiegebouwen: werkplekken en wat ze opbrengen als ze bezet zijn
+  const sl = BUILDINGS[b.type].slots;
+  if (sl) {
+    const r = Object.keys(sl)[0];
+    const one = rates({ ...live, villagers: { food: 0, wood: 0, stone: 0, gold: 0, idle: 0, [r]: 1 } }, speed)[r];
+    const s0 = slots(live)[r];
+    const s1 = slots(nx)[r];
+    const name = RES_NAMES[r].toLowerCase();
+    add(`Werkplekken ${name}`, fmt(s0), fmt(s1));
+    add(`${RES_NAMES[r]} als alles bezet is`, per(s0 * one), per(s1 * one));
+    const free = s0 - live.villagers[r];
+    if (free > 0) notes.push(`Je hebt nu al <b>${free} vrije werkplek${free === 1 ? '' : 'ken'}</b> voor ${name}. Meer plekken helpen pas als je ook meer dorpelingen hebt.`);
+    else if (live.villagers.idle > 0) notes.push(`Je hebt ${live.villagers.idle} dorpeling${live.villagers.idle === 1 ? '' : 'en'} zonder werk: die kunnen hier meteen aan de slag (+${per(Math.min(live.villagers.idle, s1 - s0) * one)}).`);
+    else notes.push(`Alle werkplekken voor ${name} zijn bezet: met extra dorpelingen haal je hier tot +${per((s1 - s0) * one)}.`);
+  }
+
+  // algemene getallen van de stad: enkel wat verandert
+  add('Bevolking (ruimte)', fmt(popCap(live)), fmt(popCap(nx)));
+  if (b.type === 'house') {
+    const used = homePop(live) + (d.awayPop || 0);
+    notes.push(used >= popCap(live) - 2 ? `Je stad zit vol (${fmt(used)}/${fmt(popCap(live))}): zonder extra ruimte kun je niemand meer trainen.`
+      : `Je gebruikt nu ${fmt(used)} van ${fmt(popCap(live))} plaatsen.`);
+  }
+  add('Opslag per grondstof', fmt(capacity(live)), fmt(capacity(nx)));
+  add('Verborgen voor plunderaars', fmt(protectAmount(live)), fmt(protectAmount(nx)));
+  if (b.type === 'storage') {
+    const cap = capacity(live);
+    const top = RES.reduce((m, r) => (live.res[r] > live.res[m] ? r : m), RES[0]);
+    notes.push(live.res[top] >= cap * 0.9 ? `Je ${RES_NAMES[top].toLowerCase()} zit (bijna) aan de grens: wat je daarboven verdient, gaat verloren.`
+      : `Je grootste voorraad (${RES_NAMES[top].toLowerCase()}) is ${fmt(live.res[top])} van ${fmt(cap)}.`);
+  }
+  add('Bouwers tegelijk', String(maxBuilds(live)), String(maxBuilds(nx)));
+  if (!sl) {
+    const r0 = rates(live, speed); const r1 = rates(nx, speed);
+    for (const r of RES) if (Math.floor(r0[r]) !== Math.floor(r1[r])) add(`${RES_NAMES[r]} per uur`, per(r0[r]), per(r1[r]));
+  }
+  add('Basisverdediging van de stad', fmt(townBaseDef(live)), fmt(townBaseDef(nx)));
+  add('Verdediging van je torens', fmt(towerDefense(live)), fmt(towerDefense(nx)));
+  add('Herstel van de trouw', `${loyaltyRegen(live)} per uur`, `${loyaltyRegen(nx)} per uur`);
+  add('Edelmannen', String(noblesMax(live)), String(noblesMax(nx)));
+
+  // per soort gebouw
+  switch (b.type) {
+    case 'tc':
+      trainRows(rows, notes, live, nx, ['villager', ...(CIVS[live.civ] ? CIVS[live.civ].units : [])], L, to, speed);
+      break;
+    case 'barracks': case 'range': case 'stable': case 'workshop':
+      trainRows(rows, notes, live, nx, Object.keys(UNITS).filter((k) => UNITS[k].building === b.type), L, to, speed);
+      break;
+    case 'smithy': {
+      add('Aanval en verdediging van al je troepen', `+${5 * L}%`, `+${5 * to}%`);
+      const names = ['leer en brons', 'ijzer en maliën', 'plaatharnas'];
+      if (gearOf(to) !== gearOf(L)) notes.push(`<b>Nieuwe uitrusting:</b> je soldaten krijgen ${names[gearOf(to)]}.`);
+      break;
+    }
+    case 'market':
+      add('Koers (100 geven →)', fmt(marketRate(live) * 100), fmt(marketRate(nx) * 100));
+      add('Max. per karavaan', fmt(MARKET.shipPerLevel * L), fmt(MARKET.shipPerLevel * to));
+      break;
+    case 'tower': {
+      const n = Math.max(1, L);
+      if (L) { add('Schade per pijl', String(TOWER.dmg[n]), String(TOWER.dmg[to])); add('Levens', String(TOWER.hp[n]), String(TOWER.hp[to])); }
+      break;
+    }
+    case 'wall': {
+      const e0 = effectiveWall(live); const e1 = effectiveWall(nx);
+      const txt = (e) => (e ? `+${Math.round(e * COMBAT.wallBonus * 100)}% en +${fmt(e * COMBAT.wallFlat)}` : '—');
+      add('Verdedigingsbonus', txt(e0), txt(e1));
+      add('Levens per muurstuk (veldslag)', L ? fmt(wallHp(L)) : '—', fmt(wallHp(to)));
+      if (L < 3 && to >= 3) notes.push('Je houten palissade wordt een <b>stenen muur</b>.');
+      if (!(live.walls || []).length) notes.push('Je hebt nog geen muurstukken geplaatst: de bonus telt pas zodra je muren zet.');
+      else if (!wallEnclosed(live)) notes.push('Je stad is nog niet helemaal ommuurd: zolang er een gat is, krijg je maar 30% van de bonus.');
+      else notes.push('Al je muurstukken en poorten worden meteen sterker.');
+      break;
+    }
+    case 'lodge':
+      add('Sneller bouwen', `${5 * L}%`, `${5 * to}%`);
+      break;
+    case 'mill': case 'guild': {
+      const bo = BUILDINGS[b.type].boost;
+      const all = Object.keys(bo).length === RES.length;
+      const r = Object.keys(bo)[0];
+      add(`Bonus van ${b.type === 'mill' ? 'de molen' : 'het gildehuis'} (${all ? 'alle grondstoffen' : RES_NAMES[r].toLowerCase()})`, `+${pct(bo[r] * L)}`, `+${pct(bo[r] * to)}`);
+      break;
+    }
+    case 'academy':
+      notes.push(`<b>Nieuwe rij onderzoek:</b> ${TECH_LINE_IDS.map((line) => TECHS[techAt(line, to)].name).join(', ')}.`);
+      break;
+    default: break;
+  }
+
+  const pts = townScore(nx) - townScore(live);
+  if (pts > 0) rows.push(['Punten', fmt(townScore(live)), `${fmt(townScore(nx))} <span class="muted">(+${fmt(pts)})</span>`]);
+
+  if (!rows.length && !notes.length) return '';
+  return `<div class="gains"><div class="gh">Wat levert het op?</div>
+    ${rows.length ? `<dl class="kv">${rows.map(([l, a, z]) => `<dt>${l}</dt><dd><span class="was">${a}</span> → <b class="up">${z}</b></dd>`).join('')}</dl>` : ''}
+    ${notes.map((n) => `<p class="small gnote">${n}</p>`).join('')}</div>`;
+}
+
 // ---------- gebouwpaneel ----------
 export function buildingPanelHtml(app, live, b) {
   const d = app.data;
@@ -527,8 +659,8 @@ export function buildingPanelHtml(app, live, b) {
     <div><h2>${def.name}</h2><div class="lvl">${lvl ? `Niveau ${lvl} van ${def.maxLevel}` : 'In aanbouw'}${b.type === 'tc' ? ` · ${AGES[lvl].short}tijd` : ''}</div></div></div>
     <p class="desc">${def.desc}</p>`;
   if (job) {
-    html += `<div class="card"><h3>${icon('hammer')} ${lvl ? `Verbeteren naar niveau ${job.to}` : 'In aanbouw'}</h3>${bar(job.start, job.end)}
-      <div class="row small" style="margin-top:6px"><span class="grow muted">Klaar over</span>${timer(job.end)}</div></div>`;
+    html += `<div class="card"><h3>${icon('hammer')} ${lvl ? (b.type === 'tc' ? `Naar het ${AGES[job.to].name}` : `Verbeteren naar niveau ${job.to}`) : 'In aanbouw'}</h3>${bar(job.start, job.end)}
+      <div class="row small" style="margin-top:6px"><span class="grow muted">Klaar over</span>${timer(job.end)}</div>${gainsHtml(app, live, b, job.to)}</div>`;
   }
   html += buildingInfo(app, live, b);
   if (!job && lvl < def.maxLevel) {
@@ -536,8 +668,9 @@ export function buildingPanelHtml(app, live, b) {
     const cost = levelCost(b.type, to);
     const err = checkUpgrade(live, b.id);
     const title = b.type === 'tc' ? `Naar het ${AGES[to].name}` : (lvl === 0 ? 'Bouwen' : `Verbeteren naar niveau ${to}`);
-    html += `<div class="card"><h3>${icon('up')} ${title}</h3>${costHtml(cost, live.res)}
-      <div class="small muted" style="margin-top:4px">${icon('clock')} ${fmtDuration(buildTime(live, b.type, to, d.world.speed))}</div>`;
+    html += `<div class="card"><h3>${icon('up')} ${title}</h3>${gainsHtml(app, live, b, to)}
+      <div class="gcost">${costHtml(cost, live.res)}
+      <div class="small muted" style="margin-top:4px">${icon('clock')} ${fmtDuration(buildTime(live, b.type, to, d.world.speed))}</div></div>`;
     if (b.type === 'tc') html += unlocksHtml(to, live.civ);
     if (err && err !== 'Niet genoeg grondstoffen.') html += `<p class="req">${err}</p>`;
     html += `<div class="actions"><button class="btn primary" data-action="upgrade" data-id="${b.id}" ${!canAct || err ? 'disabled' : ''}>${b.type === 'tc' ? 'Nieuw tijdperk' : (lvl === 0 ? 'Bouwen' : 'Verbeteren')}</button></div></div>`;
@@ -627,11 +760,9 @@ function buildingInfo(app, live, b) {
       <dt>Herstel</dt><dd>${loyaltyRegen(live)} per uur</dd><dt>Punten</dt><dd>+${fmt(600 * L)}</dd></dl></div>`;
     case 'tower': {
       const top = TOWER.hp.length - 1;
-      const n = Math.max(1, L); const nx = Math.min(top, n + 1);
-      const up = L && L < top ? ` <span class="muted">→ ${TOWER.dmg[nx]}</span>` : '';
-      const upH = L && L < top ? ` <span class="muted">→ ${TOWER.hp[nx]}</span>` : '';
-      return `<div class="card"><dl class="kv"><dt>Schade per pijl</dt><dd>${TOWER.dmg[n]}${up}</dd>
-        <dt>Levens</dt><dd>${TOWER.hp[n]}${upH}</dd><dt>Bereik</dt><dd>${TOWER.range} passen</dd>
+      const n = Math.max(1, Math.min(top, L));
+      return `<div class="card"><dl class="kv"><dt>Schade per pijl</dt><dd>${TOWER.dmg[n]}</dd>
+        <dt>Levens</dt><dd>${TOWER.hp[n]}</dd><dt>Bereik</dt><dd>${TOWER.range} passen</dd>
         <dt>Schiet om de</dt><dd>${TOWER.rate / 1000} s</dd><dt>Verdediging (automatisch)</dt><dd>+${80 * L}</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Tijdens een veldslag schiet de toren op de dichtstbijzijnde vijand. Wordt hij gesloopt, dan verliest hij een niveau.</p></div>`;
     }

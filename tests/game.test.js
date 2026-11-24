@@ -1580,3 +1580,26 @@ test('vazallen: edelmannen onderwerpen een stad, schatting, geen aanvallen, losg
     Date.now = realNow;
   }
 });
+
+test('verbeterpaneel toont voor elk gebouw wat het volgende niveau oplevert', async () => {
+  const { gainsHtml } = await import('../public/js/ui.js');
+  const { BUILDINGS } = await import('../public/shared/rules.js');
+  const s = newTownState(0, 'greek');
+  s.buildings.find((b) => b.type === 'tc').level = 2;
+  s.villagers = { food: 9, wood: 10, stone: 2, gold: 2, idle: 3 };
+  let id = 100;
+  for (const t of Object.keys(BUILDINGS)) if (t !== 'tc' && t !== 'wall') s.buildings.push({ id: id++, type: t, x: 0, y: 0, level: 1 });
+  s.buildings.find((b) => b.type === 'wall').level = 1;
+  s.walls = [1, 2, 3];
+  const app = { data: { world: { speed: 1 }, awayPop: 0 } };
+  for (const b of s.buildings) {
+    const h = gainsHtml(app, s, b, b.level + 1);
+    assert.match(h, /Wat levert het op\?/, b.type);
+    assert.match(h, /Punten/, `${b.type}: punten`);
+    assert.doesNotMatch(h, /NaN|undefined/, b.type);
+  }
+  const lumber = s.buildings.find((b) => b.type === 'lumber');
+  assert.match(gainsHtml(app, s, lumber, 2), /Werkplekken hout.*10.*15/s);
+  const house = s.buildings.find((b) => b.type === 'house');
+  assert.match(gainsHtml(app, s, house, 2), new RegExp(`${popCap(s)}.*${popCap(s) + 5}`, 's'));
+});
