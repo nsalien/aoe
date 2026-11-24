@@ -2387,10 +2387,8 @@ export class TownView {
         const f = age / 380;
         const x = a.x + (b.x - a.x) * f; const y = a.y - 14 + (b.y - a.y + 6) * f - Math.sin(f * Math.PI) * 18;
         const ang = Math.atan2((b.y - a.y + 6) - Math.cos(f * Math.PI) * 18 * Math.PI, b.x - a.x);
-        ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
-        if (from.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 2.4, 0, Math.PI * 2); ctx.fill(); }
-        else { ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(4, 0); ctx.stroke(); ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(5.5, 0); ctx.lineTo(3.5, -1.2); ctx.lineTo(3.5, 1.2); ctx.fill(); ctx.fillStyle = '#f4efe0'; ctx.fillRect(-5.5, -1, 1.6, 2); }
-        ctx.restore();
+        // bij uitzoomen (gsm) groter, zodat je de pijlen blijft zien
+        A.shot(ctx, x, y, ang, 0.85 * Math.max(1, 1 / this.cam.zoom), from.k === 'stonethrower' ? 'stone' : 'arrow');
       }
     }
   }

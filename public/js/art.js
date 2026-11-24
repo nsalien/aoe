@@ -1579,6 +1579,41 @@ export function smoke(ctx, x, y, t, seed = 0, s = 1) {
   }
 }
 
+// Een vliegend projectiel (pijl, vuurpijl of steen) in (x, y), richting ang. k = schaal: geef bij uitzoomen een grotere k
+// mee (bv. 1 / zoom), zodat het op een gsm even goed te zien blijft. Een lichte rand en een kort spoor houden het
+// zichtbaar op donker gras en 's nachts.
+export function shot(ctx, x, y, ang, k = 1, kind = 'arrow') {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(k, k);
+  ctx.lineCap = 'round';
+  if (kind === 'stone') {
+    ctx.strokeStyle = 'rgba(255,246,220,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-4, 0); ctx.stroke();
+    ctx.fillStyle = '#8f887c'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.arc(0, 0, 3.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  const fire = kind === 'fire';
+  // spoor achter de pijl
+  ctx.strokeStyle = fire ? 'rgba(255,140,40,0.18)' : 'rgba(255,250,232,0.16)'; ctx.lineWidth = fire ? 3 : 2;
+  ctx.beginPath(); ctx.moveTo(-24, 0); ctx.lineTo(-14, 0); ctx.stroke();
+  ctx.strokeStyle = fire ? 'rgba(255,150,50,0.45)' : 'rgba(255,250,232,0.4)';
+  ctx.beginPath(); ctx.moveTo(-15, 0); ctx.lineTo(-7, 0); ctx.stroke();
+  // lichte rand en schacht
+  ctx.strokeStyle = 'rgba(255,246,220,0.8)'; ctx.lineWidth = 2.8; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(6, 0); ctx.stroke();
+  ctx.strokeStyle = '#4a2f17'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(6, 0); ctx.stroke();
+  // veren
+  ctx.fillStyle = fire ? '#b8402a' : '#f3eee2';
+  ctx.beginPath(); ctx.moveTo(-9, -2); ctx.lineTo(-5, 0); ctx.lineTo(-9, 2); ctx.lineTo(-7.5, 0); ctx.closePath(); ctx.fill();
+  if (fire) {
+    ctx.fillStyle = 'rgba(255,200,80,0.9)'; ctx.beginPath(); ctx.ellipse(7, 0, 4.4, 2.8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff6a1a'; ctx.beginPath(); ctx.ellipse(6.4, 0, 2.6, 1.6, 0, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillStyle = '#dfe5ec'; ctx.strokeStyle = '#26231f'; ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.moveTo(9.5, 0); ctx.lineTo(5.2, -2.2); ctx.lineTo(5.2, 2.2); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ---------- sprite-cache ----------
 
 
