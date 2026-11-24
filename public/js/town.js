@@ -260,13 +260,14 @@ export class TownView {
     this.cam.onHover = (sx, sy) => {
       this.hoverTile = sx < 0 ? null : this.screenGrid(sx, sy);
       this.hoverW = sx < 0 ? null : this.cam.screenToWorld(sx, sy);
-      if (this.moveB && this.moveB.click && sx >= 0) this.updateMove(sx, sy);
+      if (this.moveB && !this.moveB.dragging && sx >= 0) { this.moveB.gdx = 0; this.moveB.gdy = 0; this.updateMove(sx, sy); }
       this.updateCursor();
     };
     this.cam.onLongPress = (sx, sy) => this.longPress(sx, sy);
     this.cam.onHoldDrag = (ph, sx, sy) => this.holdDrag(ph, sx, sy);
+    this.cam.onGrab = (sx, sy) => this.grabMove(sx, sy);
     this.cam.onRightClick = (sx, sy) => {
-      if (this.moveB) { this.moveB = null; return; }
+      if (this.moveB) { this.cancelMove(); return; }
       if (this.placing) { if (this.onCancelPlace) this.onCancelPlace(); return; }
       if (this.sel) this.click(sx, sy, null, true);
     };
@@ -1607,7 +1608,14 @@ export class TownView {
 
   click(sx, sy, e, order) {
     if (!this.state) return;
-    if (this.moveB) { if (this.moveB.click && !order) { this.updateMove(sx, sy); this.dropMove(); } else this.moveB = null; return; }
+    if (this.moveB) {
+      // muis: klikken zet het gebouw meteen neer; aanraken: het gebouw gaat naar die plek (bevestigen met 'Zet hier')
+      if (order) { this.cancelMove(); return; }
+      this.moveB.gdx = 0; this.moveB.gdy = 0;
+      this.updateMove(sx, sy);
+      if (this.cam.lastType === 'mouse') this.dropMove();
+      return;
+    }
     const w = this.cam.screenToWorld(sx, sy);
     const tnow = performance.now();
     const dbl = !order && this.lastTap && tnow - this.lastTap.t < 420 && Math.hypot(sx - this.lastTap.x, sy - this.lastTap.y) < 28;
@@ -1742,17 +1750,9 @@ export class TownView {
     if (key(sel) !== before && this.onSelChange) this.onSelChange(sel);
   }
 
-  // ingedrukt houden: op een gebouw = het oppakken om te verplaatsen, elders = je hele leger kiezen.
-  // Geeft true terug als er iets vastgepakt is (de camera stuurt dan het slepen naar holdDrag).
+  // ingedrukt houden = je hele leger kiezen
   longPress(sx, sy) {
-    if (this.placing || this.landMode || this.wallMode || !this.state || this.battleMode) return false;
-    const b = this.onMove ? this.pick(sx, sy) : null;
-    if (b && b.type !== 'wall') {
-      if (b.type === 'tc') { if (this.onNotice) this.onNotice('Je stadscentrum blijft in het midden van je stad.'); return false; }
-      this.startMove(b, false, sx, sy);
-      if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
-      return true;
-    }
+    if (this.placing || this.landMode || this.wallMode || this.moveB || !this.state || this.battleMode) return false;
     if (!this.selectArmy()) return false;
     const w = this.cam.screenToWorld(sx, sy);
     this.pressMark = { x: w.x, y: w.y, at: performance.now() };
@@ -1760,23 +1760,21 @@ export class TownView {
     return false;
   }
 
-  // ---------- gebouw verplaatsen ----------
-  // click = met de knop Verplaatsen (volgt de muis, klikken zet neer); anders slepen na ingedrukt houden.
-  // Het gebouw blijft op dezelfde plek onder je vinger of muis als waar je het vastpakte.
-  startMove(b, click = false, sx = null, sy = null) {
+  // ---------- gebouw verplaatsen (knop Verplaatsen in het gebouwpaneel) ----------
+  // Het gebouw staat eerst doorschijnend op zijn eigen plek. Tik (of klik) op de nieuwe plek, of sleep het gebouw zelf;
+  // met een muis zet een klik het meteen neer, op een aanraakscherm bevestig je met 'Zet hier' (dropMove).
+  startMove(b) {
     if (!b || b.type === 'tc' || !isPlaced(b)) return;
-    const size = BUILDINGS[b.type].size;
-    let gdx = 0; let gdy = 0;
-    if (sx != null && !click) {
-      const c = toWorld(b.x + size / 2, b.y + size / 2);
-      const sc = this.cam.worldToScreen(c.x, c.y);
-      gdx = sc.x - sx; gdy = sc.y - sy;
-    }
     this.setSel(null);
     this.selected = b.id;
-    this.moveB = { id: b.id, size, x: b.x, y: b.y, ok: false, same: true, click, gdx, gdy, sx, sy };
-    if (sx != null) this.updateMove(sx, sy);
-    if (this.onMoveStart) this.onMoveStart(b, click);
+    this.moveB = { id: b.id, size: BUILDINGS[b.type].size, x: b.x, y: b.y, ok: false, same: true, gdx: 0, gdy: 0, sx: null, sy: null, dragging: false };
+    if (this.onMoveChange) this.onMoveChange(this.moveB);
+  }
+
+  cancelMove() {
+    if (!this.moveB) return;
+    this.moveB = null;
+    if (this.onMoveEnd) this.onMoveEnd();
   }
 
   updateMove(sx, sy) {
@@ -1785,31 +1783,56 @@ export class TownView {
     m.sx = sx; m.sy = sy;
     const w = this.cam.screenToWorld(sx + m.gdx, sy + m.gdy);
     const g = toGrid(w.x, w.y);
-    m.x = Math.floor(g.gx - m.size / 2 + 0.5); m.y = Math.floor(g.gy - m.size / 2 + 0.5);
+    const x = Math.floor(g.gx - m.size / 2 + 0.5); const y = Math.floor(g.gy - m.size / 2 + 0.5);
     const b = this.state.buildings.find((q) => q.id === m.id);
-    if (!b) { this.moveB = null; return; }
-    m.same = b.x === m.x && b.y === m.y;
-    m.ok = !m.same && !checkMove(this.state, m.id, m.x, m.y);
+    if (!b) { this.cancelMove(); return; }
+    const before = `${m.x},${m.y},${m.ok}`;
+    m.x = x; m.y = y;
+    m.same = b.x === x && b.y === y;
+    m.ok = !m.same && !checkMove(this.state, m.id, x, y);
+    if (before !== `${m.x},${m.y},${m.ok}` && this.onMoveChange) this.onMoveChange(m);
+  }
+
+  // neerdrukken op het doorschijnende gebouw = het verslepen (in plaats van de kaart te verschuiven)
+  grabMove(sx, sy) {
+    const m = this.moveB;
+    // met een muis volgt het gebouw de muis al en zet een klik het neer: niets vast te pakken
+    if (!m || !this.state || this.cam.lastType === 'mouse') return false;
+    const w = this.cam.screenToWorld(sx, sy);
+    const g = toGrid(w.x, w.y);
+    const c = toWorld(m.x + m.size / 2, m.y + m.size / 2);
+    const b = this.state.buildings.find((q) => q.id === m.id);
+    const h = b && b.level > 0 ? (SPRITE_H[b.type] || 55) : 30;
+    const onFoot = g.gx >= m.x - 0.15 && g.gx < m.x + m.size + 0.15 && g.gy >= m.y - 0.15 && g.gy < m.y + m.size + 0.15;
+    const onSprite = Math.abs(w.x - c.x) < m.size * 24 && w.y < c.y + 6 && w.y > c.y - h;
+    if (!onFoot && !onSprite) return false;
+    const sc = this.cam.worldToScreen(c.x, c.y);
+    m.gdx = sc.x - sx; m.gdy = sc.y - sy;
+    m.dragging = true;
+    return true;
   }
 
   holdDrag(ph, sx, sy) {
-    if (!this.moveB) return;
+    const m = this.moveB;
+    if (!m) return;
     if (ph === 'move') this.updateMove(sx, sy);
-    else if (ph === 'end') { this.updateMove(sx, sy); this.dropMove(); } else this.moveB = null;
+    else { if (ph === 'end') this.updateMove(sx, sy); m.dragging = false; }
   }
 
+  // neerzetten (enkel als de nieuwe plek mag); anders blijft de verplaatsstand open
   dropMove() {
     const m = this.moveB;
-    this.moveB = null;
     if (!m) return;
-    if (m.ok && this.onMove) this.onMove(m.id, m.x, m.y);
-    else if (!m.same && this.onNotice) this.onNotice('Daar kan het gebouw niet staan: kies vrije bouwgrond.');
+    if (!m.ok) { if (this.onNotice) this.onNotice(m.same ? 'Kies eerst een nieuwe plek voor het gebouw.' : 'Daar kan het gebouw niet staan: kies vrije bouwgrond.'); return; }
+    this.moveB = null;
+    if (this.onMove) this.onMove(m.id, m.x, m.y);
+    if (this.onMoveEnd) this.onMoveEnd();
   }
 
   // tijdens het slepen: kaart mee laten schuiven aan de rand van het scherm
   moveEdgePan(dt) {
     const m = this.moveB;
-    if (!m || m.sx == null) return;
+    if (!m || !m.dragging || m.sx == null) return;
     const cam = this.cam; const e = 44;
     let vx = 0; let vy = 0;
     if (m.sx < e) vx = -1; else if (m.sx > cam.w - e) vx = 1;
@@ -2274,7 +2297,7 @@ export class TownView {
     this.birds.update(dt);
     this.clouds.update(dt);
     this.adaptQuality(dt);
-    if (this.moveB && !this.moveB.click) this.moveEdgePan(dt);
+    if (this.moveB && this.moveB.dragging) this.moveEdgePan(dt);
     if (!this.battleMode && (now - this.fogAt > 120 || now < this.fogAt)) this.updateFog(now);
     cam.apply(ctx);
     const gnd = this.ground;

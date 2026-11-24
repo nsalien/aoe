@@ -22,6 +22,7 @@ const P = {
     <path d="M5 13h14" stroke="#4a3220" stroke-width="1.2"/><circle cx="16.4" cy="15.5" r="1" fill="#f2c230"/><path d="M2.5 21h19" ${S}/>`,
   people: `<circle cx="9" cy="8" r="3" fill="#f1c9a0" ${S}/><path d="M3.5 20c0-4 2.5-6.5 5.5-6.5s5.5 2.5 5.5 6.5z" fill="#8b6a43" ${S}/>
     <circle cx="16.5" cy="9" r="2.5" fill="#f1c9a0" ${S}/><path d="M15 13.5c.5-.3 1-.4 1.6-.4 2.6 0 4.4 2.3 4.4 6.1h-5" fill="#6b8f4a" ${S}/>`,
+  move: `<path d="M12 2.5l3 3.2h-2v4.8h4.8v-2l3.2 3-3.2 3v-2H13v4.8h2l-3 3.2-3-3.2h2v-4.8H6.2v2L3 11.5l3.2-3v2H11V5.7H9z" fill="#e8c46a" ${S}/>`,
   hammer: `<path d="M13.6 9.4L4 19l1.6 1.6 9.6-9.6z" fill="#a8743f" ${S}/><path d="M10.6 6.2L14.5 3l6.5 6.5-3.2 3.9z" fill="#9aa1ab" ${S}/><path d="M13 5.5l5.5 5.5" stroke="#d7dbe0" stroke-width="1"/>`,
   target: `<circle cx="11" cy="13" r="8.5" fill="#f4efe0" ${S}/><circle cx="11" cy="13" r="5.6" fill="#d64545"/><circle cx="11" cy="13" r="2.9" fill="#f4efe0"/><circle cx="11" cy="13" r="1.2" fill="#d64545"/>
     <path d="M11 13l9-9" stroke="#6b4a2b" stroke-width="1.5" stroke-linecap="round"/><path d="M17 3.2l3.2.6.6 3.2" fill="none" stroke="#8a8f99" stroke-width="1.5" stroke-linecap="round"/>`,

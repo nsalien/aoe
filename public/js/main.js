@@ -233,9 +233,9 @@ function startGame(data) {
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
     town.onMove = moveBuilding;
-    town.onNotice = (msg) => toast(msg, '', 'hammer');
-    town.onMoveStart = (b, click) => toast(click ? `Klik op een vrije plek voor ${BUILDINGS[b.type].name.toLowerCase()} (Esc of rechts klikken = stoppen).`
-      : `Sleep ${BUILDINGS[b.type].name.toLowerCase()} naar een vrije plek en laat los.`, '', 'hammer');
+    town.onNotice = (msg) => toast(msg, '', 'move');
+    town.onMoveChange = renderMoveHint;
+    town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; };
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
     town.onSelChange = (sel) => {
       const g = sel && (sel.type === 'group' || sel.type === 'unit') ? sel.id : null;
@@ -920,7 +920,21 @@ async function moveBuilding(id, x, y) {
   if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
 }
 
+// balk bovenaan tijdens het verplaatsen: wat je moet doen, 'Zet hier' (enkel als de plek mag) en 'Stoppen'
+function renderMoveHint(m) {
+  const hint = $('#placeHint');
+  if (!m) { hint.hidden = true; return; }
+  const b = app.live && app.live.buildings.find((x) => x.id === m.id);
+  const name = b ? BUILDINGS[b.type].name : 'Gebouw';
+  const mouse = town.cam.lastType === 'mouse';
+  const how = m.ok ? 'Mag hier staan.' : m.same ? (mouse ? 'Klik op de nieuwe plek.' : 'Tik op de nieuwe plek of sleep het gebouw.') : 'Daar kan het niet staan.';
+  hint.hidden = false;
+  setHTML(hint, `<span><b>${UI.esc(name)} verplaatsen</b> <span class="muted">${how}</span></span>
+    <button class="btn small primary" data-action="moveHere" ${m.ok ? '' : 'disabled'}>Zet hier</button><button class="btn small" data-action="moveStop">Stoppen</button>`);
+}
+
 function cancelPlace() {
+  if (town && town.moveB) town.cancelMove();
   app.placing = null;
   town.placing = null;
   $('#placeHint').hidden = true;
@@ -1139,6 +1153,7 @@ const actions = {
     if (app.placing === type) { cancelPlace(); return; }
     const err = el.classList.contains('locked') || el.classList.contains('poor') ? el.title.split(': ').slice(1).join(': ') : null;
     if (err) { toast(err, 'err'); return; }
+    if (town.moveB) town.cancelMove();
     app.placing = type;
     if (app.mode) setMode(null);
     town.clearSel();
@@ -1167,9 +1182,14 @@ const actions = {
   moveBuilding(el) {
     const b = app.live && app.live.buildings.find((x) => x.id === Number(el.dataset.id));
     if (!b || !town) return;
+    if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+    cancelPlace();
+    if (app.mode) setMode(null);
     openPanelMobile(false);
-    town.startMove(b, true);
+    town.startMove(b);
   },
+  moveHere() { if (town) town.dropMove(); },
+  moveStop() { if (town) town.cancelMove(); },
   async demolish(el) {
     const stop = el.dataset.stop === '1';
     if (!confirm(stop ? `De bouw van ${el.dataset.name} stoppen? Je krijgt de helft van de grondstoffen terug.` : `${el.dataset.name} afbreken? Je krijgt een deel van de grondstoffen terug.`)) return;
@@ -1378,7 +1398,7 @@ document.addEventListener('keydown', (e) => {
   if (battle && battle.open) return; // het slagveld heeft zijn eigen toetsen
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
-    else if (town && town.moveB) town.moveB = null;
+    else if (town && town.moveB) town.cancelMove();
     else if (app.placing) cancelPlace();
     else if (app.mode) setMode(null);
     else if (town && town.sel) actions.cancelVillager();

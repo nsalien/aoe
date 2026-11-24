@@ -658,6 +658,10 @@ export function buildingPanelHtml(app, live, b) {
   let html = `<div class="ph"><img class="thumb" src="${buildingThumb(b.type, Math.max(1, lvl), d.team.color)}" alt="">
     <div><h2>${def.name}</h2><div class="lvl">${lvl ? `Niveau ${lvl} van ${def.maxLevel}` : 'In aanbouw'}${b.type === 'tc' ? ` · ${AGES[lvl].short}tijd` : ''}</div></div></div>
     <p class="desc">${def.desc}</p>`;
+  // verplaatsen: meteen bovenaan, zodat je de knop ook op een gsm direct ziet
+  if (b.type !== 'tc' && b.type !== 'wall') {
+    html += `<div class="actions move-row"><button class="btn" data-action="moveBuilding" data-id="${b.id}" ${canAct ? '' : 'disabled'}>${icon('move')} Verplaatsen</button></div>`;
+  }
   if (job) {
     html += `<div class="card"><h3>${icon('hammer')} ${lvl ? (b.type === 'tc' ? `Naar het ${AGES[job.to].name}` : `Verbeteren naar niveau ${job.to}`) : 'In aanbouw'}</h3>${bar(job.start, job.end)}
       <div class="row small" style="margin-top:6px"><span class="grow muted">Klaar over</span>${timer(job.end)}</div>${gainsHtml(app, live, b, job.to)}</div>`;
@@ -678,9 +682,6 @@ export function buildingPanelHtml(app, live, b) {
     html += `<p class="small muted">${icon('star')} Maximaal niveau bereikt.</p>`;
   }
   if (b.type !== 'tc' && b.type !== 'wall') {
-    html += `<div class="card"><h3>${icon('hammer')} Verplaatsen</h3>
-      <p class="small muted" style="margin:0">Gratis, naar vrije bouwgrond. Tip: houd het gebouw in je stad ingedrukt en sleep het.</p>
-      <div class="actions"><button class="btn small" data-action="moveBuilding" data-id="${b.id}" ${canAct ? '' : 'disabled'}>Verplaatsen</button></div></div>`;
     // afbreken (of een bouw stoppen): een deel van de grondstoffen komt terug
     const err = checkDemolish(live, b.id);
     const back = demolishRefund(live, b);
@@ -1197,8 +1198,8 @@ export function helpHtml(w, peaceEnd) {
     <ul>${CIV_IDS.map((c) => `<li>${civEmblem(c, 15)} <b>${CIVS[c].name}</b>: ${CIVS[c].units.map((k) => `<b>${UNITS[k].name}</b> (${UNITS[k].desc.charAt(0).toLowerCase()}${UNITS[k].desc.slice(1).replace(/\.$/, '')})`).join(' en ')}.</li>`).join('')}</ul>
     <h3>Vijf tijdperken</h3>
     <ul>${AGES.slice(1).map((a, i) => `<li><b>${a.name}</b>${['', ': schietbaan, stal, smidse, markt, wachttorens en de <b>molen</b>', ': het kasteel, ridders, rammen en de <b>Academie</b>', ': het monument, het <b>gildehuis</b> en de <b>bouwloods</b>', ': het <b>Adelshof</b> (edelmannen) en de <b>kathedraal</b>'][i] || ': je begint met huizen, werkplekken, een opslagplaats en een kazerne'}.</li>`).join('')}</ul>
-    <p><b>Verplaatsen:</b> houd een gebouw ingedrukt en sleep het naar vrije bouwgrond (op pc kan het ook met de knop
-    <b>Verplaatsen</b> in het gebouwpaneel). Dat is gratis. Het stadscentrum blijft in het midden van je stad.</p>
+    <p><b>Verplaatsen:</b> tik op een gebouw en kies <b>Verplaatsen</b>. Tik daarna op de nieuwe plek (of sleep het gebouw)
+    en kies <b>Zet hier</b>; met een muis klik je gewoon op de nieuwe plek. Dat is gratis. Het stadscentrum blijft in het midden.</p>
     <p>Gebouwen verbeter je <b>één niveau per tijdperk</b> (niveau 4 vraagt het Tijdperk van de Gilden, niveau 5 de Kroon). Hoge niveaus zie je ook: vaandels, gouden pieken, aanbouwen.</p>
     <ul><li><b>Molen</b>: +5% voedsel per niveau. <b>Gildehuis</b>: +3% van alle grondstoffen per niveau. <b>Bouwloods</b>: een bouwer extra en sneller bouwen.</li>
     <li><b>Smidse</b>: +5% aanval en verdediging per niveau, en betere uitrusting: leer en brons, dan ijzer en maliën (niveau 3), dan plaatharnas (niveau 5).</li>

@@ -826,3 +826,7 @@ body.in-battle #toasts { top: 74px; }
 .gains .up { color: #2f7a2c; }
 .gains .gnote { margin: 5px 0 0; color: var(--ink2); line-height: 1.35; }
 .gcost { margin-top: 2px; }
+
+/* knop Verplaatsen bovenaan in het gebouwpaneel */
+.move-row { margin: 0 0 10px; }
+.move-row .btn svg, .move-row .btn img { width: 18px; height: 18px; vertical-align: -4px; }
