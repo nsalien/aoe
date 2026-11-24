@@ -80,6 +80,9 @@ registratie; oude spelers kregen een vast willekeurig volk.
 **Eigen gebied rond je stad** (`territory.js`, uit de stad-id):
 - Oorlogsmist; groepen (dorpelingen of soldaten) lopen in echte tijd (max. 8 groepen). Bomen kappen aan de rand =
   extra bouwgrond + hout; wilde bronnen ontginnen; everzwijnen jagen.
+- **Mist rond je stad** (gevraagd: "geen mist binnen je eigen muren"): je ziet altijd je bouwgrond (vierkant, gekochte
+  loten, gekapt bos), je muren en alles erbinnen, plus een rand van ±3 tegels (`homeSight` in `sim.js`, `FIELD.homeSight`).
+  Daarbuiten begint de mist; meestal dus net voorbij je muur.
 - **Bouwgrond**: een vierkant van 12×12 dat met elk tijdperk een ring groeit, plus **gekochte loten** van 4×4
   (max. 12, steeds duurder) en gekapte tegels. Een stippellijn toont de rand van al je bouwgrond.
 - **Barbarenkamp**: 4 barbaren in tijdperk 1, 6/8/10 later, hooguit +3 na veel overvallen. Barbaren vallen meteen
@@ -282,6 +285,12 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     `siegeview.js`. Tests: tijdperken, productie, bouwloods, onderzoek, automatische en live slag, edelman en een hele
     vazalcyclus via de echte routes (onderwerpen, schatting, geen aanvallen, ranglijst, bevrijding, bescherming, losgeld, na 3 dagen vrij).
     Tempo (botbrein, zeer actief): IJzer dag 2,6, Gilden dag 6,3, Kroon dag 11,2.
+
+30. **Mist en pijlen** (feedback van de gebruiker met een screenshot op zijn gsm): de mist begon in een vast vierkant
+    (bouwring + 3), waardoor gekochte loten en gekapt bos binnen je muren in de mist lagen. Nu volgt ze je echte bouwgrond
+    en muren (`homeSight`, gedeeld: `exploredNow` en `updateFog` gebruiken ze). Pijlen waren op een iPhone niet te zien
+    (1 dun donker streepje, bij uitzoomen en lagere resolutie < 1 pixel): nu `A.shot` in `art.js` met lichte rand, spoor
+    en een schaal `1 / zoom` bij uitzoomen, in de belegering (`siegeview.js`) en in gevechten in je gebied (`town.js`).
 
 ## 8. Bekende beperkingen en ideeën
 
