@@ -323,7 +323,15 @@ export class SiegeView extends TownView {
     const age = bt - (u.at ?? -1e9);
     const swing = u.at >= 0 && age >= 0 && age < 340 && !isRangedK(u.k) ? Math.sin((age / 340) * Math.PI) : 0;
     const lx = swing ? dir * swing * 3 : 0;
-    this.figure(ctx, u, x + lx, y, t, moving || swing > 0, dir, color);
+    // aanvalsbeweging: fase in de cyclus tussen twee slagen (0 = de slag of het schot); wacht hij nog, dan in de aanslag
+    let atk = null;
+    if (!moving && FIG.hasAttackAnim(u.k)) {
+      const tk = bv.state.tk && bv.state.tk[u.s];
+      const R = ((UNITS[u.k] && UNITS[u.k].rate) || 1500) * (isRangedK(u.k) && tk && tk.volley ? 0.85 : 1);
+      if (u.at != null && u.at >= 0 && age >= 0 && age < R) atk = age / R;
+      else if (u.tg != null || (reg && reg.eng)) atk = FIG.attackReady(u.k);
+    }
+    this.figure(ctx, u, x + lx, y, t, moving || (swing > 0 && atk == null), dir, color, atk);
     // levens en aantal
     const max = u.hp0 * (u.n || 1);
     const tall = u.k === 'elephant' ? 54 : cav ? 40 : u.k === 'ram' || u.k === 'stonethrower' ? 28 : 32;
@@ -347,9 +355,9 @@ export class SiegeView extends TownView {
     return this._looks[side];
   }
 
-  figure(ctx, u, x, y, t, moving, dir, team) {
+  figure(ctx, u, x, y, t, moving, dir, team, atk = null) {
     const k = u.k;
-    const o = { s: 1.05, team, phase: t * 0.012 + u.id, walking: moving };
+    const o = { s: 1.05, team, phase: t * 0.012 + u.id, walking: moving, attack: atk };
     const flip = dir < 0;
     if (flip) { ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0); }
     if (k === 'stonethrower') A.stoneThrower(ctx, x, y, 0.8, t);
@@ -357,7 +365,7 @@ export class SiegeView extends TownView {
     else if (k === 'villager') A.person(ctx, x, y, { ...o, s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe' });
     else if (!FIG.uniqueUnit(ctx, k, x, y, o)) {
       const look = soldierOpts(k, this.sideLook(u.s));
-      if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: moving, phase: o.phase });
+      if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: moving, phase: o.phase, attack: atk });
       else if (look) A.person(ctx, x, y, { ...o, ...look });
       else switch (k) {
         case 'ram': {

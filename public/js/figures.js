@@ -24,6 +24,7 @@ function shade(hex, amt) {
 }
 
 import * as S3 from './sprite3d.js';
+import { SWORD_ARM, SWORD_ROT, SPEAR_X } from './figmodels.js';
 
 // ---------- cache ----------
 
@@ -96,6 +97,19 @@ const frameOf = (phase) => {
   const p = ((phase || 0) % TAU + TAU) % TAU;
   return Math.floor((p / TAU) * FR) % FR;
 };
+// Welke eenheden een aanvalsbeweging hebben, en in welke houding ze wachten op hun volgende slag of schot
+// (zwaard omhoog, speer naar achter, boog helemaal aangespannen).
+const ATK_KINDS = new Set(['villager', 'barbarian', 'spear', 'sword', 'archer', 'rider', 'knight', 'hoplite', 'peltast', 'samurai', 'yabusame', 'lionguard', 'immortal', 'noble']);
+export const hasAttackAnim = (k) => ATK_KINDS.has(k);
+export const attackReady = (k) => (k === 'archer' || k === 'peltast' || k === 'yabusame' ? 0.9
+  : k === 'spear' || k === 'hoplite' || k === 'lionguard' || k === 'immortal' || k === 'rider' || k === 'knight' ? 0.6 : 0.8);
+
+// mode en beeld van een figuur. o.attack = fase in de aanvalscyclus (0..1, 0 = de slag of het schot): dan 'atk'.
+function modeOf(o) {
+  if (o.attack != null) return ['atk', Math.floor((((o.attack % 1) + 1) % 1) * FR) % FR];
+  const mode = o.working ? 'work' : o.walking ? 'walk' : 'idle';
+  return [mode, mode === 'idle' ? 0 : frameOf(o.phase)];
+}
 
 // ---------- onderdelen ----------
 
@@ -250,7 +264,9 @@ const WORK_ARM = [-0.2, -1.1, -2.1, -2.6, -1.5, 0.3, 1.05, 0.55];
 function drawPerson(c, o, mode, f) {
   const a = (f / FR) * TAU;
   const walk = mode === 'walk';
-  const work = mode === 'work';
+  const atk = mode === 'atk';
+  const work = mode === 'work' || (atk && o.weapon === 'tool');
+  if (atk && o.weapon === 'tool') f = (f + 6) % FR; // slag met de bijl valt op beeld 0
   const sw = walk ? Math.sin(a) : 0;
   const bob = walk ? Math.abs(Math.cos(a)) * 0.55 : work ? Math.max(0, Math.sin(a)) * 0.35 : 0;
   const skin = SKIN[o.skin || 0];
@@ -374,7 +390,14 @@ function drawPerson(c, o, mode, f) {
 
   // voorste arm met wapen of gereedschap
   const sleeve = shade(body, -0.06);
-  if (o.weapon === 'spear') {
+  if (o.weapon === 'spear' && atk) {
+    // steken: speer vooruit, hand naar achter en dan vooruit
+    const dx = SPEAR_X[f] * 28;
+    const [ex, ey] = arm(c, 2.1, ty + 1.1, 1.25 + SPEAR_X[f] * 1.5, sleeve, skin, 4);
+    line(c, ex - 9 + dx * 0.3, ey + 1.2, ex + 15 + dx, ey - 1.6, '#7a5129', 0.95);
+    c.fillStyle = '#c9d0d8'; c.beginPath(); c.moveTo(ex + 19 + dx, ey - 2.1); c.lineTo(ex + 14.6 + dx, ey - 2.4); c.lineTo(ex + 14.8 + dx, ey - 0.8); c.closePath(); c.fill();
+    disc(c, ex, ey, 0.8, skin);
+  } else if (o.weapon === 'spear') {
     const [ex, ey] = arm(c, 2.1, ty + 1.1, walk ? 0.45 + sw * 0.1 : 0.5, sleeve, skin, 4);
     line(c, ex + 0.2, 1.2, ex + 1.3, -27.5, '#7a5129', 0.95);
     line(c, ex + 0.05, 1.0, ex + 1.15, -27.3, 'rgba(255,225,180,0.35)', 0.3);
@@ -383,14 +406,14 @@ function drawPerson(c, o, mode, f) {
     c.fillStyle = '#5a3a1e'; c.fillRect(ex + 0.85, -27.2, 0.9, 0.8);
     disc(c, ex, ey, 0.8, skin);
   } else if (o.weapon === 'sword') {
-    const [ex, ey] = arm(c, 2.1, ty + 1.1, walk ? 0.7 + sw * 0.15 : 0.75, sleeve, skin, 4.2);
+    const [ex, ey] = arm(c, 2.1, ty + 1.1, atk ? SWORD_ARM[f] : walk ? 0.7 + sw * 0.15 : 0.75, sleeve, skin, 4.2);
     if (o.barb) { // bijl
-      c.save(); c.translate(ex, ey); c.rotate(0.45);
+      c.save(); c.translate(ex, ey); c.rotate(atk ? SWORD_ROT[f] : 0.45);
       line(c, 0, 1.2, 0, -6.4, '#6b4523', 0.9);
       c.fillStyle = '#7d8790'; c.beginPath(); c.moveTo(0.2, -6.6); c.quadraticCurveTo(3.4, -7.2, 3.2, -4.6); c.quadraticCurveTo(2.6, -3.4, 0.2, -4.2); c.closePath(); c.fill();
       c.restore();
     } else {
-      c.save(); c.translate(ex, ey); c.rotate(0.55);
+      c.save(); c.translate(ex, ey); c.rotate(atk ? SWORD_ROT[f] : 0.55);
       c.fillStyle = '#e6eaef'; c.beginPath(); c.moveTo(-0.45, -1); c.lineTo(0.45, -1); c.lineTo(0.3, -7.6); c.lineTo(0, -8.4); c.lineTo(-0.3, -7.6); c.closePath(); c.fill();
       c.fillStyle = '#b08a3a'; c.fillRect(-1.5, -1.3, 3, 0.65);
       c.fillStyle = '#5a3a1e'; c.fillRect(-0.35, -0.7, 0.7, 1.6);
@@ -439,8 +462,7 @@ export function person(ctx, x, y, o = {}) {
   const s = sz(o);
   ctx.fillStyle = 'rgba(0,0,0,0.24)';
   ctx.beginPath(); ctx.ellipse(x + 0.4 * s, y, 4.4 * s, 1.9 * s, 0, 0, TAU); ctx.fill();
-  const mode = o.working ? 'work' : o.walking ? 'walk' : 'idle';
-  const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const [mode, f] = modeOf(o);
   const f3 = S3.getFig('p', o, mode, f, needOf(ctx, s));
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
@@ -601,8 +623,7 @@ export function horseman(ctx, x, y, o = {}) {
   const s = sz(o);
   ctx.fillStyle = 'rgba(0,0,0,0.24)';
   ctx.beginPath(); ctx.ellipse(x + 0.8 * s, y, 9 * s, 2.6 * s, 0, 0, TAU); ctx.fill();
-  const mode = o.walking ? 'walk' : 'idle';
-  const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const [mode, f] = modeOf(o);
   const f3 = S3.getFig('h', o, mode, f, needOf(ctx, s));
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
   const R = resFor(ctx, s);
@@ -823,8 +844,7 @@ export function elite(ctx, x, y, o = {}) {
   const s = sz(o);
   ctx.fillStyle = 'rgba(0,0,0,0.24)';
   ctx.beginPath(); ctx.ellipse(x + 0.4 * s, y, 4.6 * s, 2 * s, 0, 0, TAU); ctx.fill();
-  const mode = o.walking ? 'walk' : 'idle';
-  const f = mode === 'idle' ? 0 : frameOf(o.phase);
+  const [mode, f] = modeOf(o);
   const lk = LOOK[o.look] || {};
   const f3 = S3.getFig('p', { body: lk.body, leg: lk.leg, look: o.look, team: o.team, skin: o.skin || (o.look === 'samurai' ? 1 : o.look === 'immortal' || o.look === 'lionguard' ? 2 : 0), thumb: o.thumb }, mode, f, needOf(ctx, s));
   if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s, y - f3.ay * s, f3.w * s, f3.h * s); return; }
@@ -970,7 +990,7 @@ export function elephant(ctx, x, y, o = {}) {
 
 // eenheid van een volk tekenen (geeft false terug als het geen eenheid van een volk is)
 export function uniqueUnit(ctx, kind, x, y, o = {}) {
-  const base = { s: o.s || 1, team: o.team, walking: o.walking, phase: o.phase, thumb: o.thumb };
+  const base = { s: o.s || 1, team: o.team, walking: o.walking, phase: o.phase, thumb: o.thumb, attack: o.attack };
   switch (kind) {
     case 'hoplite': case 'peltast': case 'samurai': case 'lionguard': case 'immortal':
       elite(ctx, x, y, { ...base, look: kind }); return true;
