@@ -7,7 +7,7 @@ import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, 
 import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
-  exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
+  exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
   gateAxis, checkPlaceGate, gateRoute, gateList, gateSpan,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
@@ -1715,9 +1715,8 @@ export class TownView {
     this.fogAt = now;
     if (!s || !s.terr) { this.explored = null; this.visibleArr = null; return; }
     const ex = exploredNow(s, now);
-    const k = buildRing(s);
-    const vis = new Uint8Array(T_W * T_W);
-    for (let j = T_MIN; j < T_MAX; j++) for (let i = T_MIN; i < T_MAX; i++) if (ringOf(i, j) <= k + 3) vis[tileIndex(i, j)] = 1;
+    // je eigen stad (bouwgrond, muren en alles erbinnen) en een rand errond zie je altijd
+    const vis = homeSight(s).slice();
     for (const g of s.field || []) {
       const p = groupPos(g, now);
       const r = groupVision(g);
