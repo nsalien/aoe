@@ -1,6 +1,7 @@
 // 3D-gebouwen als afbeeldingen: worden op de achtergrond gerenderd (render-worker.js) en daarna bewaard.
 // Zolang een gebouw nog niet klaar is, geeft get() null en tekent het spel de gewone (getekende) versie.
 import { HAS_3D } from './models3d.js';
+import { HAS_PROP } from './propmodels.js';
 
 const SCALE = typeof window !== 'undefined' && (window.devicePixelRatio || 1) > 1.5 && window.innerWidth > 900 ? 3 : 2;
 const cache = new Map();
@@ -11,7 +12,7 @@ let ready = 0;
 const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4);
 // eenmaal gerenderde gebouwen bewaren in de browser (Cache Storage), zodat dat maar één keer gebeurt.
 // Verhoog VERSION als de modellen of de renderer veranderen.
-const VERSION = 5;
+const VERSION = 6;
 const STORE = 'rvs-3d-v' + VERSION;
 const hasStore = typeof caches !== 'undefined' && typeof window !== 'undefined' && window.isSecureContext;
 const urlOf = (key) => `/__3d/${VERSION}/${SCALE}/${encodeURIComponent(key)}`;
@@ -177,15 +178,26 @@ export function getFig(kind, o, mode, f, need = 0) {
   const L = {};
   let key = `f|${kind}|${mode}${f}`;
   for (const k of FIG_KEYS) { const v = o[k]; if (v !== undefined && v !== null && v !== false && v !== '') { L[k] = v; key += `|${k}=${v}`; } }
+  return tiered(key, { fig: { kind, L, mode, f } }, need);
+}
+
+// de gewone versie, en bij inzoomen een scherpere (de beste die er al is, tot de gevraagde klaar is)
+function tiered(key, job, need) {
   const s = cache.get(key);
-  if (s === undefined) request(key, { fig: { kind, L, mode, f } });
+  if (s === undefined) request(key, job);
   if (!HI.length || !(need > SCALE * 1.2) || s === false) return s || null;
   // scherpere versie: de kleinste die volstaat (anders de grootste)
   const tier = HI.find((x) => x >= need * 0.85) || HI[HI.length - 1];
   const hk = `${key}@${tier}`;
   const h = cache.get(hk);
   if (h) { hiKeys.delete(hk); hiKeys.add(hk); return h; }
-  if (h === undefined && s) request(hk, { fig: { kind, L, mode, f } }, tier, 1);
+  if (h === undefined && s) request(hk, job, tier, 1);
   for (let i = HI.indexOf(tier) - 1; i >= 0; i--) { const lo = cache.get(`${key}@${HI[i]}`); if (lo) return lo; }
   return s || null;
+}
+
+// spullen in en rond de stad (propmodels.js): lantaarn, put, tonnen, kar, rots, stronk, ...; met hun eigen slagschaduw
+export function getProp(kind, v = 0, need = 0) {
+  if (!enabled() || !HAS_PROP.has(kind)) return null;
+  return tiered(`p|${kind}|${v}`, { prop: { kind, v } }, need);
 }

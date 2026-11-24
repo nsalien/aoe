@@ -1062,9 +1062,9 @@ export class TownView {
       top = 24;
     } else if (n.kind === 'tree') {
       const spr = this.trees[1];
-      ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1);
+      if (!A.prop3d(ctx, 'tree', 1, p.x - 3, p.y, 1.1)) ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1);
       // stapeltje brandhout
-      for (let i = 0; i < 3; i++) {
+      if (!A.prop3d(ctx, 'woodpile', 0, p.x + 10, p.y + 3, 1.1)) for (let i = 0; i < 3; i++) {
         const lx = p.x + 10; const ly = p.y + 3 - i * 3.2;
         ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(lx - 6 + i, ly); ctx.lineTo(lx + 5 - i, ly - 2); ctx.stroke();
@@ -1078,10 +1078,13 @@ export class TownView {
       A.rock(ctx, p.x + 1, p.y + 7, 1.3);
       top = 28;
     } else {
-      A.rock(ctx, p.x - 3, p.y + 2, 2.3);
-      A.rock(ctx, p.x + 9, p.y + 4, 1.5);
-      ctx.fillStyle = '#f2c230';
-      for (const [dx, dy, r] of [[-7, -7, 1.9], [-1, -10, 1.5], [4, -5, 1.7], [9, 1, 1.2]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      if (A.prop3d(ctx, 'gold', n.id % 8, p.x - 1, p.y + 3, 1.6)) A.prop3d(ctx, 'gold', (n.id + 3) % 8, p.x + 9, p.y + 5, 0.9);
+      else {
+        A.rock(ctx, p.x - 3, p.y + 2, 2.3);
+        A.rock(ctx, p.x + 9, p.y + 4, 1.5);
+        ctx.fillStyle = '#f2c230';
+        for (const [dx, dy, r] of [[-7, -7, 1.9], [-1, -10, 1.5], [4, -5, 1.7], [9, 1, 1.2]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      }
       const tw = Math.sin(t * 0.006 + n.id);
       if (tw > 0.6) {
         ctx.strokeStyle = `rgba(255,255,220,${(tw - 0.6) * 2.5})`; ctx.lineWidth = 1;
@@ -1962,6 +1965,7 @@ export class TownView {
     const v = this.viewRect();
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
     this.treeMip = cam.zoom * cam.dpr < 0.95;
+    this.treeNeed = cam.zoom * cam.dpr;
     if (this.battleMode) this.underlay(ctx, t, now); // slagveld: opstelplaats en looplijnen op de grond
     else if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
     if (this.landMode) this.drawLandLots(ctx);
@@ -2177,11 +2181,15 @@ export class TownView {
     const spr = this.trees[tr.kind ?? tr.v];
     let sway = Math.sin(t * 0.0012 + tr.gx) * 0.6;
     if (shake) sway += Math.sin(t * 0.05) * 1.6;
+    // 3D-boom (zelfde stijl als de gebouwen); de schaduw zit al in de grondlaag
+    const d3 = S3.getProp('tree', tr.kind ?? tr.v, this.treeNeed);
+    if (d3) { ctx.drawImage(d3.cv, p.x - d3.ax + sway, p.y - d3.ay, d3.w, d3.h); return; }
     ctx.drawImage(this.treeMip ? spr.small : spr.cv, p.x - spr.ax + sway, p.y - spr.ay, spr.w, spr.h);
   }
 
   drawStump(ctx, st) {
     const p = toWorld(st.gx, st.gy);
+    if (A.prop3d(ctx, 'stump', Math.floor(st.gx * 7 + st.gy * 3) & 7, p.x, p.y, 0.9)) return;
     ctx.fillStyle = 'rgba(20,30,10,0.25)'; ctx.beginPath(); ctx.ellipse(p.x + 1, p.y, 6, 2.6, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#6b4523'; ctx.fillRect(p.x - 3.5, p.y - 4, 7, 4);
     ctx.fillStyle = '#d9b27a'; ctx.beginPath(); ctx.ellipse(p.x, p.y - 4, 3.5, 1.6, 0, 0, Math.PI * 2); ctx.fill();
@@ -2210,20 +2218,25 @@ export class TownView {
   drawDepositInner(ctx, d, t) {
     const p = { x: 0, y: 0 };
     if (d.kind === 'gold') {
-      A.rock(ctx, p.x - 8, p.y + 2, 2.8); A.rock(ctx, p.x + 9, p.y + 4, 2.1); A.rock(ctx, p.x, p.y + 8, 1.6);
-      ctx.fillStyle = '#f2c230';
-      for (const [dx, dy, r] of [[-12, -9, 2.2], [-5, -13, 1.8], [2, -7, 2], [10, -3, 1.6], [-1, 2, 1.5], [6, -9, 1.3]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      if (A.prop3d(ctx, 'gold', d.id % 8, p.x - 8, p.y + 2, 2.4)) { A.prop3d(ctx, 'gold', (d.id + 2) % 8, p.x + 9, p.y + 4, 1.8); A.prop3d(ctx, 'gold', (d.id + 5) % 8, p.x, p.y + 9, 1.3); } else {
+        A.rock(ctx, p.x - 8, p.y + 2, 2.8); A.rock(ctx, p.x + 9, p.y + 4, 2.1); A.rock(ctx, p.x, p.y + 8, 1.6);
+        ctx.fillStyle = '#f2c230';
+        for (const [dx, dy, r] of [[-12, -9, 2.2], [-5, -13, 1.8], [2, -7, 2], [10, -3, 1.6], [-1, 2, 1.5], [6, -9, 1.3]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      }
       const tw = Math.sin(t * 0.005 + d.id * 3);
       if (tw > 0.5) { ctx.fillStyle = `rgba(255,255,230,${(tw - 0.5) * 2})`; ctx.fillRect(p.x - 6, p.y - 15, 2, 2); ctx.fillRect(p.x + 3, p.y - 9, 1.6, 1.6); }
     } else if (d.kind === 'stone') {
       A.rock(ctx, p.x - 10, p.y + 1, 3.2); A.rock(ctx, p.x + 7, p.y, 2.8); A.rock(ctx, p.x - 1, p.y + 9, 2.2); A.rock(ctx, p.x + 13, p.y + 7, 1.5);
     } else if (d.kind === 'wood') {
       for (const [dx, dy, sc] of [[-12, 2, 1.75], [10, 0, 1.6], [-1, 9, 1.85]]) A.broadleaf(ctx, p.x + dx, p.y + dy, sc, 0.15);
-      ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(p.x + 14 - i, p.y + 12 - i * 3); ctx.lineTo(p.x + 26 - i, p.y + 9 - i * 3); ctx.stroke(); }
-      ctx.lineCap = 'butt';
+      if (!A.prop3d(ctx, 'logs', 0, p.x + 20, p.y + 11, 0.8)) {
+        ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(p.x + 14 - i, p.y + 12 - i * 3); ctx.lineTo(p.x + 26 - i, p.y + 9 - i * 3); ctx.stroke(); }
+        ctx.lineCap = 'butt';
+      }
     } else {
       for (const [dx, dy] of [[-12, 0], [0, -5], [11, 1], [-4, 8], [8, 9]]) {
+        if (A.prop3d(ctx, 'berry', (dx + 20) % 3, p.x + dx, p.y + dy, 0.85)) continue;
         A.bush(ctx, p.x + dx, p.y + dy, 1.6);
         ctx.fillStyle = '#d6324a';
         for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(p.x + dx - 3 + i * 2, p.y + dy - 4 - (i % 2) * 2, 1.1, 0, Math.PI * 2); ctx.fill(); }
@@ -2886,12 +2899,14 @@ export class TownView {
     if (d.kind === 'bush') A.bush(ctx, p.x, p.y, 1.2);
     else if (d.kind === 'rock') A.rock(ctx, p.x, p.y, 1.2);
     else if (d.kind === 'stone') A.rock(ctx, p.x, p.y, d.s);
+    else if (d.kind === 'gold' && A.prop3d(ctx, 'gold', Math.floor(d.gx * 5 + d.gy * 3) & 7, p.x, p.y + 1.2 * d.s, d.s)) { /* 3D */ }
     else if (d.kind === 'gold') {
       A.rock(ctx, p.x, p.y, d.s);
       ctx.fillStyle = '#f2c230';
       ctx.beginPath(); ctx.arc(p.x - 2, p.y - 5 * d.s, 1.6, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(p.x + 3, p.y - 3 * d.s, 1.2, 0, Math.PI * 2); ctx.fill();
       if (Math.sin(t * 0.003 + d.gx * 7) > 0.92) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x - 2.5, p.y - 6 * d.s, 1.5, 1.5); }
+    } else if (d.kind === 'berry' && A.prop3d(ctx, 'berry', Math.floor(d.gx * 3 + d.gy) % 3, p.x, p.y, 0.7)) { /* 3D */
     } else if (d.kind === 'berry') {
       A.bush(ctx, p.x, p.y, 1.4);
       ctx.fillStyle = '#d6324a';

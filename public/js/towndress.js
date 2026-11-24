@@ -59,6 +59,9 @@ function propSprite(kind, v, PS) {
 export function drawProp(ctx, p) {
   const m = ctx.getTransform();
   const s = p.s || 1;
+  // 3D-model (zelfde stijl als de gebouwen), anders de getekende versie
+  const w0 = toWorld(p.gx, p.gy);
+  if (A.prop3d(ctx, p.kind, p.v || 0, w0.x, w0.y, s)) return;
   const cv = propSprite(p.kind, p.v || 0, resFor(Math.hypot(m.a, m.b) * s));
   const [x0, y0, x1, y1] = BOXES[p.kind] || BOX;
   const w = toWorld(p.gx, p.gy);
