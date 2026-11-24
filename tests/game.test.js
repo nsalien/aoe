@@ -514,7 +514,7 @@ test('een groep kan zich terugtrekken uit een gevecht', () => {
 });
 
 // ---------- grond, muren en groepen ----------
-import { checkBuyLot, doBuyLot, isBuildable as canBuild, doPlaceWalls, wallEnclosed, effectiveWall, canPlaceAt as canPut, doPlaceGate, doRemoveWalls, doDemolish, gateList } from '../public/shared/sim.js';
+import { checkBuyLot, doBuyLot, isBuildable as canBuild, doPlaceWalls, wallEnclosed, effectiveWall, canPlaceAt as canPut, doPlaceGate, doRemoveWalls, doDemolish, gateList, homeSight, exploredNow } from '../public/shared/sim.js';
 import { LAND } from '../public/shared/rules.js';
 
 test('grond bijkopen per lot van 4 x 4, aansluitend en elke keer duurder', () => {
@@ -531,6 +531,22 @@ test('grond bijkopen per lot van 4 x 4, aansluitend en elke keer duurder', () =>
   doBuyLot(s, 4, 0); // sluit aan op het vorige lot
   assert.ok(w2 - s.res.wood > wood - w2, 'het tweede lot is duurder');
   assert.ok(canPut(s, 'house', 13, 1), 'je kan er bouwen');
+});
+
+test('oorlogsmist: je bouwgrond (ook loten), je muren en een rand van 3 tegels zie je altijd', () => {
+  const s = terrTown();
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  const seen = (i, j) => homeSight(s)[tileIndex(i, j)] === 1;
+  const known = (i, j) => exHas(exploredNow(s, s.t), i, j);
+  assert.ok(seen(14, 1) && !seen(16, 1), 'zonder loten: 3 tegels rond het bouwvierkant');
+  doBuyLot(s, 3, 0); doBuyLot(s, 4, 0); // tegels 12..19 x 0..3
+  assert.ok(seen(19, 1), 'het verste lot ligt niet in de mist');
+  assert.ok(seen(22, 1) && !seen(23, 1), 'de mist begint 3 tegels voorbij je bouwgrond');
+  assert.ok(known(22, 1) && !known(23, 1), 'wat je ziet, is ook ontdekt (server en browser)');
+  // een muur op het lot: de mist begint 3 tegels voorbij de muur
+  s.buildings.find((b) => b.type === 'wall').level = 1;
+  doPlaceWalls(s, [[19, 0], [19, 1], [19, 2], [19, 3]]);
+  assert.ok(seen(22, 2) && !seen(24, 2));
 });
 
 test('muren tegel per tegel; een gesloten muur verdedigt volledig', () => {

@@ -8,7 +8,7 @@ import {
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
 } from './rules.js';
 import {
-  territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, TILE, exDecode, exEncode, revealCircle, revealSegment,
+  territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, T_W, TILE, exDecode, exEncode, revealCircle, revealSegment,
 } from './territory.js';
 import { resolveBattle, computeLoot, carryCapacity } from './battle.js';
 import { combatants, runFight, fightEnd, survivorsByGroup } from './skirmish.js';
@@ -660,9 +660,51 @@ function withEx(s, fn) {
   s.terr.ex = exEncode(b);
 }
 
-// wat is er nu ontdekt (inclusief wat lopende eenheden onderweg al zagen)
+// Wat je rond je eigen stad altijd ziet: je bouwgrond (vierkant van je tijdperk, gekochte loten, gekapt bos), je muren
+// en poorten en alles erbinnen, met een rand van FIELD.homeSight tegels. Daarbuiten begint de oorlogsmist, dus nooit
+// binnen je eigen muren. Geeft een Uint8Array per tegel (1 = zichtbaar); gedeeld en gecachet: niet aanpassen.
+const SIGHT_OFF = (() => {
+  const r = FIELD.homeSight; const R = Math.ceil(r); const out = [];
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (dx * dx + dy * dy <= r * r) out.push([dx, dy]);
+  return out;
+})();
+let sightCache = null;
+export function homeSight(s) {
+  const k = ringForAge(age(s));
+  const tr = s.terr;
+  const key = tr ? `${k}|${tr.seed}|${tr.cl.join()}|${JSON.stringify(tr.lots || [])}|${(s.walls || []).join()}|${(s.gates || []).join()}` : `${k}`;
+  if (sightCache && sightCache.key === key) return sightCache.vis;
+  const src = new Uint8Array(T_W * T_W);
+  for (let j = T_MIN; j < T_MAX; j++) for (let i = T_MIN; i < T_MAX; i++) if (ringOf(i, j) <= k) src[tileIndex(i, j)] = 1;
+  if (tr) {
+    for (const idx of clearedSet(s)) src[idx] = 1;
+    const walls = wallSet(s);
+    for (const idx of walls) if (idx >= 0 && idx < src.length) src[idx] = 1;
+    const inside = insideSet(s, walls);
+    if (inside) {
+      for (const p of inside) {
+        const [i, j] = p.split(',').map(Number);
+        if (inTerr(i, j)) src[tileIndex(i, j)] = 1;
+      }
+    }
+  }
+  const vis = new Uint8Array(T_W * T_W);
+  for (let idx = 0; idx < src.length; idx++) {
+    if (!src[idx]) continue;
+    const i = (idx % T_W) + T_MIN; const j = Math.floor(idx / T_W) + T_MIN;
+    for (const [dx, dy] of SIGHT_OFF) if (inTerr(i + dx, j + dy)) vis[tileIndex(i + dx, j + dy)] = 1;
+  }
+  sightCache = { key, vis };
+  return vis;
+}
+
+// wat is er nu ontdekt (je eigen stad en de rand errond, plus wat lopende eenheden onderweg al zagen)
 export function exploredNow(s, now) {
   const b = exDecode(s.terr ? s.terr.ex : '');
+  if (s.terr) {
+    const hs = homeSight(s);
+    for (let k = 0; k < hs.length; k++) if (hs[k]) b[k >> 3] |= 1 << (k & 7);
+  }
   for (const g of s.field || []) {
     const p = groupPos(g, now);
     if (g.pending) revealSegment(b, g.x0, g.y0, p.x, p.y, groupVision(g));

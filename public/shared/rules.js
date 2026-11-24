@@ -320,6 +320,7 @@ export const FIELD = {
   chopMs: 12000, // bos kappen duurt 12 echte seconden per boom
   chopWood: 25,
   clearReach: 3, // tot zoveel ringen voorbij het bouwvierkant kan je bos kappen
+  homeSight: 3.2, // zo ver (tegels) rond je bouwgrond en je muren zie je altijd; daarbuiten begint de oorlogsmist
   gatherEff: 0.8, // wilde bronnen: 80% van een gewone werkplek (de weg is langer)
   aggro: 3.4, // wie zo dicht bij het barbarenkamp komt, wordt meteen aangevallen (tegels)
   armorK: 40, // schade x armorK / (armorK + verdediging)
