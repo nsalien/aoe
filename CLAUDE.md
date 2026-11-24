@@ -159,6 +159,13 @@ Daarom:
   (gewone eerst), hooguit `MAX_HI` scherpe beelden in het geheugen. Figuren krijgen anti-aliasing (`aa`) in `render()`.
   `render3d.js` versnelt exact met lijsten per vorm (`buildAccel`: schaduw, omgevingsschaduw, schermvak per beeldlijn).
   Materialen voor figuren: `cloth`, `leather`, `mail` (maliën), `plain`/`metal`/`gold`.
+- **Grond van de stad** (`town.js` + `groundhd.js`): `bakeGround` bereidt alles voor en maakt een tekenfunctie
+  `paintGround(g, R, S)` (g in wereldcoördinaten op schaal S, R = uitsnede in wereldpixels). Daarmee wordt de grond één keer
+  op `BAKE` gebakken (uitgezoomd); ingezoomd tekent `drawGroundHD` het zichtbare deel in stukken op schermresolutie
+  (`HD_TIERS` 2–6 px per wereldpixel, cache `HDGround` met LRU, hooguit 2 nieuwe stukken per beeld, `hdPatterns` = fijne
+  texturen per resolutie, `stone()` = één kassei/kinderkopje/stapsteen). De aankleding (`buildDress`) heeft ook `paint(g, R, S)`.
+  Nieuwe grondversiering hoort in die tekenfuncties, op vaste (gehashte) plaatsen en met een uitsnede-test: geen Math.random
+  of oplopende `rnd()`, anders verschillen de stukken.
 - `public/js/town.js` / `world.js` — de twee canvas-weergaven; `fx.js` — dag/nacht, licht, deeltjes, wolken, vogels.
   `worldmap.js` bakt de wereldkaart (hoogteveld uit `worldgen.fieldAt`, kolom per kolom getekend, bossen, akkers, wegen).
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.
