@@ -557,6 +557,72 @@ function mill(s, st, L) {
   return {};
 }
 
+// Boerderij: omgeploegde akker met ruggen, jonge plantjes (niveau 1) of rijp graan, een hek rondom,
+// een vogelverschrikker (niveau 1), hooibalen (vanaf 2) en een molentje met draaiende wieken (vanaf 3, wieken apart getekend).
+function farm(s, st, L) {
+  const soil = { k: 'dirt', c: rgb('#6a4a2c') }; const ridge = { k: 'dirt', c: rgb('#84603c') };
+  s.box(-0.47, -0.47, 0, 0.47, 0.47, 0.012, soil);
+  const rows = 6;
+  const free = (i, k) => (L >= 3 && i <= 1 && k === 0) || (L >= 2 && i >= 4 && k === 0);
+  for (let i = 0; i < rows; i++) {
+    const y = -0.4 + (i + 0.5) * (0.8 / rows);
+    s.box(-0.43, y - 0.038, 0.012, 0.43, y + 0.038, 0.032, ridge);
+    if (L === 1) {
+      for (let k = 0; k < 9; k++) {
+        const x = -0.38 + k * 0.095 + ((i * 3 + k) % 3) * 0.006;
+        if (Math.abs(x - 0.05) < 0.05 && Math.abs(y - 0.05) < 0.07) continue; // plaats voor de vogelverschrikker
+        s.ell(x, y, 0.05, 0.032, 0.03, 0.028, { k: 'leaf', c: rgb((i + k) % 2 ? '#6fad40' : '#5a9634') });
+      }
+    } else {
+      // rijp graan: doorlopende ruggen met een bolle top (in twee stukken, iets verschillend van hoogte)
+      const wheat = { k: 'hay', c: rgb(L >= 4 ? '#e2bb4c' : '#d8b252') };
+      const xa = free(i, 0) ? -0.2 : -0.42;
+      for (const [a, b, k] of [[xa, 0.0, 0], [0.0, 0.42, 1]]) {
+        const hh = 0.05 + ((i * 7 + k * 3) % 4) * 0.008;
+        s.box(a + 0.004, y - 0.03, 0.03, b - 0.004, y + 0.03, 0.03 + hh, wheat);
+        s.gable(a + 0.004, y - 0.033, b - 0.004, y + 0.033, 0.03 + hh, 0.035, 'x', wheat, 0);
+      }
+    }
+  }
+  // hek rondom: paaltjes en twee latten
+  const post = mat.wood('#6b4a2a'); const rail = mat.wood('#80592f');
+  for (let i = 0; i <= 6; i++) {
+    const t = -0.47 + (i / 6) * 0.94;
+    for (const [x, y] of [[t, 0.47], [0.47, t], [t, -0.47], [-0.47, t]]) s.box(x - 0.011, y - 0.011, 0, x + 0.011, y + 0.011, 0.12, post);
+  }
+  for (const z of [0.045, 0.095]) {
+    s.box(-0.47, 0.464, z, 0.47, 0.476, z + 0.013, rail); s.box(0.464, -0.47, z, 0.476, 0.47, z + 0.013, rail);
+    s.box(-0.47, -0.476, z, 0.47, -0.464, z + 0.013, rail); s.box(-0.476, -0.47, z, -0.464, 0.47, z + 0.013, rail);
+  }
+  const anchors = {};
+  if (L === 1) {
+    // vogelverschrikker
+    const x = 0.05; const y = 0.05;
+    s.box(x - 0.01, y - 0.01, 0, x + 0.01, y + 0.01, 0.4, mat.wood('#5a3a1e'));
+    s.box(x - 0.008, y - 0.13, 0.29, x + 0.008, y + 0.13, 0.305, mat.wood('#5a3a1e'));
+    s.box(x - 0.035, y - 0.06, 0.2, x + 0.035, y + 0.06, 0.31, mat.cloth('#b0392b', '#8a2a20'));
+    s.ell(x, y, 0.35, 0.04, 0.04, 0.045, mat.hay());
+    s.cone(x, y, 0.07, 0.38, 0.45, mat.thatch());
+  }
+  if (L >= 2) {
+    // ronde hooibalen
+    s.hcyl('x', 0.3, 0.06, 0.06, -0.42, -0.3, mat.hay());
+    s.hcyl('x', 0.38, 0.06, 0.06, -0.4, -0.28, mat.hay());
+    if (L >= 4) s.hcyl('x', 0.34, 0.17, 0.06, -0.41, -0.29, mat.hay());
+  }
+  if (L >= 3) {
+    // molentje in de hoek; de wieken tekent het spel (ze draaien)
+    s.box(-0.44, -0.44, 0, -0.2, -0.2, 0.05, mat.stone('#a39b8c'));
+    s.box(-0.42, -0.42, 0.05, -0.22, -0.22, 0.36, mat.plaster(st.plaster || '#e9dcbc', 0.05, 0.36, { timber: true }));
+    s.hip(-0.45, -0.45, -0.19, -0.19, 0.36, 0.2, mat.thatch(mat.wood('#7a5a34')), 0.03);
+    s.win('y', -0.22, -0.35, -0.29, 0.05, 0.2, mat.door('#6b4224'));
+    s.hcyl('x', -0.32, 0.3, 0.018, -0.23, -0.19, mat.wood('#5a3a1e'));
+    anchors.blades = [-0.19, -0.32, 0.3];
+    if (L >= 5) { s.cyl(-0.32, -0.32, 0.006, 0.56, 0.68, mat.metal('#3a3c40')); s.box(-0.36, -0.324, 0.65, -0.28, -0.316, 0.67, mat.gold()); }
+  }
+  return anchors;
+}
+
 // Academie: zaal met zuilengang; niveau 2 een toren, niveau 3 een sterrenwacht. v = afgewerkte soorten onderzoek
 // (bit 1 voetvolk: schildenrek, 2 schutters: schietschijf met vuurpijl, 4 ruiterij: harnas op een paal, 8 stad: pekketel)
 function academy(s, st, L, civ, v = 0) {
@@ -764,7 +830,7 @@ export function wallScene(p) {
   return s;
 }
 
-const BUILD = { house, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral };
+const BUILD = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral };
 export const HAS_3D = new Set(Object.keys(BUILD));
 const SIZE = { tc: 2, monument: 2 };
 

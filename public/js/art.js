@@ -1731,24 +1731,28 @@ const SIZES = { tc: 2, monument: 2 };
 const cache = new Map();
 
 // variant: huizen krijgen per gebouw een iets andere tint van muur en dak (minder eentonig)
-export function buildingSprite(type, level, team = '#c0392b', civ = null, id = 0) {
+// need = schermpixels per wereldpixel: bij inzoomen tekenen we het gebouw op een hogere resolutie (4 of 6)
+const hiSprites = [];
+export function buildingSprite(type, level, team = '#c0392b', civ = null, id = 0, need = 0) {
   const st = STYLES[civ] || null;
   const variant = type === 'house' ? Math.abs(id) % 3 : 0;
-  const key = `${type}:${level}:${team}:${st ? civ : ''}:${variant}`;
+  const SC = need > SCALE * 1.2 ? (need > 4.5 ? 6 : 4) : SCALE;
+  const key = `${type}:${level}:${team}:${st ? civ : ''}:${variant}${SC !== SCALE ? `@${SC}` : ''}`;
   let spr = cache.get(key);
   if (spr) return spr;
+  if (SC !== SCALE) { hiSprites.push(key); if (hiSprites.length > 12) cache.delete(hiSprites.shift()); }
   const size = SIZES[type] || 1;
   const w = size * TW + 48;
   const h = size * TH + 170;
-  const mk = () => { const c = document.createElement('canvas'); c.width = w * SCALE; c.height = h * SCALE; return c; };
+  const mk = () => { const c = document.createElement('canvas'); c.width = w * SC; c.height = h * SC; return c; };
   const cv = mk(); // grond (aangestampte aarde) + het gebouw met omlijning
   const bcv = mk(); // enkel het gebouw
   const ax = w / 2;
   const ay = h - (size * TH) / 2 - 14;
   const g0 = cv.getContext('2d');
-  g0.scale(SCALE, SCALE); g0.translate(ax, ay);
+  g0.scale(SC, SC); g0.translate(ax, ay);
   const ctx = bcv.getContext('2d');
-  ctx.scale(SCALE, SCALE); ctx.translate(ax, ay);
+  ctx.scale(SC, SC); ctx.translate(ax, ay);
   LIGHTS = [];
   rs = 12345;
   if (st) { Object.assign(C, st.palette); STYLE = st; }
@@ -1775,7 +1779,7 @@ export function buildingSprite(type, level, team = '#c0392b', civ = null, id = 0
     Object.assign(C, BASE_C); STYLE = null;
   }
   addGrain(bcv);
-  outline(g0, bcv, type === 'farm' ? 0.3 : 0.62);
+  outline(g0, bcv, type === 'farm' ? 0.3 : 0.62, SC);
   spr = { cv, w, h, ax, ay, lights: LIGHTS };
   LIGHTS = null;
   cache.set(key, spr);
@@ -1783,12 +1787,12 @@ export function buildingSprite(type, level, team = '#c0392b', civ = null, id = 0
 }
 
 // donkere omlijning rond het gebouw (zoals bij de figuren): scherper en beter leesbaar op het gras
-function outline(dst, src, alpha) {
+function outline(dst, src, alpha, sc = SCALE) {
   const w = src.width; const h = src.height;
   const tmp = document.createElement('canvas');
   tmp.width = w; tmp.height = h;
   const t = tmp.getContext('2d');
-  const px = SCALE * 0.55;
+  const px = sc * 0.55;
   for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-0.7, -0.7], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7]]) t.drawImage(src, dx * px, dy * px);
   t.globalCompositeOperation = 'source-in';
   t.fillStyle = `rgba(34,22,12,${alpha})`;
