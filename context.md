@@ -337,6 +337,12 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     pijl uit de koker, op de pees, spannen en loslaten op het moment van het schot, lans neer en stoten, werpspeer, bijl;
     wijde stand in het gevecht. Getest in een oefenslag op pc en gsm (ook schutters op de muur).
 
+38. **Gebouwen verplaatsen** (gevraagd: "door een gebouw ingeduwd te houden kan je het verplaatsen"). Ingedrukt houden op
+    een gebouw pakt het op; slepen toont het doorschijnend met een groene (mag) of rode (mag niet) voet, de kaart schuift mee
+    aan de rand; loslaten zet het neer. Gratis, enkel op vrije bouwgrond; het stadscentrum blijft in het midden. Ingedrukt
+    houden naast een gebouw kiest nog altijd je hele leger. Op pc ook via de knop Verplaatsen. Getest met muis en echte
+    aanraking (gsm), ook na herladen (de server bewaart het).
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
