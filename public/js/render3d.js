@@ -250,6 +250,57 @@ function blocked(prims, ox, oy, oz, dx, dy, dz, tmax) {
   return false;
 }
 
+// kijkstraal naar beneden op schermpunt sx: enkel vormen uit de rij waarvan het schermvak sx bevat
+function nearestAt(row, sb, sx, ox, oy, oz, nrm) {
+  let best = 1e9; let hit = null;
+  for (let i = 0; i < row.length; i++) {
+    const p = row[i]; const b = sb[p.id];
+    if (sx < b[0] || sx > b[2]) continue;
+    const t = hitPrim(p, ox, oy, oz, -VX, -VY, -VZ, best, tmpN);
+    if (t > 0 && t < best) { best = t; hit = p; nrm[0] = tmpN[0]; nrm[1] = tmpN[1]; nrm[2] = tmpN[2]; }
+  }
+  lastHit = hit;
+  return hit ? best : -1;
+}
+
+// lijsten per vorm: wie kan er zon wegnemen (in de richting van de zon, overlappend gezien vanuit de zon) en wie ligt
+// binnen het bereik van de korte straaltjes voor omgevingsschaduw
+function buildAccel(prims, proj) {
+  const n = prims.length;
+  const corners = (b) => { const c = []; for (const x of [b[0], b[3]]) for (const y of [b[1], b[4]]) for (const z of [b[2], b[5]]) c.push([x, y, z]); return c; };
+  // twee richtingen loodrecht op de zon
+  let e1 = [SUN[1], -SUN[0], 0]; const l1 = Math.hypot(e1[0], e1[1]) || 1; e1 = [e1[0] / l1, e1[1] / l1, 0];
+  const e2 = [SUN[1] * e1[2] - SUN[2] * e1[1], SUN[2] * e1[0] - SUN[0] * e1[2], SUN[0] * e1[1] - SUN[1] * e1[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const sb = []; const ps = [];
+  for (const p of prims) {
+    const cs = corners(p.bb);
+    let a0 = Infinity; let a1 = -Infinity; let b0 = Infinity; let b1 = -Infinity; let s0 = Infinity; let s1 = -Infinity;
+    let x0 = Infinity; let x1 = -Infinity; let y0 = Infinity; let y1 = -Infinity;
+    for (const c of cs) {
+      const u = dot(c, e1); const v = dot(c, e2); const w = dot(c, SUN);
+      a0 = Math.min(a0, u); a1 = Math.max(a1, u); b0 = Math.min(b0, v); b1 = Math.max(b1, v); s0 = Math.min(s0, w); s1 = Math.max(s1, w);
+      const [sx, sy] = proj(c[0], c[1], c[2]);
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+    }
+    sb.push([x0 - 0.01, y0 - 0.01, x1 + 0.01, y1 + 0.01]);
+    ps.push([a0, a1, b0, b1, s0, s1]);
+  }
+  const E = 0.01; const R = 0.24;
+  const sh = []; const ao = [];
+  for (let i = 0; i < n; i++) {
+    const P = ps[i]; const B = prims[i].bb;
+    const s = []; const o = [];
+    for (let k = 0; k < n; k++) {
+      const Q = ps[k]; const C = prims[k].bb;
+      if (Q[1] >= P[0] - E && Q[0] <= P[1] + E && Q[3] >= P[2] - E && Q[2] <= P[3] + E && Q[5] >= P[4] - E) s.push(prims[k]);
+      if (C[3] >= B[0] - R && C[0] <= B[3] + R && C[4] >= B[1] - R && C[1] <= B[4] + R && C[5] >= B[2] - R && C[2] <= B[5] + R) o.push(prims[k]);
+    }
+    sh.push(s); ao.push(o);
+  }
+  return { sb, sh, ao };
+}
+
 // ---------- materialen ----------
 // Elk materiaal zet een kleur (alb) en mag de normaal licht verbuigen (voor reliëf: voegen, pannen, balken).
 const alb = [0, 0, 0];
@@ -373,6 +424,24 @@ const MAT = {
     return 1;
   },
   plain(m) { const c = m.c || [0.6, 0.6, 0.6]; alb[0] = c[0]; alb[1] = c[1]; alb[2] = c[2]; return m.shiny ? 2 : 1; },
+  // maliënkolder: rijen kleine ringetjes (verspringend), glanzend
+  mail(m, p, n, u, v) {
+    const c = m.c || [0.62, 0.65, 0.7];
+    const f = 130; const rv = v * f * 1.25; const row = Math.floor(rv); const ru = u * f + (row % 2) * 0.5;
+    const du = ru - Math.floor(ru) - 0.5; const dv = rv - row - 0.5;
+    const d = Math.sqrt(du * du + dv * dv);
+    const ring = 1 - Math.min(1, Math.abs(d - 0.32) * 5);
+    const k = 0.55 + 0.55 * ring;
+    alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k;
+    return 2;
+  },
+  // leer: warme kleur met vlekjes en fijne nerf
+  leather(m, p, n, u, v) {
+    const c = m.c || [0.42, 0.27, 0.15];
+    const k = 0.8 + 0.25 * fbm(u * 70, v * 70, 52) + 0.06 * vnoise(u * 300, v * 40, 53);
+    alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k;
+    return 1;
+  },
   brick(m, p, n, u, v) { // leemstenen: kleine blokjes, warm van kleur
     return MAT.stone({ c: m.c || [0.74, 0.58, 0.4], row: 0.045, bw: 0.09 }, p, n, u, v);
   },
@@ -443,6 +512,10 @@ export function render(scene, scale = 2, opts = {}) {
       const [sx, sy] = proj(x, y, z); x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
     }
   }
+  // Versnelling (exact, zelfde beeld): per vorm de vormen die er schaduw op kunnen werpen (sh) of dichtbij liggen (ao),
+  // en per vorm het vak op het scherm (sb) zodat een kijkstraal enkel de vormen op zijn pixel test.
+  for (let k = 0; k < prims.length; k++) prims[k].id = k;
+  const accel = buildAccel(prims, proj);
   const ap = opts.apron || 0;
   if (ap) for (const [x, y] of [[-ap, -ap], [ap, -ap], [-ap, ap], [ap, ap]]) { const [sx, sy] = proj(x, y, 0); x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy); }
   if (opts.ground !== false) { x1 += zTop * 40 + 6; y1 += zTop * 8 + 4; } // slagschaduw
@@ -474,7 +547,7 @@ export function render(scene, scale = 2, opts = {}) {
     // zon
     const dl = n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2];
     let sun = 0;
-    if (dl > 0) sun = blocked(prims, px + n[0] * 0.002, py + n[1] * 0.002, pz + n[2] * 0.002, SUN[0], SUN[1], SUN[2], 20) ? 0 : dl;
+    if (dl > 0) sun = blocked(prim ? accel.sh[prim.id] : prims, px + n[0] * 0.002, py + n[1] * 0.002, pz + n[2] * 0.002, SUN[0], SUN[1], SUN[2], 20) ? 0 : dl;
     // hemel en omgevingsschaduw: korte straaltjes rond de normaal
     let ao = 1;
     if (AO_N) {
@@ -487,7 +560,7 @@ export function render(scene, scale = 2, opts = {}) {
       for (const [ca, sa] of dirs) {
         const dx = n[0] * 0.75 + (tx * ca + bx * sa) * 0.66; const dy = n[1] * 0.75 + (ty * ca + by * sa) * 0.66; const dz = n[2] * 0.75 + (tz * ca + bz * sa) * 0.66;
         const ox = px + n[0] * 0.003; const oy = py + n[1] * 0.003; const oz = pz + n[2] * 0.003;
-        if ((dz < 0 && oz + dz * 0.22 < 0) || blocked(prims, ox, oy, oz, dx, dy, dz, 0.22)) occ++;
+        if ((dz < 0 && oz + dz * 0.22 < 0) || blocked(prim ? accel.ao[prim.id] : prims, ox, oy, oz, dx, dy, dz, 0.22)) occ++;
       }
       ao = 1 - (occ / AO_N) * 0.75;
     }
@@ -507,18 +580,25 @@ export function render(scene, scale = 2, opts = {}) {
     return sun;
   };
   const col = [0, 0, 0];
+  // anti-aliasing (enkel zonder grond, voor figuren): per pixel onthouden welke vorm geraakt werd; waar buren verschillen,
+  // daarna 4 extra stralen per pixel en het gemiddelde nemen (gladde randen, ook als het beeld vergroot getekend wordt)
+  const ids = opts.aa && opts.ground === false ? new Int32Array(W * H).fill(-1) : null;
+  // per pixelrij: de vormen waarvan het schermvak die rij raakt
+  const rowList = (j) => { const ya = y0 + j / scale; const yb = y0 + (j + 1) / scale; return prims.filter((p) => accel.sb[p.id][1] <= yb && accel.sb[p.id][3] >= ya); };
   const apronMat = { k: 'dirt', c: opts.apronC || [0.52, 0.43, 0.3] };
   for (let j = 0; j < H; j++) {
     const sy = y0 + (j + 0.5) / scale;
+    const row = rowList(j);
     for (let i = 0; i < W; i++) {
       const sx = x0 + (i + 0.5) / scale;
       // punt op hoogte ZT dat op deze pixel valt, dan langs de kijkrichting naar beneden
       const dxy = sx / 32; const sxy = (sy + ZT * ZPX) / 16;
       const ox = (sxy + dxy) / 2; const oy = (sxy - dxy) / 2; const oz = ZT;
-      const t = nearest(prims, ox, oy, oz, -VX, -VY, -VZ, 1e9, nrm);
+      const t = nearestAt(row, accel.sb, sx, ox, oy, oz, nrm);
       const o = (j * W + i) * 4;
       if (t > 0) {
         const hit = lastHit;
+        if (ids) ids[j * W + i] = hit.id;
         let n0 = nrm[0]; let n1 = nrm[1]; let n2 = nrm[2];
         if (n0 * VX + n1 * VY + n2 * VZ < 0) { n0 = -n0; n1 = -n1; n2 = -n2; }
         const px = ox - VX * t; const py = oy - VY * t; const pz = oz - VZ * t;
@@ -554,6 +634,44 @@ export function render(scene, scale = 2, opts = {}) {
           if (s > 0.01) { data[o] = 18; data[o + 1] = 24; data[o + 2] = 10; data[o + 3] = Math.round(Math.min(0.6, s) * 255); }
         }
       }
+    }
+  }
+  if (ids) {
+    const SUB = [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]];
+    const edge = new Uint8Array(W * H);
+    for (let j = 0; j < H; j++) {
+      for (let i = 0; i < W; i++) {
+        const k = j * W + i; const id = ids[k];
+        if ((i > 0 && ids[k - 1] !== id) || (i < W - 1 && ids[k + 1] !== id) || (j > 0 && ids[k - W] !== id) || (j < H - 1 && ids[k + W] !== id)) edge[k] = 1;
+      }
+    }
+    let rj = -1; let row = null;
+    const base = data.slice(); // kleuren van de eerste ronde: een extra straal op dezelfde vorm als een buur hergebruikt die
+    for (let k = 0; k < W * H; k++) {
+      if (!edge[k]) continue;
+      const i = k % W; const j = (k - i) / W;
+      if (j !== rj) { rj = j; row = rowList(j); }
+      let r = 0; let g = 0; let b = 0; let n = 0;
+      for (const [du, dv] of SUB) {
+        const sx = x0 + (i + 0.5 + du) / scale; const sy = y0 + (j + 0.5 + dv) / scale;
+        const dxy = sx / 32; const sxy = (sy + ZT * ZPX) / 16;
+        const ox = (sxy + dxy) / 2; const oy = (sxy - dxy) / 2; const oz = ZT;
+        const t = nearestAt(row, accel.sb, sx, ox, oy, oz, nrm);
+        if (!(t > 0)) continue;
+        const hit = lastHit;
+        n++;
+        let src = ids[k] === hit.id ? k : -1;
+        if (src < 0) for (const q of [k - 1, k + 1, k - W, k + W]) if (q >= 0 && q < W * H && ids[q] === hit.id && Math.abs((q % W) - i) <= 1) { src = q; break; }
+        if (src >= 0) { r += base[src * 4]; g += base[src * 4 + 1]; b += base[src * 4 + 2]; continue; }
+        let n0 = nrm[0]; let n1 = nrm[1]; let n2 = nrm[2];
+        if (n0 * VX + n1 * VY + n2 * VZ < 0) { n0 = -n0; n1 = -n1; n2 = -n2; }
+        const mat = hit.mat.side && Math.abs(n2) < 0.2 ? hit.mat.side : hit.mat;
+        shade(ox - VX * t, oy - VY * t, oz - VZ * t, [n0, n1, n2], mat, hit, col);
+        r += tone(col[0]); g += tone(col[1]); b += tone(col[2]);
+      }
+      const o = k * 4;
+      if (!n) { data[o + 3] = 0; continue; }
+      data[o] = Math.round(r / n); data[o + 1] = Math.round(g / n); data[o + 2] = Math.round(b / n); data[o + 3] = Math.round((n / SUB.length) * 255);
     }
   }
   // lichtpunten (vensters) op het scherm, voor de nacht
