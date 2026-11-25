@@ -358,6 +358,16 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     opening wordt muur). Dan tikken of slepen en 'Zet hier' (muis: klikken). Gratis; vrije bouwgrond; poorten blijven in een
     recht stuk muur; nooit dicht zonder poort. Getest op gsm (aanraking) en pc, ook na herladen.
 
+41. **Wachttoren en andere gebouwen: nieuwe onderdelen per niveau, niet enkel groter** (gemeld: "Griekse wachttoren 2 → 3
+    geen verschil"; de %-meting zag 'hoger' als verschil, het Griekse dak ontbrak). Wachttoren, molen, adelshof en kathedraal
+    opnieuw gemaakt met per niveau iets nieuws (zie CLAUDE.md), Grieks stadscentrum 5 met verguld dak en beelden, gildehuis 1
+    in vakwerk en riet. Alle volkeren nagekeken in overzichten. `VERSION` 8.
+
+42. **Kleine gebouwen achter een groot gebouw kiezen** (gemeld: "achter het stadscentrum kan je ze niet selecteren, en dat
+    kan ik niet verplaatsen"). Kiezen gaat nu op de pixels van het beeld; nog eens tikken op dezelfde plek = het gebouw
+    erachter; het paneel toont 'Ook op deze plek' met knoppen (handig op een gsm); het gekozen gebouw wordt doorschijnend met
+    een gestippelde gouden voet bovenop getekend als er iets voor staat. Een tip verschijnt hooguit 3 keer per toestel.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
