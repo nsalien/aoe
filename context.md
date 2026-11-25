@@ -11,8 +11,10 @@ zodat een nieuwe sessie meteen verder kan. Werk het bij als je iets belangrijks 
 **Rijken van de Vallei** is een isometrisch browser-strategiespel in de stijl van Age of Empires, voor een kleine
 vriendengroep. Live op https://rijken-van-de-vallei.pages.dev (Cloudflare Pages + Pages Functions + D1, gratis plan).
 
-- Een **seizoen** = vredestijd (standaard 21 dagen) + oorlogsweek (7 dagen). In de vredestijd bouw je je economie op
-  en versla je rovers en barbaren; spelers aanvallen kan pas in de oorlogsweek. Daarna een eindstand.
+- Een **seizoen** duurt standaard 28 dagen (`world.war_ms`), daarna een eindstand. **Vrede is per speler**: de eerste
+  24 uur na zijn start (`world.prep_ms`; wie zich vóór de start inschreef: vanaf de start) kan niemand hem aanvallen en
+  kan hij zelf geen spelers aanvallen. Daarna kan iedereen eender wanneer aanvallen. Rovers en barbaren altijd.
+  (Vroeger: 3 weken vrede voor iedereen + 1 oorlogsweek; migratie `0004` zette het lopende seizoen om, zelfde einddatum.)
 - Spelers worden automatisch in **teams** gekoppeld (standaard 2 per team, tot 8 teams). Bondgenoten starten naast
   elkaar, kunnen elkaar troepen (versterking) en grondstoffen (karavanen via de markt) sturen en chatten.
 - Twee weergaven: **je stad** (met je eigen gebied eromheen) en de **wereldkaart** (56×56, steden + roverskampen).
@@ -36,10 +38,32 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
 - Grondstoffen: voedsel, hout, steen, goud. Start: 300/300/150/100, 6 dorpelingen (3 voedsel, 3 hout).
 - Dorpelingen werken op **werkplekken** (stadscentrum + boerderij/houthakkerskamp/steengroeve/goudmijn per niveau).
   Opslag (stadscentrum + opslagplaats) begrenst je voorraad; een deel is verborgen voor plunderaars.
-- **4 tijdperken**: Vuursteen → Brons → IJzer → Kroon (stadscentrum verbeteren; IJzer = kasteel).
-- **Bouwers**: 2 tegelijk, 3 vanaf het IJzertijdperk (`maxBuilds`).
+- **5 tijdperken** (gevraagd: "5 tijdperken met namen, upgrades per tijdperk en een paar nieuwe gebouwen"):
+  Vuursteen → Brons → IJzer → **Gilden** → **Kroon** (stadscentrum verbeteren; IJzer = kasteel). Vroeger was Kroon het 4e;
+  wie in tijdperk 4 zat, ziet nu "Gilden". Een actieve speler haalt de Kroon rond dag 11–16 van 28.
+- **Niveau N vraagt tijdperk N** (`levelAge`): bijna alle gebouwen gaan tot niveau 5 (vroeger 3). Uitzondering: de Academie
+  (`levelAges` [3, 4, 5]). Niveaus 4–5 zijn zichtbaar (vaandels, gouden piek en voetband; huizen een aanbouw en een torentje).
+- **Bouwers**: 2 tegelijk, 3 vanaf het IJzertijdperk, +1 met een bouwloods (`maxBuilds`); de bouwloods bouwt ook 5%/niveau sneller (`buildTime`).
 - **Gebouwen**: stadscentrum, huis, boerderij, houthakkerskamp, steengroeve, goudmijn, opslagplaats, kazerne, stadsmuur
-  (tijdperk 1); schietbaan, stal, smidse, markt, wachttoren (2); belegwerkplaats (3); monument (4, punten).
+  (tijdperk 1); schietbaan, stal, smidse, markt, wachttoren, **molen** (+5% voedsel/niv.) (2); belegwerkplaats, **Academie** (3);
+  monument, **gildehuis** (+3% alles/niv.), **bouwloods** (4); **Adelshof** (edelmannen), **kathedraal** (trouw +1/u per niveau,
+  600 punten/niv.) (5). Productiebonussen: `boost()` in `sim.js`.
+- **Smidse**: +5% aanval/verdediging per niveau én het uitzicht van alle soldaten (`gearOf`: leer en brons, ijzer en maliën
+  vanaf niveau 3, plaatharnas op 5).
+- **Academie** (gevraagd: "onderzoek naar betere wapens, zichtbaar per upgrade"): `TECHS` in `rules.js`, 4 soorten
+  (voetvolk, schutters, ruiterij, stad) × 3 rijen. Geen ruwe kracht maar vaardigheden: schildmuur, krijgsdrill, strijdkreet,
+  vuurpijlen, taxusboog, pijlenregen, hoefijzers, lansen, flankrit, kokende pek, torenkruisbogen, ijzerbeslag. Eén onderzoek
+  tegelijk (`s.research`, klaar in `advance()`), voorgoed (`s.tech`). Werkt in de live slag (`st.tk`, `TK()` in
+  `fieldbattle.js`) en als kleine bonus in de automatische slag (`auto` → `techMods` in `battle.js`). Zichtbaar: `troops.js`
+  (groot schild, gouden pluim, vuurpijlen, lange boog, kleed, lans, ...) en de Academie zelf (variant = afgewerkte soorten).
+- **Edelman, trouw en vazallen** (gevraagd: "edelmannen zoals Tribal Wars, maar toegankelijk; ook bij andere spelers"):
+  edelman in het Adelshof (één per niveau, één tegelijk in opleiding). Trouw 0–100 (`s.loy`, herstelt 2/u + kathedraal).
+  Een gewonnen aanval met een levende edelman: −25 per edelman (`applyNobles` in `functions/lib/vassal.js`). Bij 0 is de stad
+  3 dagen **vazal** (tabel `vassals` + `s.vas`): schatting (20% van de productie om de 6 u, karavaan `kind = 'tribute'`),
+  heer en vazal vallen elkaar niet aan (maar helpen mag), de heer krijgt 20% van de punten van de vazal, een bot-vazal stuurt
+  zijn heer versterking. Vrij: na 3 dagen, met losgeld (`/vassal/ransom`), of als een clanlid de heer verslaat. Daarna 24 u
+  beschermd. Max. 2 vazallen; niet tegen steden met < 45% van je punten. Sterke bots gebruiken edelmannen (vanaf ± week 3).
+  Niemand verliest zijn stad (één stad per speler blijft).
 - **Afbreken**: elk gebouw behalve het stadscentrum; een kwart van de kosten terug (de helft van een lopende bouw).
   Niet als er nog getraind wordt. Werkers boven de nieuwe plaatsen worden vrij.
 - **Vondsten**: af en toe een schaap/eik/rotsblokken/goud rond je stad; een dorpeling oogst ze (`BONUS`).
@@ -56,6 +80,9 @@ registratie; oude spelers kregen een vast willekeurig volk.
 **Eigen gebied rond je stad** (`territory.js`, uit de stad-id):
 - Oorlogsmist; groepen (dorpelingen of soldaten) lopen in echte tijd (max. 8 groepen). Bomen kappen aan de rand =
   extra bouwgrond + hout; wilde bronnen ontginnen; everzwijnen jagen.
+- **Mist rond je stad** (gevraagd: "geen mist binnen je eigen muren"): je ziet altijd je bouwgrond (vierkant, gekochte
+  loten, gekapt bos), je muren en alles erbinnen, plus een rand van ±3 tegels (`homeSight` in `sim.js`, `FIELD.homeSight`).
+  Daarbuiten begint de mist; meestal dus net voorbij je muur.
 - **Bouwgrond**: een vierkant van 12×12 dat met elk tijdperk een ring groeit, plus **gekochte loten** van 4×4
   (max. 12, steeds duurder) en gekapte tegels. Een stippellijn toont de rand van al je bouwgrond.
 - **Barbarenkamp**: 4 barbaren in tijdperk 1, 6/8/10 later, hooguit +3 na veel overvallen. Barbaren vallen meteen
@@ -74,8 +101,11 @@ registratie; oude spelers kregen een vast willekeurig volk.
   meer schade/levens per niveau; gesloopt = een niveau minder.
 
 **Wereldkaart en aanvallen**
-- Roverskampen (niveau 1–5; altijd aan te vallen, ook in vredestijd) en steden. Legers marcheren in echte tijd
+- Roverskampen (niveau 1–5; altijd aan te vallen, ook tijdens je vrede) en steden. Legers marcheren in echte tijd
   (`marches`), komen aan, vechten, keren terug met buit. Verkenners verkennen.
+- **Vrede** (`peaceEnd`/`peaceBlock` in `functions/lib/game.js`): een aanval of verkenning op een speler mag pas
+  **aankomen** als de vrede van beide spelers voorbij is (vertrekken mag al eerder). `/state` geeft `me.peaceEnd`,
+  `/map` per stad `peaceEnd`; de balk bovenaan toont "Vrede · nog …", op de kaart staat "· vrede" bij de stad.
 - Tik je een stad of kamp aan, dan zie je **"Onderweg hierheen"**: elke mars ernaartoe met klokuur en aftelling.
 - **Wat er gebeurt als een aanval aankomt** (`resolveMarch` → `maybeOfferBattle` in `functions/lib/game.js`):
   1. Er draait geen server op de achtergrond: een aankomst wordt verwerkt bij het eerstvolgende verzoek van **eender
@@ -94,11 +124,28 @@ registratie; oude spelers kregen een vast willekeurig volk.
      eerst een **opstelling** (max. 75 s, tot beide op Start drukken), dan de slag (max. 10 minuten). De aanvaller staat
      aan de kant van zijn eigen stad; de verdediger zet schutters op de muur en voetvolk achter de poort aan die kant.
      Aanvallers kunnen niet door poorten of over muren: rammen (of voetvolk) slaan een bres. Winnen: alle verdedigers
-     verslaan of het plein voor het stadscentrum 30 s houden. Gevechten bewust traag (`FB.pace`): een slag duurt minuten.
-     Kaartjes per eenheid onderaan (1 tik = die eenheid, 2 tikken = alle van die soort), ingedrukt houden = heel leger.
-     Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
+     verslaan of op de vlucht jagen, of het plein voor het stadscentrum 30 s houden. Een slag duurt ±1–3 minuten.
+     **Zoals Rome: Total War** (gevraagd door de gebruiker): troepen vechten in **regimenten** (hooguit 12 figuren per kaartje)
+     met een **vaandel** (soort, aantal, levens, moed). Ze lopen als één blok in **formatie** (Linie, Blok, Wig, Los, Kring),
+     houden hun richting aan en vechten samen. 1 tik = dat regiment, 2 tikken = alle van die soort, ingedrukt = heel leger.
+     Tik op de grond = in formatie erheen (meerdere regimenten in slagorde: voetvolk vooraan, schutters erachter, ruiters op
+     de flanken); **lijn trekken** (rechts slepen, gsm: knop Lijn) = richting en breedte. Flank/rug en stormloop doen meer
+     schade. **Moed**: wie zwaar verliest of omsingeld wordt, vlucht (witte vlag) en hergroepeert na rust; vlucht een heel
+     leger, dan is de slag verloren. Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
 
-**Punten**: opbouwpunten (gebouwen, dorpelingen, troepen; monument +1500/niveau) + gevechtspunten.
+**Computerspelers (bots)** (gevraagd: "bots die als echte spelers hun stad uitbouwen en je na je 24 uur vrede aanvallen,
+in eigen clans die samenwerken"): standaard 4 bots in clans van 2 (beheer: aantal 0–12 en niveau makkelijk/normaal/sterk).
+Ze bouwen hun stad uit zoals een actieve speler (± tijdperk 2 na 1 dag, 3 na 2,5 dagen), zetten een muur met 4 poorten en
+torens, trainen een leger, plunderen roverskampen en vallen spelers aan zodra hun vrede voorbij is en ze denken te winnen
+(normaal: per bot hooguit om de ±6 uur, en elke stad krijgt ±9 speluren rust na een aanval van een bot; een clan valt soms
+samen aan). Clanleden sturen elkaar versterking bij een aanval en grondstoffen als iemand spaart voor een nieuw tijdperk.
+Op de kaart, bij een stad en in de ranglijst staat "computer" met hun sterkte. **Balans** (gevraagd: "bots te sterk; zorg voor een
+goede balans t.o.v. de echte spelers, wat mindere en wat sterkere bots"): elke bot is zwak, gemiddeld of sterk en groeit enkel
+tot een doelscore t.o.v. de actieve echte spelers (zwak ±70% van de mediaan, gemiddeld de mediaan, sterk zo goed als de beste);
+bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraak. Een speler die stopt, laten ze met rust.
+
+**Punten**: opbouwpunten (gebouwen, onderzoek, dorpelingen, troepen; monument +1500/niveau, kathedraal +600/niveau)
++ 20% van de punten van je vazallen + gevechtspunten.
 
 ## 4. Werkwijze en omgeving
 
@@ -115,7 +162,15 @@ registratie; oude spelers kregen een vast willekeurig volk.
 - `npm test` (Node test runner, `tests/game.test.js`, ±60 tests): simulatie, gevechten, gebied, muren/poorten,
   afbreken, belegeringen (determinisme na JSON heen en terug, opstelling, AI, bres), meldingen (met `node:sqlite`).
 - Belegering zonder browser: maak een stad met `newTownState` + muren/poorten en speel `createBattle` + `stepTo` af
-  (beide kanten AI) om duur en verloop te controleren.
+  (beide kanten AI) om duur en verloop te controleren. Handig: snapshots (`units`, `regs`, `walls`) bewaren en ze in Chromium
+  als bovenaanzicht tekenen (raster + stippen per soldaat + vaandel met toestand en moed): zo zie je meteen wie vastloopt.
+  Determinisme: dezelfde slag in het geheugen én telkens via JSON afspelen, met bevelen, en vergelijken.
+- Twee spelers met vertraging: geef beide steden troepen (`json_set` op `$.units`), stuur een aanval via `/api/march`, zet
+  `marches.arrive_at` vlak in de toekomst, laat beide pagina's peilen (`visibilitychange`) en kies 'Zelf besturen'. Meet per beeld
+  de verplaatsing (sprongen) en vergelijk beide schermen. Wereldsnelheid hoog zetten werkt niet: dan overvallen barbaren alles.
+- Een oefenslag blijft 30 s lopen nadat je ze verlaat: gebruik voor elke test een nieuwe speler.
+- Bots testen: zet `world.start_at` (en `players.created_at`/`towns.state.t` van de bots) in het verleden en roep `botTick` vaak op
+  (of laat een speler `/api/state` peilen); `players.bot_next = 0` maakt een bot meteen weer aan de beurt.
 - Lokaal spel: `npm run db:init:local` en `npx wrangler pages dev --port 8788`.
 - Browsertests met Playwright (scripts in je scratchpad, niet in de repo):
   - `const { chromium } = createRequire(import.meta.url)('playwright')` (ESM-import vindt het niet).
@@ -201,7 +256,133 @@ registratie; oude spelers kregen een vast willekeurig volk.
     `sprite3d.js`, `render-worker.js`). Eigen ontwerpen, geen kopie van AoE. Ruwweg 15–150 ms per gebouw en ±20 ms per
     figuurbeeld in een worker; daarna bewaard in de browser. Lichtrichting = die van de schaduwen in de stad.
 
+25. **Vrede per speler** (gevraagd: "vrede maar 24 uur nadat iemand begint, geen 3 weken; daarna eender wanneer
+    aanvallen"). Geen gezamenlijke vredestijd meer (fase is enkel nog `lobby`/`war`/`ended`). Beheer: "Vrede per speler
+    (uren)" en "Lengte seizoen (dagen)".
+
+26. **Veldslagen zoals Rome: Total War** (gevraagd: "manueel gevecht doorlopen tot alles vlekkeloos is, formaties instellen").
+    Nieuwe kern in `fieldbattle.js`: regimenten met formaties, vaandel en één route per regiment (voorheen liep elke soldaat los en
+    zocht elk zijn eigen route: chaotisch, gemengde groepen kropen aan rammentempo, soms vastgelopen), slagorde voor groepen,
+    lijn trekken, flank/rug/stormloop, moed en vluchten, formaties blijven aan de juiste kant van de muur. De computer stuurt
+    ook regimenten (rammen op de poort, voetvolk in slagorde ervoor, ruiters wachten op een bres). Browser: vaandels, plaatsen
+    waar een regiment komt te staan, formatieknoppen, minder schokjes bij elke peiling (oude en nieuwe stand op hetzelfde moment
+    vergeleken), kleinere antwoorden (`have`). Getest: computer tegen computer (open, ommuurd, kamp, groot leger), pc en gsm
+    (rechtop/liggend, aanraakscherm, trage processor), twee spelers met 300–450 ms vertraging (verschil < 0,3 tegel, geen sprongen).
+
+27. **Computerspelers (bots)**: `botbrain.js` (economie) en `bots.js` (beurten, leger, clan). Getest met een hele wereld in Node
+    (4 dagen met een nepklok via de echte routes: groei, aanvallen op een speler, versterking, karavanen, kampen) en het
+    inhalen van 3,2 dagen in een lopende wereld (±90 beurten, ±30 min met één speler online; beurt ≤ 4,4 ms en ≤ 14 query's).
+    Tip: `node:sqlite` in het geheugen + alle migraties + `handle()` met een eigen `Date.now` = een snelle proefwereld.
+
+28. **Balans van de bots** (zie §3): `BOT_TIERS`/`botTarget` in `botbrain.js`, `humanRef` in `bots.js`, migratie `0006`.
+    Simulatie (5 dagen: een actieve, een gewone en een gestopte speler + 4 bots): sterk ±880 tegen de beste speler 843,
+    gemiddeld ±760 tegen de mediaan 732, zwak ±430; de gestopte speler werd nooit aangevallen, de gewone 5 keer.
+
+29. **Vijf tijdperken, nieuwe gebouwen, Academie, edelmannen en vazallen** (zie §3). Regels in `rules.js`/`sim.js`,
+    vazallen in `functions/lib/vassal.js` + migratie `0007`, 3D-modellen in `models3d.js` (molen, Academie met varianten,
+    gildehuis met trapgevel, bouwloods met kraan, Adelshof, kathedraal; paleizen per volk op stadscentrum niveau 5),
+    getekende versies in `art.js`, troepen in `troops.js` + `figures.js`/`figmodels.js`, vuurpijlen en kokende pek in
+    `siegeview.js`. Tests: tijdperken, productie, bouwloods, onderzoek, automatische en live slag, edelman en een hele
+    vazalcyclus via de echte routes (onderwerpen, schatting, geen aanvallen, ranglijst, bevrijding, bescherming, losgeld, na 3 dagen vrij).
+    Tempo (botbrein, zeer actief): IJzer dag 2,6, Gilden dag 6,3, Kroon dag 11,2.
+
+30. **Mist en pijlen** (feedback van de gebruiker met een screenshot op de gsm): de mist begon in een vast vierkant
+    (bouwring + 3), waardoor gekochte loten en gekapt bos binnen je muren in de mist lagen. Nu volgt ze je echte bouwgrond
+    en muren (`homeSight`, gedeeld: `exploredNow` en `updateFog` gebruiken ze). Pijlen waren op een iPhone niet te zien
+    (1 dun donker streepje, bij uitzoomen en lagere resolutie < 1 pixel): nu `A.shot` in `art.js` met lichte rand, spoor
+    en een schaal `1 / zoom` bij uitzoomen, in de belegering (`siegeview.js`) en in gevechten in je gebied (`town.js`).
+
+31. **Troepen scherp en gedetailleerd, routes rond water en muren** (gevraagd: "troepen veel gedetailleerder, ingezoomd
+    wazig; niet over water of door muren, naar buiten via de poort"). Figuren in meerdere resoluties (tot 6 px per
+    wereldpixel bij inzoomen) met anti-aliasing; modellen met gezicht, kledij, maliën, harnas, schild met embleem, echte
+    wapens, schede, pijlkoker en een paard met tuig. Renderer 2–4× sneller (exact hetzelfde beeld voor gebouwen).
+    Routes in je gebied met A* (`routeTo`), ±0,05 ms per route; ook de dorpelingen in de stad.
+
+32. **Idee: haven, boten en eilanden** — uitgewerkt in `docs/idee-haven.md`, **nog niet gebouwd** (wacht op de keuzes
+    van de gebruiker, zie de open vragen onderaan dat bestand).
+
+33. **Omgeving even mooi als de gebouwen** (feedback met screenshot: "mooie houthakkershut, maar de stronken ernaast
+    zijn alles behalve mooi; ook de kar en tonnen naast de mijn"): alle aankleding, rotsen, goud, stronken, bomen, schapen,
+    everzwijnen en het barbarenkamp zijn nu 3D-modellen in dezelfde stijl (`propmodels.js`), met slagschaduw, gladde randen
+    en scherpe versies bij inzoomen. Renderer: anti-aliasing met grondschaduw, materialen `leaf`, `bark`, `water`.
+    Nog getekend: de akker, het water/de vijver, kameel/strijdwagen/olifant en rammen.
+
+34. **Wat een verbetering oplevert** (gevraagd: "er staat enkel 'verbeteren' en de prijs; toon wat het verbetert, zodat
+    de speler weet of het de moeite waard is"): het verbeterpaneel (en de lopende bouw) toont "Wat levert het op?" met
+    nu → straks (`gainsHtml` in `ui.js`). Het rekent de stad uit met het gebouw één niveau hoger, met dezelfde functies als
+    de simulatie (`popCap`, `capacity`, `slots`, `rates`, `maxBuilds`, `townBaseDef`, `towerDefense`, `townScore`, …), en
+    toont per soort: werkplekken en productie als ze bezet zijn, trainingstijden en nieuwe eenheden, smidse, markt,
+    torens, muren (`wallHp`), molen/gildehuis, bouwloods, academie (nieuwe rij), punten. Plus een tip of het nu zin heeft
+    (vrije werkplekken, bevolking in gebruik, voorraad t.o.v. opslag, muur nog open).
+
+35. **Scherp en gedetailleerd terrein in de stad** (feedback met screenshot op de gsm: "gebouwen en figuren zijn goed,
+    maar het terrein loopt achterop; veel mooier, scherper, gedetailleerder"). De grond was één afbeelding op 1,25 px per
+    wereldpixel (op een gsm ingezoomd 6–8× uitvergroot). Nu tekent de stad ingezoomd het zichtbare deel opnieuw in stukken
+    op schermresolutie (tot 6 px per wereldpixel, ook op gsm; `groundhd.js`). Nieuw: plein met kasseien in kringen (bolle
+    stenen met schaduwkant en glans, sierringen, mos in de voegen), straten met kinderkopjes in verband en een stoeprand,
+    stapstenen op de paadjes, moestuintjes met ruggen en plantjes (kool, sla, bonen, pompoen), grind op de aardewegen,
+    fijne grasprietjes/bosbodem/aarde-texturen per resolutie en een fijne korrel over alles. Tijd per stuk in headless
+    Chromium (zonder GPU) 15–50 ms; op een toestel met GPU sneller.
+
+36. **Alles scherp, terrein nog mooier** (gevraagd: "alles moet scherp zijn, maak het terrein nog veel mooier").
+    Gebouwen, muren en torens krijgen scherpe versies bij inzoomen (zoals de figuren; 6x van een stadscentrum duurt in een
+    werker enkele seconden, daarna bewaard in de browser), poortbogen en 2D-stukken volgen de zoom. De boerderij is nu een
+    3D-model. Meren scherp in de HD-stukken. Terrein: zacht reliëf met warm licht en koele schaduw, sappige plekken, veel
+    meer wilde bloemen in groepjes, grasplukjes met echte sprieten, extra fijn gras van dichtbij, stenen met mos, kiezels
+    op de vijveroever, struiken en varens met echte blaadjes.
+
+37. **Aanvalsbewegingen** (gevraagd: "bij gevechten zie je ze hun wapens niet gebruiken; speren moeten steken, zwaarden
+    slaan, bogen aanspannen en schieten"). Nieuwe modus `atk` voor de 3D-figuren (en een eenvoudige 2D-terugval), in de
+    maat van de echte slagen: zwaard omhoog achter het hoofd en neer, speer terugtrekken en stoten (schild omhoog), boog:
+    pijl uit de koker, op de pees, spannen en loslaten op het moment van het schot, lans neer en stoten, werpspeer, bijl;
+    wijde stand in het gevecht. Getest in een oefenslag op pc en gsm (ook schutters op de muur).
+
+38. **Gebouwen verplaatsen** (gevraagd: "door een gebouw ingeduwd te houden kan je het verplaatsen"). Ingedrukt houden op
+    een gebouw pakt het op; slepen toont het doorschijnend met een groene (mag) of rode (mag niet) voet, de kaart schuift mee
+    aan de rand; loslaten zet het neer. Gratis, enkel op vrije bouwgrond; het stadscentrum blijft in het midden. Ingedrukt
+    houden naast een gebouw kiest nog altijd je hele leger. Op pc ook via de knop Verplaatsen. Getest met muis en echte
+    aanraking (gsm), ook na herladen (de server bewaart het).
+    **Aangepast** (feedback: "inhouden lukt niet op mobiel, selecteert mijn leger"): geen lang indrukken meer. Knop
+    **Verplaatsen** bovenaan in het gebouwpaneel; dan tikken op de nieuwe plek of het gebouw verslepen, en 'Zet hier'
+    (met een muis: klikken zet het neer). Balk bovenaan met 'Zet hier' / 'Stoppen'. Lang indrukken = enkel het leger.
+
+39. **Elk gebouwniveau ziet er anders en beter uit** (gevraagd: "nooit hetzelfde, bv. houthakker 2 → 3; elk tijdperk aparte
+    visuals"). Alle niveaus gerenderd en per stap gemeten: goudmijn en werkplaats waren op elk niveau identiek, markt na 2,
+    steengroeve, boerderij 3-5, smidse, houthakker, opslag, stal, kazerne amper. Nieuwe modellen met één opbouw (riet → pannen
+    → leien + extra bouwsel → aanbouw + vaandels → toren/goud) en zichtbare extra's per niveau; ook de daken van de volkeren
+    volgen het niveau, en de eigen stadscentra van de volkeren hebben extra's op niveau 4 en 5. Nu minstens ±15% verschil per
+    stap bij alle gebouwen en volkeren (meestal 25-70%). `VERSION` 7: de browser rendert de gebouwen één keer opnieuw.
+
+40. **Muren en poorten verplaatsen** (gevraagd: "op dezelfde manier als gebouwen"). Tik op een muurstuk: bovenaan het paneel
+    'Dit muurstuk' of 'Rechte muur (N)' (het hele rechte stuk, poorten gaan mee); op een poort: 'Poort verplaatsen' (de oude
+    opening wordt muur). Dan tikken of slepen en 'Zet hier' (muis: klikken). Gratis; vrije bouwgrond; poorten blijven in een
+    recht stuk muur; nooit dicht zonder poort. Getest op gsm (aanraking) en pc, ook na herladen.
+
+41. **Wachttoren en andere gebouwen: nieuwe onderdelen per niveau, niet enkel groter** (gemeld: "Griekse wachttoren 2 → 3
+    geen verschil"; de %-meting zag 'hoger' als verschil, het Griekse dak ontbrak). Wachttoren, molen, adelshof en kathedraal
+    opnieuw gemaakt met per niveau iets nieuws (zie CLAUDE.md), Grieks stadscentrum 5 met verguld dak en beelden, gildehuis 1
+    in vakwerk en riet. Alle volkeren nagekeken in overzichten. `VERSION` 8.
+
+42. **Kleine gebouwen achter een groot gebouw kiezen** (gemeld: "achter het stadscentrum kan je ze niet selecteren, en dat
+    kan ik niet verplaatsen"). Kiezen gaat nu op de pixels van het beeld; nog eens tikken op dezelfde plek = het gebouw
+    erachter; het paneel toont 'Ook op deze plek' met knoppen (handig op een gsm); het gekozen gebouw wordt doorschijnend met
+    een gestippelde gouden voet bovenop getekend als er iets voor staat. Een tip verschijnt hooguit 3 keer per toestel.
+
+43. **Per volk: elk niveau ander materiaal en andere details, niet enkel groter** (gevraagd: "ander materiaal, evt. andere
+    structuur, herwerk voor elk volk"). Muren volgen per volk een eigen reeks materialen (`CIV_WALL`: leem/riet → … → marmer,
+    geglazuurde steen, goud) met eigen versiering (pilasters, hoekstenen, ronde hoeklijsten, lisenen, tegelbanden, rozetten,
+    donkere balken); daken krijgen vanaf niveau 4 nokversiering per volk en op 5 goud. Open loodsen van Egypte, Babylon en
+    Perzië kregen een plat dak in plaats van een leien zadeldak. Alle 6 volkeren nagekeken. `VERSION` 9.
+
+44. **Fout: wachttoren 3 en 4 toonden de oude 2D-tekening** (gemeld met een schermafbeelding: "niveau 3 ziet er bij mij
+    anders uit"). Het model gaf een leeg anker `glow` mee; de werker liep daarop vast en het spel viel terug op 2D. Opgelost
+    in het model en in `render-worker.js` (lege ankers overslaan), plus een test die elk model van elk volk en niveau bouwt
+    en de ankers nakijkt. Nagekeken in de browser: alle torens 1-5 in 3D.
+
 ## 8. Bekende beperkingen en ideeën
+
+- Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
+  in een rechte lijn, ook over water.
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
 - Aanvallen wachten niet tot de aanvaller online komt (zie §3); er is nu wel een melding + aftelling. Mogelijke

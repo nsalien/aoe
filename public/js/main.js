@@ -6,7 +6,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -187,7 +187,8 @@ function showAuth(msg) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   let html = msg || '';
   if (w && !msg) {
-    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>.`, prep: `${UI.icon('dove')} Vredestijd tot <b>${f(w.prepEnd)}</b>.`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>!`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
+    const peace = `${UI.icon('dove')} Nieuwe spelers krijgen ${UI.peaceText(w.peaceMs)} vrede.`;
+    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>. ${peace}`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>! ${peace}`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
     html = `${phase}<br>${app.info.players} heerser(s) in de vallei · teams van ${w.teamSize}`;
     $('#joinCodeRow').hidden = !w.needsCode;
   }
@@ -227,10 +228,15 @@ function startGame(data) {
   if (!town) {
     town = new TownView($('#townCanvas'));
     world = new WorldView($('#worldCanvas'));
-    town.onSelect = (b) => { app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
+    town.onSelect = (b) => { app.pickStack = town.pickStack; app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
     town.onGate = async (i, j) => { const r = await act('/gate', { i, j }, 'Poort gebouwd'); if (r) setMode(null); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
+    town.onMove = moveBuilding;
+    town.onMoveWalls = moveWalls;
+    town.onNotice = (msg, ic) => toast(msg, '', ic || 'move');
+    town.onMoveChange = renderMoveHint;
+    town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; };
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
     town.onSelChange = (sel) => {
       const g = sel && (sel.type === 'group' || sel.type === 'unit') ? sel.id : null;
@@ -289,12 +295,12 @@ function applyState(data, first = false) {
   if (fieldQueue.length) setBaseState(data.town.state);
   const off = data.now - Date.now();
   if (first || Math.abs(off - app.offset) > 1500) app.offset = off;
-  app.canAct = data.world.phase === 'prep' || data.world.phase === 'war';
+  app.canAct = data.world.phase === 'war';
+  app.inPeace = app.now() < data.me.peaceEnd;
   town.setTown(data.town.id, data.team.color);
   computeLive(true);
   world.setMarches(data.marches);
   if (prevPhase && prevPhase !== data.world.phase) {
-    if (data.world.phase === 'war') toast('De oorlog is begonnen! Je kan nu vijandelijke steden aanvallen.', 'err', 'swords');
     if (data.world.phase === 'ended') { toast('Het seizoen is voorbij!', '', 'flag'); openModal('leaderboard'); }
   }
   // nieuwe rapporten
@@ -308,7 +314,7 @@ function applyState(data, first = false) {
   handleBattles(data, first);
   // inkomende aanvallen
   for (const m of data.marches) {
-    if (!m.ally && m.status === 'out' && !app.knownHostile.has(m.id)) {
+    if (!m.ally && m.status === 'out' && (m.kind === 'attack' || m.kind === 'scout') && !app.knownHostile.has(m.id)) {
       app.knownHostile.add(m.id);
       if (!first) toast(`${m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err', 'swords');
     }
@@ -415,8 +421,9 @@ function computeLive(force) {
   const sig = [
     s.builds.map((j) => `${j.bid}:${j.to}`).join(','),
     Object.entries(s.queues).map(([k, q]) => `${k}${q.length}:${q[0].done}`).join(','),
-    s.buildings.map((b) => b.level).join(''),
+    s.buildings.map((b) => `${b.level}@${b.x},${b.y}`).join(''),
     JSON.stringify(s.units), JSON.stringify(s.villagers), s.rally,
+    s.research ? s.research.id : '', Object.keys(s.tech || {}).join(','), Math.floor(s.loy ?? 100), s.vas ? s.vas.until : '',
     (s.nodes || []).map((n) => `${n.id}${n.claimed ? 'c' : ''}`).join(','),
     (s.harvests || []).map((h) => h.id).join(','),
     (s.field || []).map((g) => `${g.id}${g.pending ? 'p' : ''}${g.work ? g.work.type : ''}${g.order ? g.order.type : ''}`).join(','),
@@ -483,7 +490,12 @@ function tick() {
   renderAlert();
   const w = app.data.world;
   const now = app.now();
-  if ((w.phase === 'prep' && now >= w.prepEnd) || (w.phase === 'war' && now >= w.warEnd) || (w.phase === 'lobby' && now >= w.startAt)) {
+  if (app.inPeace && now >= app.data.me.peaceEnd) {
+    app.inPeace = false;
+    toast('Je vrede is voorbij! Je kan nu vijandelijke steden aanvallen, en zij jou.', 'err', 'swords');
+    renderAll();
+  }
+  if ((w.phase === 'war' && now >= w.warEnd) || (w.phase === 'lobby' && now >= w.startAt)) {
     w.phase = 'x';
     refresh();
   }
@@ -551,7 +563,7 @@ function renderResBar() {
 }
 
 function renderPhase() {
-  const p = UI.phaseHtml(app.data.world, app.now());
+  const p = UI.phaseHtml(app.data.world, app.now(), app.data.me.peaceEnd);
   const el = $('#phase');
   el.className = `phase ${p.cls}`;
   setHTML(el, p.html);
@@ -894,7 +906,54 @@ async function placeBuilding(type, x, y, keep) {
   if (!r || !keep) cancelPlace();
 }
 
+// Gebouw verplaatsen: meteen in de browser (zelfde regels als de server), dan de server. Weigert die, dan terug.
+async function moveBuilding(id, x, y) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const base = app.serverState || app.data.town.state;
+  try {
+    const c = structuredClone(base);
+    doMove(c, id, x, y);
+    setBaseState(c);
+    computeLive(true);
+    renderAll();
+  } catch (e) { toast(e.message, 'err'); return; }
+  const r = await act('/move', { id, x, y }, 'Gebouw verplaatst');
+  if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
+}
+
+// balk bovenaan tijdens het verplaatsen: wat je moet doen, 'Zet hier' (enkel als de plek mag) en 'Stoppen'
+function renderMoveHint(m) {
+  const hint = $('#placeHint');
+  if (!m) { hint.hidden = true; return; }
+  const walls = m.kind === 'walls';
+  const b = !walls && app.live && app.live.buildings.find((x) => x.id === m.id);
+  const name = walls ? m.label : b ? BUILDINGS[b.type].name : 'Gebouw';
+  const mouse = town.cam.lastType === 'mouse';
+  const what = walls ? 'de muur' : 'het gebouw';
+  const how = m.ok ? 'Mag hier staan.' : m.same ? (mouse ? 'Klik op de nieuwe plek.' : `Tik op de nieuwe plek of sleep ${what}.`) : 'Daar kan het niet staan.';
+  hint.hidden = false;
+  setHTML(hint, `<span><b>${UI.esc(name)} verplaatsen</b> <span class="muted">${how}</span></span>
+    <button class="btn small primary" data-action="moveHere" ${m.ok ? '' : 'disabled'}>Zet hier</button><button class="btn small" data-action="moveStop">Stoppen</button>`);
+}
+
+// muurstukken of een poort verplaatsen: meteen in de browser, dan de server (weigert die, dan terug)
+async function moveWalls(tiles, dx, dy) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const base = app.serverState || app.data.town.state;
+  try {
+    const c = structuredClone(base);
+    doMoveWalls(c, tiles, dx, dy);
+    setBaseState(c);
+    app.selWall = null; town.selWall = null; app.selBuilding = null; town.selected = null;
+    computeLive(true);
+    renderAll();
+  } catch (e) { toast(e.message, 'err'); return; }
+  const r = await act('/walls/move', { tiles, dx, dy }, 'Muur verplaatst');
+  if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
+}
+
 function cancelPlace() {
+  if (town && town.moveB) town.cancelMove();
   app.placing = null;
   town.placing = null;
   $('#placeHint').hidden = true;
@@ -964,7 +1023,7 @@ const sendCtx = { target: null, kind: null };
 
 function townTarget(id) {
   const t = app.map && app.map.towns.find((x) => x.id === id);
-  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y };
+  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y, peaceEnd: t.peaceEnd };
 }
 
 function openSend(target, kind) {
@@ -1001,7 +1060,7 @@ async function openModal(type, arg) {
   const body = $('#modalBody');
   $('#modal').hidden = false;
   clearInterval(chatTimer);
-  if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world);
+  if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world, app.data.me.peaceEnd);
   if (type === 'send') {
     body.innerHTML = UI.sendHtml(app, app.live, sendCtx.target, sendCtx.kind);
     updateSendSummary();
@@ -1113,6 +1172,7 @@ const actions = {
     if (app.placing === type) { cancelPlace(); return; }
     const err = el.classList.contains('locked') || el.classList.contains('poor') ? el.title.split(': ').slice(1).join(': ') : null;
     if (err) { toast(err, 'err'); return; }
+    if (town.moveB) town.cancelMove();
     app.placing = type;
     if (app.mode) setMode(null);
     town.clearSel();
@@ -1138,6 +1198,32 @@ const actions = {
     const r = await act('/walls', { tiles: [[Number(el.dataset.i), Number(el.dataset.j)]], remove: true }, app.selWall && app.selWall.gate ? 'Poort afgebroken' : 'Muurstuk afgebroken');
     if (r) { town.selWall = null; app.selWall = null; renderPanel(true); }
   },
+  moveBuilding(el) {
+    const b = app.live && app.live.buildings.find((x) => x.id === Number(el.dataset.id));
+    if (!b || !town) return;
+    if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+    cancelPlace();
+    if (app.mode) setMode(null);
+    openPanelMobile(false);
+    town.startMove(b);
+  },
+  moveWall(el) {
+    const live = app.live;
+    if (!live || !town) return;
+    if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+    const i = Number(el.dataset.i); const j = Number(el.dataset.j); const what = el.dataset.what;
+    const gate = gateList(live).find((g) => g.tiles.some(([a, b]) => a === i && b === j));
+    let tiles; let label;
+    if (what === 'run') { tiles = wallRun(live, i, j); label = `Muur (${tiles.length} stukken)`; }
+    else if (gate && (what === 'gate' || what === 'one')) { tiles = gate.tiles.map(([a, b]) => [a, b]); label = 'Poort'; }
+    else { tiles = [[i, j]]; label = 'Muurstuk'; }
+    cancelPlace();
+    if (app.mode) setMode(null);
+    openPanelMobile(false);
+    town.startWallMove(tiles, i, j, label);
+  },
+  moveHere() { if (town) town.dropMove(); },
+  moveStop() { if (town) town.cancelMove(); },
   async demolish(el) {
     const stop = el.dataset.stop === '1';
     if (!confirm(stop ? `De bouw van ${el.dataset.name} stoppen? Je krijgt de helft van de grondstoffen terug.` : `${el.dataset.name} afbreken? Je krijgt een deel van de grondstoffen terug.`)) return;
@@ -1203,6 +1289,14 @@ const actions = {
     if (n < 1) { toast('Kies een aantal.', 'err'); return; }
     act('/train', { unit: el.dataset.unit, count: n }, 'Training gestart');
   },
+  research(el) {
+    act('/research', { id: el.dataset.id }, 'Onderzoek gestart');
+  },
+  async ransom() {
+    if (!confirm('Losgeld betalen? Je bent meteen vrij.')) return;
+    const r = await act('/vassal/ransom', {}, 'Losgeld betaald: je bent weer vrij!');
+    if (r) refresh();
+  },
   trade() {
     act('/trade', { give: $('#tr-give').value, get: $('#tr-get').value, amount: Math.floor(Number($('#tr-amount').value) || 0) }, 'Ruil voltooid');
   },
@@ -1210,8 +1304,16 @@ const actions = {
     const r = await act('/recall', { id: Number(el.dataset.id) }, 'Troepen keren terug');
     if (r) refresh();
   },
+  // een ander gebouw op de plek waar je tikte (rij 'Ook op deze plek' in het paneel)
+  pickBuilding(el) {
+    const id = Number(el.dataset.id);
+    if (!app.live.buildings.some((x) => x.id === id)) return;
+    app.selBuilding = id; town.selected = id; app.selWall = null; town.selWall = null;
+    town.lastPick = null;
+    renderPanel();
+  },
   deselect() {
-    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null;
+    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null; app.pickStack = null;
     if (world) world.selected = null;
     renderPanel();
   },
@@ -1226,7 +1328,7 @@ const actions = {
     const o = sel.obj;
     const target = sel.kind === 'camp'
       ? { kind: 'camp', id: o.id, name: `Roverskamp (niveau ${o.level})`, x: o.x, y: o.y }
-      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y };
+      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd };
     openSend(target, el.dataset.kind);
   },
   async sendTo(el) {
@@ -1338,6 +1440,7 @@ document.addEventListener('keydown', (e) => {
   if (battle && battle.open) return; // het slagveld heeft zijn eigen toetsen
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
+    else if (town && town.moveB) town.cancelMove();
     else if (app.placing) cancelPlace();
     else if (app.mode) setMode(null);
     else if (town && town.sel) actions.cancelVillager();

@@ -3,11 +3,12 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE, techTier } from '../shared/rules.js';
+import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
-  exploredNow, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, gateRoute, gateList, gateSpan,
+  exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -16,6 +17,7 @@ import * as FIG from './figures.js';
 import { fbm } from '../shared/worldgen.js';
 import { buildDress, drawProp, dressKey } from './towndress.js';
 import * as S3 from './sprite3d.js';
+import * as GH from './groundhd.js';
 import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 
 const N = TOWN_GRID;
@@ -155,41 +157,38 @@ function drawSub(ctx, cv, scale, ox, oy, W, H, v) {
   ctx.drawImage(cv, sx, sy, sw, sh, x0, y0, sw / scale, sh / scale);
 }
 
-// naadloze detailtextuur (neutraal grijs = geen kleurverschil bij 'soft-light'): korte sprietjes en korrels
-let detailCv = null;
-function groundDetail() {
-  if (detailCv) return detailCv;
-  const S = 192;
-  const cv = document.createElement('canvas');
-  cv.width = S; cv.height = S;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#808080'; g.fillRect(0, 0, S, S);
-  let seed = 7;
-  const r = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  g.lineCap = 'round';
-  for (let i = 0; i < 2600; i++) {
-    const x = r() * S; const y = r() * S;
-    const light = r() < 0.45;
-    const len = 1.2 + r() * 2.6; const lean = (r() - 0.5) * 1.6;
-    g.strokeStyle = light ? `rgba(255,255,255,${0.25 + r() * 0.35})` : `rgba(0,0,0,${0.25 + r() * 0.35})`;
-    g.lineWidth = 0.45 + r() * 0.4;
-    for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
-      if (x + ox < -6 || x + ox > S + 6 || y + oy < -6 || y + oy > S + 6) continue;
-      g.beginPath(); g.moveTo(x + ox, y + oy); g.lineTo(x + ox + lean, y + oy - len); g.stroke();
-    }
-  }
-  for (let i = 0; i < 900; i++) {
-    g.fillStyle = r() < 0.5 ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
-    g.fillRect(r() * S, r() * S, 0.8, 0.8);
-  }
-  detailCv = cv;
-  return cv;
-}
-
 // kleine gebouwen iets groter tekenen dan hun tegel, zodat de stad voller en gedetailleerder oogt
 const bScale = (b) => ((BUILDINGS[b.type].size || 1) === 1 ? 1.12 : 1);
 
 const FOG_SCALE = 0.25;
+// kleur per diepte (f = waarde / 255 * 1,6) voor de scherpe meren: zandrand, schuim, ondiep, diep
+let lakeLut = null;
+function lakeLUT() {
+  if (lakeLut) return lakeLut;
+  const L = new Uint8ClampedArray(256 * 4);
+  const ramp = (f, a, b) => Math.min(1, Math.max(0, (f - a) / (b - a)));
+  for (let v = 0; v < 256; v++) {
+    const f = (v / 255) * 1.6;
+    let r = 0; let g = 0; let b = 0; let a = 0;
+    if (f < 0.22) a = 0;
+    else if (f < 0.4) {
+      const t = ramp(f, 0.22, 0.3);
+      r = 210; g = 192; b = 138; a = t * (f < 0.34 ? 0.75 : 0.95);
+      if (f > 0.34) { r = 178; g = 158; b = 106; } // natte rand
+    } else if (f < 0.46) { r = 236; g = 244; b = 246; a = 0.92; } // schuim
+    else {
+      const dpt = ramp(f, 0.46, 1.5);
+      r = 96 - dpt * 52; g = 168 - dpt * 52; b = 206 - dpt * 22; a = 1;
+      if (f < 0.6) { const t = 1 - ramp(f, 0.46, 0.6); r += (130 - r) * t * 0.5; g += (205 - g) * t * 0.5; b += (215 - b) * t * 0.5; }
+      if (f > 0.47 && f < 0.5) { r += 18; g += 18; b += 14; } // lichte lijn net binnen het schuim
+    }
+    L[v * 4] = r; L[v * 4 + 1] = g; L[v * 4 + 2] = b; L[v * 4 + 3] = Math.round(a * 255);
+  }
+  lakeLut = L;
+  return L;
+}
+// resolutie van getekende (2D) stukken die als afbeelding bewaard worden: scherper als je inzoomt
+const spriteQ = (need) => (need > 4.5 ? 6 : need > 3 ? 4 : 2.5);
 
 export class TownView {
   constructor(canvas) {
@@ -261,10 +260,14 @@ export class TownView {
     this.cam.onHover = (sx, sy) => {
       this.hoverTile = sx < 0 ? null : this.screenGrid(sx, sy);
       this.hoverW = sx < 0 ? null : this.cam.screenToWorld(sx, sy);
+      if (this.moveB && !this.moveB.dragging && sx >= 0) { this.moveB.gdx = 0; this.moveB.gdy = 0; this.updateMove(sx, sy); }
       this.updateCursor();
     };
     this.cam.onLongPress = (sx, sy) => this.longPress(sx, sy);
+    this.cam.onHoldDrag = (ph, sx, sy) => this.holdDrag(ph, sx, sy);
+    this.cam.onGrab = (sx, sy) => this.grabMove(sx, sy);
     this.cam.onRightClick = (sx, sy) => {
+      if (this.moveB) { this.cancelMove(); return; }
       if (this.placing) { if (this.onCancelPlace) this.onCancelPlace(); return; }
       if (this.sel) this.click(sx, sy, null, true);
     };
@@ -425,15 +428,8 @@ export class TownView {
     const sd = this.seed;
     const terr = this.terr;
     const W = T_W * A.TW; const H = T_W * A.TH + 20;
-    const cv = document.createElement('canvas');
-    cv.width = Math.round(W * BAKE); cv.height = Math.round(H * BAKE);
-    const g = cv.getContext('2d');
     const origin = toWorld(T_MIN, T_MIN); // bovenste hoek
     this.groundOrigin = { x: origin.x - W / 2, y: origin.y };
-    g.scale(BAKE, BAKE);
-    g.translate(W / 2, 0);
-    g.translate(-origin.x, -origin.y);
-    const WM = g.getTransform(); // wereldruimte
     const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
     const mid = N / 2;
     // naadloze texturen (één keer per sessie)
@@ -441,24 +437,13 @@ export class TownView {
       const ts = FX.LOW_POWER ? 128 : 256;
       this.tex = { grass: NAT.groundTexture('grass', ts), forest: NAT.groundTexture('forest', ts), dirt: NAT.groundTexture('dirt', ts), water: NAT.groundTexture('water', ts) };
     }
-    // textuur over een vorm leggen; de vorm wordt in tegelruimte opgebouwd, de textuur ligt in wereldpixels
-    const texture = (kind, alpha, shape) => {
-      g.save();
-      g.setTransform(WM); g.transform(...ISO);
-      g.beginPath(); shape();
-      g.setTransform(WM);
-      g.globalCompositeOperation = 'overlay'; g.globalAlpha = alpha;
-      g.fillStyle = g.createPattern(this.tex[kind], 'repeat');
-      g.fill('nonzero');
-      g.restore();
-    };
     this.pond = terr.pond;
     this.near = terr.near;
     this.pasture = terr.pasture;
     const pd = this.pond;
     const inPond = (x, y) => Math.hypot(x - pd.x, (y - pd.y) / 0.8) < pd.r + 0.6;
 
-    // bodemkleur: zachte overgangen (geen zichtbare tegels), donkere bosgrond, droge plekjes in de wei
+    // ---------- voorbereiden (één keer per stad): alles wat de tekenfunctie nodig heeft ----------
     this.lakeWaves = [];
     const lakes = [];
     for (let j = T_MIN; j < T_MAX; j++) {
@@ -468,6 +453,7 @@ export class TownView {
         if (hashInt(i, j, sd + 2) < 0.35) this.lakeWaves.push({ gx: i + 0.5, gy: j + 0.5, p: hashInt(i, j, sd + 3) * 6.28 });
       }
     }
+    const lakeImg = lakes.length ? this.lakeImage(lakes, sd) : null;
     const tileAt = (i, j) => (i < T_MIN || j < T_MIN || i >= T_MAX || j >= T_MAX ? -1 : terr.tiles[tileIndex(i, j)]);
     const forestD = new Float32Array(T_W * T_W);
     for (let j = T_MIN; j < T_MAX; j++) {
@@ -483,19 +469,28 @@ export class TownView {
       const v = (a, b) => forestD[tileIndex(Math.min(T_MAX - 1, a), Math.min(T_MAX - 1, b))];
       return (v(i, j) * (1 - fx) + v(i + 1, j) * fx) * (1 - fy) + (v(i, j + 1) * (1 - fx) + v(i + 1, j + 1) * fx) * fy;
     };
+    // bodemkleur: zachte overgangen (geen zichtbare tegels), donkere bosgrond, droge plekjes in de wei
+    const base = document.createElement('canvas');
     {
       const RS = FX.LOW_POWER ? 3 : 4;
       const NW = T_W * RS;
-      const base = document.createElement('canvas');
       base.width = NW; base.height = NW;
       const bc = base.getContext('2d');
       const img = bc.createImageData(NW, NW);
       const px = img.data;
       const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
       const C0 = hex('#5c9838'); const C1 = hex('#93bd54'); const DRY = hex('#b9b764'); const OUT = hex('#557f33');
-      const FOR = hex('#3c6628'); const MOSS = hex('#5d6f2c'); const SAND = hex('#cdbb85');
+      const FOR = hex('#3c6628'); const MOSS = hex('#5d6f2c'); const SAND = hex('#cdbb85'); const LUSH = hex('#467f2c');
+      const SUN = hex('#b3c95e'); const COOL = hex('#2e5e3c');
       const lerp = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
       const c = [0, 0, 0];
+      // zacht glooiend land: hoogte uit ruis, belicht van linksboven (de kant die naar -i kijkt krijgt licht)
+      const HN = NW + 2;
+      const HG = new Float32Array(HN * HN);
+      for (let v = 0; v < HN; v++) for (let u = 0; u < HN; u++) {
+        const gx = T_MIN + (u - 0.5) / RS; const gy = T_MIN + (v - 0.5) / RS;
+        HG[v * HN + u] = fbm(gx / 5.5, gy / 5.5, sd + 701, 3) + fbm(gx / 2, gy / 2, sd + 702, 2) * 0.3;
+      }
       for (let v = 0; v < NW; v++) {
         for (let u = 0; u < NW; u++) {
           const gx = T_MIN + (u + 0.5) / RS; const gy = T_MIN + (v + 0.5) / RS;
@@ -509,239 +504,403 @@ export class TownView {
           if (f > 0) { lerp(c, FOR, Math.min(0.78, f * 0.9)); lerp(c, MOSS, f * n2 * 0.4); }
           const t = terr.tiles[tileIndex(i, j)];
           if (t === TILE.SAND || t === TILE.WATER) lerp(c, SAND, 0.4);
+          // sappige, donkerder plekken gras
+          const n4 = fbm(gx / 3.1 + 20, gy / 3.1, sd + 14, 2);
+          if (n4 > 0.56 && f < 0.5) lerp(c, LUSH, Math.min(0.42, (n4 - 0.56) * 2.2));
+          // reliëf: helling naar het licht, iets vlakker in de stad
+          const hc = HG[(v + 1) * HN + u + 1];
+          const hu = (HG[(v + 1) * HN + u + 2] - HG[(v + 1) * HN + u]) * RS * 0.5;
+          const hv = (HG[(v + 2) * HN + u + 1] - HG[v * HN + u + 1]) * RS * 0.5;
+          const flat = Math.min(1, 0.3 + ringOf(i, j) / 7);
+          const sh = Math.max(-0.2, Math.min(0.2, (hu * 1.7 + hv * 0.25) * flat));
+          if (sh > 0) lerp(c, SUN, sh * 1.3); else lerp(c, COOL, -sh * 1.1);
+          const lv = 1 + sh * 0.6 - (hc < 0.42 ? (0.42 - hc) * 0.3 * flat : 0);
           const o = (v * NW + u) * 4;
-          px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2]; px[o + 3] = 255;
+          px[o] = c[0] * lv; px[o + 1] = c[1] * lv; px[o + 2] = c[2] * lv; px[o + 3] = 255;
         }
       }
       bc.putImageData(img, 0, 0);
-      g.save();
-      g.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-      g.imageSmoothingEnabled = true;
-      g.drawImage(base, T_MIN, T_MIN, T_W, T_W);
-      g.restore();
     }
-    texture('grass', 0.62, () => g.rect(T_MIN, T_MIN, T_W, T_W));
-    texture('forest', 0.75, () => {
-      for (let j = T_MIN; j < T_MAX; j++) {
-        for (let i = T_MIN; i < T_MAX; i++) {
-          if (forestD[tileIndex(i, j)] < 0.45) continue;
-          g.moveTo(i + 0.5 + 0.9, j + 0.5); g.arc(i + 0.5, j + 0.5, 0.9, 0, Math.PI * 2);
-        }
-      }
-    });
-    // fijne korrel in het gras (anders oogt de grond te glad)
-    {
-      const n = FX.LOW_POWER ? 9000 : 22000;
-      for (const [col, from] of [['rgba(25,55,12,0.16)', 0], ['rgba(255,255,205,0.10)', 1], ['rgba(70,100,25,0.14)', 2]]) {
-        g.fillStyle = col;
-        for (let k = from; k < n; k += 3) {
-          const i = T_MIN + hashInt(k, 61, sd) * T_W; const j = T_MIN + hashInt(k, 62, sd) * T_W;
-          if (terr.tiles[tileIndex(Math.floor(i), Math.floor(j))] === TILE.WATER) continue;
-          const p = toWorld(i, j);
-          g.fillRect(p.x, p.y, 1.8, 0.9);
-        }
-      }
-    }
-    // grote, zachte kleurvlekken voor een natuurlijke look
-    for (let k = 0; k < 140; k++) {
-      const i = T_MIN + hashInt(k, 21, sd) * T_W; const j = T_MIN + hashInt(k, 22, sd) * T_W;
-      const p = toWorld(i, j);
-      const r = 30 + hashInt(k, 23, sd) * 80;
-      const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-      const light = k % 2 === 0;
-      gr.addColorStop(0, light ? 'rgba(200,230,120,0.13)' : 'rgba(40,80,20,0.12)');
-      gr.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = gr; g.beginPath(); g.ellipse(p.x, p.y, r, r * 0.5, 0, 0, Math.PI * 2); g.fill();
-    }
-
-    // in grid-ruimte tekenen (cirkels worden isometrische ellipsen)
-    g.save();
-    g.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
-    // meertjes in de wildernis: zachte vormen met een zandrand
-    const blob = (list, r, col) => {
-      g.fillStyle = col; g.beginPath();
-      for (const [x, y] of list) { g.moveTo(x + r, y); g.arc(x, y, r, 0, Math.PI * 2); }
-      g.fill();
-    };
-    if (lakes.length) g.drawImage(...this.lakeImage(lakes, sd));
     const roads = [[mid, mid, mid, T_MAX], [mid, mid, mid, T_MIN], [mid, mid, T_MAX, mid], [mid, mid, T_MIN, mid]];
-    g.lineCap = 'round';
-    for (const [w, col] of [[1.3, 'rgba(95,80,40,0.22)'], [0.98, '#a88a58'], [0.8, '#bfa06b'], [0.36, 'rgba(226,206,160,0.35)']]) {
-      g.strokeStyle = col; g.lineWidth = w;
-      for (const [x0, y0, x1, y1] of roads) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
-    }
-    // karrensporen, licht golvend, met een grasstrookje ertussen buiten de stad
-    for (const [x0, y0, x1, y1] of roads) {
-      const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      for (const [o, col, w] of [[-0.19, 'rgba(105,78,42,0.42)', 0.075], [0.19, 'rgba(105,78,42,0.42)', 0.075], [0, 'rgba(105,150,55,0.22)', 0.1]]) {
-        g.strokeStyle = col; g.lineWidth = w;
-        g.beginPath();
-        for (let t = o === 0 ? 4.5 : 3.2; t <= len; t += 0.25) {
-          const wob = (fbm(t * 0.7, o * 9 + x1 * 0.1 + y1 * 0.13, sd + 40, 2) - 0.5) * 0.12;
-          const x = x0 + ((x1 - x0) / len) * t + vx * (o + wob); const y = y0 + ((y1 - y0) / len) * t + vy * (o + wob);
-          if (t <= (o === 0 ? 4.5 : 3.2)) g.moveTo(x, y); else g.lineTo(x, y);
-        }
-        g.stroke();
-      }
-    }
-    const grad = g.createRadialGradient(mid, mid, 0.5, mid, mid, 3.3);
-    grad.addColorStop(0, '#c9b088'); grad.addColorStop(0.8, '#c2a674'); grad.addColorStop(1, 'rgba(194,166,116,0)');
-    g.fillStyle = grad; g.beginPath(); g.arc(mid, mid, 3.3, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#a99a62'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.55, pd.r * 0.8 + 0.55, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#dccb92'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.38, pd.r * 0.8 + 0.38, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(245,250,255,0.75)'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.1, pd.r * 0.8 + 0.1, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#2f6f9e'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(20,50,90,0.35)'; g.beginPath(); g.ellipse(pd.x + 0.2, pd.y + 0.15, pd.r * 0.6, pd.r * 0.45, 0.4, 0, Math.PI * 2); g.fill();
-    texture('dirt', 0.8, () => {
-      g.rect(mid - 0.45, T_MIN, 0.9, T_W); g.rect(T_MIN, mid - 0.45, T_W, 0.9);
-      g.moveTo(mid + 3.3, mid); g.arc(mid, mid, 3.3, 0, Math.PI * 2);
-    });
-    texture('water', 0.5, () => {
-      g.moveTo(pd.x + pd.r, pd.y); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2);
-    });
-    g.setTransform(WM); g.transform(...ISO);
-    for (const k of ['stone', 'gold']) {
-      const d = this.near[k];
-      g.fillStyle = k === 'gold' ? 'rgba(140,110,65,0.45)' : 'rgba(150,145,130,0.45)';
-      g.beginPath(); g.arc(d.x, d.y, 1.5, 0, Math.PI * 2); g.fill();
-    }
-    g.fillStyle = 'rgba(170,215,100,0.25)'; g.beginPath(); g.arc(this.pasture.x, this.pasture.y, 2.3, 0, Math.PI * 2); g.fill();
-    // plekken van wilde bronnen en het kamp: kale grond
-    for (const d of terr.deposits) {
-      g.fillStyle = d.kind === 'food' ? 'rgba(120,150,60,0.25)' : d.kind === 'wood' ? 'rgba(60,90,30,0.3)' : 'rgba(130,120,100,0.35)';
-      g.beginPath(); g.arc(d.x, d.y, 1.3, 0, Math.PI * 2); g.fill();
-    }
-    if (terr.camp) {
-      g.fillStyle = 'rgba(120,95,60,0.45)'; g.beginPath(); g.arc(terr.camp.x, terr.camp.y, 2.4, 0, Math.PI * 2); g.fill();
-    }
-    g.restore();
-
-    // kasseien op het plein
-    for (let gy = mid - 3.4; gy < mid + 3.4; gy += 0.2) {
-      for (let gx = mid - 3.4; gx < mid + 3.4; gx += 0.2) {
-        const jx = gx + (hashInt(Math.round(gx * 10), Math.round(gy * 10), sd) - 0.5) * 0.08;
-        const jy = gy + (hashInt(Math.round(gy * 10), Math.round(gx * 10), sd + 3) - 0.5) * 0.08;
-        const dist = Math.hypot(jx - mid, jy - mid);
-        if (dist > 3.2 || hashInt(Math.round(gx * 10), Math.round(gy * 10), sd + 4) < (dist - 2.2) * 0.9) continue;
-        const p = toWorld(jx, jy);
-        const v = hashInt(Math.round(gx * 10), Math.round(gy * 10), sd + 5);
-        g.fillStyle = A.mix('#b9aa8c', '#d8cbb0', v);
-        g.beginPath(); g.ellipse(p.x, p.y, 4.6, 2.3, 0, 0, Math.PI * 2); g.fill();
-        g.strokeStyle = 'rgba(90,75,50,0.45)'; g.lineWidth = 0.6; g.stroke();
-        g.fillStyle = 'rgba(255,255,255,0.18)'; g.beginPath(); g.ellipse(p.x - 1, p.y - 0.7, 2, 0.9, 0, 0, Math.PI * 2); g.fill();
-      }
-    }
-    // rafelige wegranden: plukjes zand en gras die over de rand gaan
-    for (const [x0, y0, x1, y1] of roads) {
-      const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      for (let t = 3.4; t < len; t += 0.17) {
-        for (const side of [-1, 1]) {
-          const h = hashInt(Math.round(t * 10), side + x1 * 3 + y1 * 7, sd + 44);
-          const off = side * (0.44 + (h - 0.5) * 0.14);
-          const gx = x0 + ((x1 - x0) / len) * t + vx * off; const gy = y0 + ((y1 - y0) / len) * t + vy * off;
-          const p = toWorld(gx, gy);
-          if (h < 0.55) { g.fillStyle = h < 0.25 ? 'rgba(168,138,88,0.75)' : 'rgba(190,160,108,0.6)'; g.beginPath(); g.ellipse(p.x, p.y, 3 + h * 5, 1.4 + h * 2, 0, 0, Math.PI * 2); g.fill(); }
-          else if (h > 0.78) NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null);
-        }
-      }
-    }
-    // kiezels langs de wegen
-    for (let k = 0; k < 500; k++) {
-      const along = T_MIN + hashInt(k, 31, sd) * T_W;
-      const side = (hashInt(k, 32, sd) - 0.5) * 0.9;
-      const vertical = k % 2 === 0;
-      const gx = vertical ? mid + side : along; const gy = vertical ? along : mid + side;
-      if (Math.hypot(gx - mid, gy - mid) < 3.4) continue;
-      const p = toWorld(gx, gy);
-      g.fillStyle = hashInt(k, 33, sd) < 0.5 ? 'rgba(140,125,100,0.8)' : 'rgba(205,190,160,0.8)';
-      g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.8, 0, 0, Math.PI * 2); g.fill();
-    }
-    // gras, bloemenweitjes, steentjes en een rijke bosbodem
-    this.flowerSpots = [];
     const onRoad = (i, j) => (Math.abs(i - mid) < 0.62 || Math.abs(j - mid) < 0.62);
     const okGround = (i, j) => {
       const t = terr.tiles[tileIndex(Math.floor(i), Math.floor(j))];
       return t !== TILE.WATER && t !== TILE.SAND && !inPond(i, j) && Math.hypot(i - mid, j - mid) > 3.4 && !onRoad(i, j);
     };
-    const tufts = FX.LOW_POWER ? 4200 : 9500;
-    for (let k = 0; k < tufts; k++) {
-      const i = T_MIN + hashInt(k, 3, sd) * T_W; const j = T_MIN + hashInt(k, 4, sd) * T_W;
-      if (!okGround(i, j)) continue;
-      const r = hashInt(k, 5, sd);
-      const forest = fAt(i, j) > 0.45;
-      const p = toWorld(i, j);
-      NAT.tuft(g, p.x, p.y, 0.75 + r * 0.55, forest || r < 0.45 ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', r > 0.82 ? 'rgba(232,240,170,0.7)' : null);
-    }
-    const FLOWERS = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43', '#f2f2f2', '#7fb0f0'];
     const meadows = FX.LOW_POWER ? 45 : 90;
+    this.flowerSpots = [];
     for (let k = 0; k < meadows; k++) {
       const ci = T_MIN + hashInt(k, 71, sd) * T_W; const cj = T_MIN + hashInt(k, 72, sd) * T_W;
       if (!okGround(ci, cj) || fAt(ci, cj) > 0.35) continue;
-      const col = FLOWERS[k % FLOWERS.length]; const col2 = FLOWERS[(k + 3) % FLOWERS.length];
-      const n = 6 + Math.floor(hashInt(k, 73, sd) * 12);
-      for (let q = 0; q < n; q++) {
-        const a = hashInt(k, 80 + q, sd) * Math.PI * 2; const d = Math.sqrt(hashInt(k, 120 + q, sd)) * 1.1;
-        const i = ci + Math.cos(a) * d; const j = cj + Math.sin(a) * d;
-        if (!okGround(i, j)) continue;
-        const p = toWorld(i, j);
-        NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
-      }
       if (ringOf(Math.floor(ci), Math.floor(cj)) <= 6) this.flowerSpots.push(toWorld(ci, cj));
-    }
-    for (let k = 0; k < (FX.LOW_POWER ? 160 : 300); k++) {
-      const i = T_MIN + hashInt(k, 91, sd) * T_W; const j = T_MIN + hashInt(k, 92, sd) * T_W;
-      if (!okGround(i, j)) continue;
-      const p = toWorld(i, j);
-      NAT.pebble(g, p.x, p.y, 0.45 + hashInt(k, 93, sd) * 0.6, hashInt(k, 94, sd) < 0.5 ? '#9c978b' : '#b3ad9f');
-    }
-    // bosbodem: gevallen blad, varens, struikjes, paddenstoelen en een omgevallen stam
-    const LEAVES = ['rgba(150,95,35,0.55)', 'rgba(190,130,45,0.5)', 'rgba(95,85,35,0.5)', 'rgba(120,60,30,0.45)'];
-    for (let j = T_MIN; j < T_MAX; j++) {
-      for (let i = T_MIN; i < T_MAX; i++) {
-        if (terr.tiles[tileIndex(i, j)] !== TILE.FOREST || ringOf(i, j) === 0 || onRoad(i + 0.5, j + 0.5)) continue;
-        for (let q = 0; q < 7; q++) {
-          const p = toWorld(i + hashInt(i * 7 + q, j, sd + 101), j + hashInt(i, j * 7 + q, sd + 102));
-          g.fillStyle = LEAVES[q % 4]; g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.7, q, 0, Math.PI * 2); g.fill();
-        }
-        const r1 = hashInt(i, j, sd + 103); const r2 = hashInt(i, j, sd + 104); const r3 = hashInt(i, j, sd + 105);
-        if (r1 < 0.6) { const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6); NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34'); }
-        if (r2 < 0.3) { const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2); NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28'); }
-        if (r3 < 0.06) { const p = toWorld(i + 0.5, j + 0.6); NAT.mushroom(g, p.x, p.y, 1); NAT.mushroom(g, p.x + 3, p.y + 1, 0.75); }
-        if (r3 > 0.975) { const p = toWorld(i + 0.5, j + 0.5); NAT.log(g, p.x, p.y, 0.9); }
-      }
-    }
-    // riet en waterlelies bij de meertjes
-    for (const [x, y] of lakes) {
-      const i = Math.floor(x); const j = Math.floor(y);
-      const h = hashInt(i, j, sd + 111);
-      const dry = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => tileAt(i + dx, j + dy) !== TILE.WATER);
-      if (dry.length && h < 0.55) {
-        const [dx, dy] = dry[Math.floor(h * 10) % dry.length];
-        const p = toWorld(x + dx * 0.62, y + dy * 0.62);
-        NAT.reed(g, p.x, p.y, 0.8 + h * 0.5);
-      } else if (!dry.length && h < 0.14) {
-        const p = toWorld(x + (h - 0.07) * 4, y);
-        NAT.lily(g, p.x, p.y, 1, h < 0.05);
-      }
-    }
-    // riet en waterlelies rond de vijver
-    for (let k = 0; k < 34; k++) {
-      const a = hashInt(k, 9, sd) * Math.PI * 2;
-      const rr = pd.r * (0.95 + hashInt(k, 10, sd) * 0.25);
-      const p = toWorld(pd.x + Math.cos(a) * rr, pd.y + Math.sin(a) * rr * 0.8);
-      g.strokeStyle = k % 2 ? '#4f7d2c' : '#6a9a3a'; g.lineWidth = 1.2;
-      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - 1.5, p.y - 9); g.moveTo(p.x + 2, p.y); g.lineTo(p.x + 3, p.y - 7); g.moveTo(p.x - 1, p.y); g.lineTo(p.x - 4, p.y - 6); g.stroke();
-      if (k % 3 === 0) { g.fillStyle = '#6b4523'; g.fillRect(p.x - 2.3, p.y - 12, 2, 4.5); }
     }
     this.lilies = [];
     for (let k = 0; k < 7; k++) {
       const a = hashInt(k, 41, sd) * Math.PI * 2; const rr = pd.r * (0.35 + hashInt(k, 42, sd) * 0.5);
       this.lilies.push({ gx: pd.x + Math.cos(a) * rr, gy: pd.y + Math.sin(a) * rr * 0.8, f: k % 3 === 0 });
     }
+    // kasseien op het plein: in kringen rond het midden, met een sierring van donkere stenen
+    const plaza = [];
+    {
+      const SP = 0.14;
+      const PAL = [[186, 174, 148], [204, 193, 168], [170, 162, 144], [195, 181, 151], [178, 170, 158], [210, 200, 178]];
+      for (let k = 0; ; k++) {
+        const r = 0.16 + k * SP;
+        if (r > 3.22) break;
+        const n = Math.max(5, Math.round((Math.PI * 2 * r) / 0.16));
+        const off = hashInt(k, 5, sd + 501) * Math.PI * 2;
+        const band = k % 7 === 4 || k === 1;
+        for (let q = 0; q < n; q++) {
+          const id = k * 131 + q;
+          const h = hashInt(id, 7, sd + 502);
+          if (r > 2.45 && h < (r - 2.45) * 1.05) continue; // rafelige rand: buiten het plein zand
+          const a0 = off + (q / n) * Math.PI * 2; const a1 = off + ((q + 1) / n) * Math.PI * 2;
+          const ga = (a1 - a0) * 0.045; const gr = 0.011;
+          const ri = Math.max(0.02, r - SP / 2 + gr); const ro = r + SP / 2 - gr;
+          const jit = (u) => (hashInt(id, u, sd + 503) - 0.5) * 0.016;
+          const P = [];
+          let cx = 0; let cy = 0;
+          [[ri, a0 + ga], [ri, a1 - ga], [ro, a1 - ga], [ro, a0 + ga]].forEach(([rr, aa], c) => {
+            const w = toWorld(mid + Math.cos(aa) * rr + jit(c * 2), mid + Math.sin(aa) * rr + jit(c * 2 + 1));
+            P.push(w.x, w.y); cx += w.x / 4; cy += w.y / 4;
+          });
+          const v = hashInt(id, 9, sd + 504);
+          let col = PAL[Math.floor(hashInt(id, 11, sd + 505) * PAL.length)];
+          if (band) col = v < 0.5 ? [150, 132, 112] : [166, 128, 104];
+          const b = 0.92 + v * 0.14;
+          plaza.push({ P, col: [col[0] * b, col[1] * b, col[2] * b], cx, cy });
+        }
+      }
+      plaza.sort((a, b) => a.cy - b.cy);
+    }
+    // korrels en grasplukjes: plaatsen één keer uitrekenen (elk stuk overloopt dan enkel een lijst)
+    const grains = [[], [], []];
+    {
+      const n = FX.LOW_POWER ? 9000 : 22000;
+      for (let k = 0; k < n; k++) {
+        const i = T_MIN + hashInt(k, 61, sd) * T_W; const j = T_MIN + hashInt(k, 62, sd) * T_W;
+        if (terr.tiles[tileIndex(Math.floor(i), Math.floor(j))] === TILE.WATER) continue;
+        const p = toWorld(i, j);
+        grains[k % 3].push(p.x, p.y);
+      }
+    }
+    const tuftList = [];
+    const tuftHD = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 4200 : 9500); k++) {
+      const i = T_MIN + hashInt(k, 3, sd) * T_W; const j = T_MIN + hashInt(k, 4, sd) * T_W;
+      if (!okGround(i, j)) continue;
+      const r = hashInt(k, 5, sd);
+      const p = toWorld(i, j);
+      const dark = fAt(i, j) > 0.45 || r < 0.45;
+      tuftList.push({ x: p.x, y: p.y, s: 0.75 + r * 0.55, col: dark ? 'rgba(40,88,22,0.62)' : 'rgba(150,200,92,0.62)', tip: r > 0.82 ? 'rgba(232,240,170,0.7)' : null });
+      tuftHD.push({ x: p.x, y: p.y, s: (0.75 + r * 0.55) * 0.95, d: dark ? '#3a7424' : '#6fa23c', l: dark ? '#6fae3e' : '#b9de74', h: hashInt(k, 6, sd) });
+    }
+    // wilde bloemen in groepjes (kleur per plek) en stenen met mos, buiten de bouwgrond
+    const WILD = ['#ffffff', '#f6e05a', '#c9a2f0', '#f2a0c0', '#9ec2f5', '#ffd27a', '#ffffff'];
+    const wildFlowers = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 5000 : 10000); k++) {
+      const i = T_MIN + hashInt(k, 731, sd) * T_W; const j = T_MIN + hashInt(k, 732, sd) * T_W;
+      if (ringOf(Math.floor(i), Math.floor(j)) === 0 || !okGround(i, j) || fAt(i, j) > 0.4) continue;
+      const m = fbm(i / 3.5, j / 3.5, sd + 733, 2);
+      if (hashInt(k, 734, sd) > (m - 0.34) * 2.6) continue;
+      const p = toWorld(i, j);
+      const cl = Math.floor(fbm(i / 2.2, j / 2.2, sd + 735, 1) * 11) % WILD.length;
+      wildFlowers.push({ x: p.x, y: p.y, col: WILD[cl], h: hashInt(k, 736, sd), s: 0.85 + hashInt(k, 737, sd) * 0.5 });
+    }
+    // extra fijne grasplukjes, enkel van dichtbij (dicht, sappig gras)
+    const fineClumps = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 7000 : 14000); k++) {
+      const i = T_MIN + hashInt(k, 751, sd) * T_W; const j = T_MIN + hashInt(k, 752, sd) * T_W;
+      if (!okGround(i, j)) continue;
+      const p = toWorld(i, j);
+      const f = fAt(i, j); const h = hashInt(k, 753, sd);
+      const pal = f > 0.45 ? ['#2f5f20', '#5a8f36'] : h < 0.5 ? ['#4b8a2c', '#8cc24f'] : h < 0.85 ? ['#5e9a34', '#a8d264'] : ['#7d9a3a', '#cbd884'];
+      fineClumps.push({ x: p.x, y: p.y, s: 0.55 + hashInt(k, 754, sd) * 0.35, d: pal[0], l: pal[1], h });
+    }
+    const rockList = [];
+    for (let k = 0; k < (FX.LOW_POWER ? 150 : 300); k++) {
+      const i = T_MIN + hashInt(k, 741, sd) * T_W; const j = T_MIN + hashInt(k, 742, sd) * T_W;
+      if (ringOf(Math.floor(i), Math.floor(j)) <= 3 || !okGround(i, j)) continue;
+      const p = toWorld(i, j);
+      const h = hashInt(k, 743, sd);
+      rockList.push({ x: p.x, y: p.y, r: 1.3 + h * h * 2.8, h: hashInt(k, 744, sd), moss: fAt(i, j) > 0.2 || h < 0.6 });
+    }
+    const FLOWERS = ['#f4e04d', '#ffffff', '#e86f9a', '#b48cf0', '#ff9f43', '#f2f2f2', '#7fb0f0'];
+    const LEAVES = ['rgba(150,95,35,0.55)', 'rgba(190,130,45,0.5)', 'rgba(95,85,35,0.5)', 'rgba(120,60,30,0.45)'];
+
+    // ---------- tekenen: g staat in wereldcoördinaten (schaal S), R = het stuk dat getekend moet worden ----------
+    // S = 0: de gebakken grond op lage resolutie (zonder de fijne texturen).
+    this.paintGround = (g, R, S = 0) => {
+      const WM = g.getTransform();
+      const vis = (x, y, m) => x > R.x0 - m && x < R.x1 + m && y > R.y0 - m && y < R.y1 + m;
+      const gvis = (gx, gy, m) => { const p = toWorld(gx, gy); return vis(p.x, p.y, m); };
+      // textuur over een vorm leggen; de vorm wordt in tegelruimte opgebouwd, de textuur ligt in wereldpixels
+      const texture = (kind, alpha, shape) => {
+        g.save();
+        g.setTransform(WM); g.transform(...ISO);
+        g.beginPath(); shape();
+        g.setTransform(WM);
+        g.globalCompositeOperation = 'overlay'; g.globalAlpha = S ? alpha * 0.7 : alpha;
+        g.fillStyle = g.createPattern(this.tex[kind], 'repeat');
+        g.fill('nonzero');
+        if (S) for (const [pat, a] of GH.hdPatterns(g, kind, S)) { g.globalAlpha = a; g.fillStyle = pat; g.fill('nonzero'); }
+        g.restore();
+      };
+      const ell = (x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill(); };
+      g.save();
+      g.transform(...ISO);
+      g.imageSmoothingEnabled = true;
+      if (S) g.imageSmoothingQuality = 'high';
+      g.drawImage(base, T_MIN, T_MIN, T_W, T_W);
+      g.restore();
+      texture('grass', 0.62, () => g.rect(T_MIN, T_MIN, T_W, T_W));
+      texture('forest', 0.75, () => {
+        for (let j = T_MIN; j < T_MAX; j++) {
+          for (let i = T_MIN; i < T_MAX; i++) {
+            if (forestD[tileIndex(i, j)] < 0.45 || !gvis(i + 0.5, j + 0.5, 70)) continue;
+            g.moveTo(i + 0.5 + 0.9, j + 0.5); g.arc(i + 0.5, j + 0.5, 0.9, 0, Math.PI * 2);
+          }
+        }
+      });
+      // fijne korrel in het gras (anders oogt de grond te glad)
+      ['rgba(25,55,12,0.16)', 'rgba(255,255,205,0.10)', 'rgba(70,100,25,0.14)'].forEach((col, c) => {
+        g.fillStyle = col;
+        const L = grains[c];
+        for (let k = 0; k < L.length; k += 2) {
+          const x = L[k]; const y = L[k + 1];
+          if (x < R.x0 - 3 || x > R.x1 + 3 || y < R.y0 - 3 || y > R.y1 + 3) continue;
+          if (S) ell(x + 0.9, y + 0.45, 0.95, 0.5); else g.fillRect(x, y, 1.8, 0.9);
+        }
+      });
+      // grote, zachte kleurvlekken voor een natuurlijke look
+      for (let k = 0; k < 140; k++) {
+        const i = T_MIN + hashInt(k, 21, sd) * T_W; const j = T_MIN + hashInt(k, 22, sd) * T_W;
+        const p = toWorld(i, j);
+        const r = 30 + hashInt(k, 23, sd) * 80;
+        if (!vis(p.x, p.y, r)) continue;
+        const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        const light = k % 2 === 0;
+        gr.addColorStop(0, light ? 'rgba(200,230,120,0.13)' : 'rgba(40,80,20,0.12)');
+        gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.beginPath(); g.ellipse(p.x, p.y, r, r * 0.5, 0, 0, Math.PI * 2); g.fill();
+      }
+
+      // in grid-ruimte tekenen (cirkels worden isometrische ellipsen)
+      g.save();
+      g.transform(...ISO);
+      if (lakeImg && !S) g.drawImage(...lakeImg.img);
+      if (lakeImg && S) { g.restore(); this.lakeHD(g, lakeImg); g.save(); g.transform(...ISO); }
+      g.lineCap = 'round';
+      for (const [w, col] of [[1.3, 'rgba(95,80,40,0.22)'], [0.98, '#a88a58'], [0.8, '#bfa06b'], [0.36, 'rgba(226,206,160,0.35)']]) {
+        g.strokeStyle = col; g.lineWidth = w;
+        for (const [x0, y0, x1, y1] of roads) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+      }
+      // karrensporen, licht golvend, met een grasstrookje ertussen buiten de stad
+      for (const [x0, y0, x1, y1] of roads) {
+        const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        for (const [o, col, w] of [[-0.19, 'rgba(105,78,42,0.42)', 0.075], [0.19, 'rgba(105,78,42,0.42)', 0.075], [0, 'rgba(105,150,55,0.22)', 0.1]]) {
+          g.strokeStyle = col; g.lineWidth = w;
+          g.beginPath();
+          for (let t = o === 0 ? 4.5 : 3.2; t <= len; t += 0.25) {
+            const wob = (fbm(t * 0.7, o * 9 + x1 * 0.1 + y1 * 0.13, sd + 40, 2) - 0.5) * 0.12;
+            const x = x0 + ((x1 - x0) / len) * t + vx * (o + wob); const y = y0 + ((y1 - y0) / len) * t + vy * (o + wob);
+            if (t <= (o === 0 ? 4.5 : 3.2)) g.moveTo(x, y); else g.lineTo(x, y);
+          }
+          g.stroke();
+        }
+      }
+      const grad = g.createRadialGradient(mid, mid, 0.5, mid, mid, 3.3);
+      grad.addColorStop(0, '#c9b088'); grad.addColorStop(0.8, '#c2a674'); grad.addColorStop(1, 'rgba(194,166,116,0)');
+      g.fillStyle = grad; g.beginPath(); g.arc(mid, mid, 3.3, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#a99a62'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.55, pd.r * 0.8 + 0.55, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#dccb92'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.38, pd.r * 0.8 + 0.38, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(245,250,255,0.75)'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r + 0.1, pd.r * 0.8 + 0.1, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#2f6f9e'; g.beginPath(); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(20,50,90,0.35)'; g.beginPath(); g.ellipse(pd.x + 0.2, pd.y + 0.15, pd.r * 0.6, pd.r * 0.45, 0.4, 0, Math.PI * 2); g.fill();
+      texture('dirt', 0.8, () => {
+        g.rect(mid - 0.45, T_MIN, 0.9, T_W); g.rect(T_MIN, mid - 0.45, T_W, 0.9);
+        g.moveTo(mid + 3.3, mid); g.arc(mid, mid, 3.3, 0, Math.PI * 2);
+      });
+      texture('water', 0.5, () => {
+        g.moveTo(pd.x + pd.r, pd.y); g.ellipse(pd.x, pd.y, pd.r, pd.r * 0.8, 0.4, 0, Math.PI * 2);
+      });
+      g.setTransform(WM); g.transform(...ISO);
+      for (const k of ['stone', 'gold']) {
+        const d = this.near[k];
+        g.fillStyle = k === 'gold' ? 'rgba(140,110,65,0.45)' : 'rgba(150,145,130,0.45)';
+        g.beginPath(); g.arc(d.x, d.y, 1.5, 0, Math.PI * 2); g.fill();
+      }
+      g.fillStyle = 'rgba(170,215,100,0.25)'; g.beginPath(); g.arc(this.pasture.x, this.pasture.y, 2.3, 0, Math.PI * 2); g.fill();
+      // plekken van wilde bronnen en het kamp: kale grond
+      for (const d of terr.deposits) {
+        g.fillStyle = d.kind === 'food' ? 'rgba(120,150,60,0.25)' : d.kind === 'wood' ? 'rgba(60,90,30,0.3)' : 'rgba(130,120,100,0.35)';
+        g.beginPath(); g.arc(d.x, d.y, 1.3, 0, Math.PI * 2); g.fill();
+      }
+      if (terr.camp) {
+        g.fillStyle = 'rgba(120,95,60,0.45)'; g.beginPath(); g.arc(terr.camp.x, terr.camp.y, 2.4, 0, Math.PI * 2); g.fill();
+      }
+      // plein: voegen (donker zand) onder de kasseien, naar de rand toe zachter
+      if (gvis(mid, mid, 230)) {
+        const mo = g.createRadialGradient(mid, mid, 0, mid, mid, 3.25);
+        mo.addColorStop(0, 'rgba(104,92,72,0.95)'); mo.addColorStop(0.74, 'rgba(110,96,74,0.92)'); mo.addColorStop(1, 'rgba(120,102,76,0)');
+        g.fillStyle = mo; g.beginPath(); g.arc(mid, mid, 3.25, 0, Math.PI * 2); g.fill();
+      }
+      g.restore();
+
+      // mos en grasjes in de voegen, dan de kasseien (van achter naar voor)
+      for (let k = 0; k < 420; k++) {
+        const a = hashInt(k, 601, sd) * Math.PI * 2; const r = 0.4 + Math.sqrt(hashInt(k, 602, sd)) * 2.8;
+        const p = toWorld(mid + Math.cos(a) * r, mid + Math.sin(a) * r);
+        if (!vis(p.x, p.y, 3)) continue;
+        g.fillStyle = k % 3 ? 'rgba(88,118,48,0.55)' : 'rgba(120,150,60,0.5)';
+        ell(p.x, p.y, 1.1, 0.55);
+      }
+      for (const st of plaza) if (vis(st.cx, st.cy, 9)) GH.stone(g, st.P, st.col, 1, 1);
+      // rafelige wegranden: plukjes zand en gras die over de rand gaan
+      for (const [x0, y0, x1, y1] of roads) {
+        const vx = y1 - y0 ? 1 : 0; const vy = x1 - x0 ? 1 : 0;
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        for (let t = 3.4; t < len; t += 0.17) {
+          for (const side of [-1, 1]) {
+            const h = hashInt(Math.round(t * 10), side + x1 * 3 + y1 * 7, sd + 44);
+            const off = side * (0.44 + (h - 0.5) * 0.14);
+            const gx = x0 + ((x1 - x0) / len) * t + vx * off; const gy = y0 + ((y1 - y0) / len) * t + vy * off;
+            const p = toWorld(gx, gy);
+            if (!vis(p.x, p.y, 10)) continue;
+            if (h < 0.55) { g.fillStyle = h < 0.25 ? 'rgba(168,138,88,0.75)' : 'rgba(190,160,108,0.6)'; g.beginPath(); g.ellipse(p.x, p.y, 3 + h * 5, 1.4 + h * 2, 0, 0, Math.PI * 2); g.fill(); }
+            else if (h > 0.78) { if (S) GH.grassClump(g, p.x, p.y, 0.85, '#4f8a2e', '#9cc95c', h); else NAT.tuft(g, p.x, p.y, 0.9, 'rgba(70,120,35,0.7)', null); }
+          }
+        }
+      }
+      // grind op de aardewegen: kleine steentjes met een schaduwkant
+      for (let k = 0; k < (FX.LOW_POWER ? 1600 : 3400); k++) {
+        const along = T_MIN + hashInt(k, 34, sd) * T_W;
+        const side = (hashInt(k, 35, sd) - 0.5) * 0.84;
+        const vertical = k % 2 === 0;
+        const gx = vertical ? mid + side : along; const gy = vertical ? along : mid + side;
+        if (Math.hypot(gx - mid, gy - mid) < 3.4) continue;
+        const p = toWorld(gx, gy);
+        if (!vis(p.x, p.y, 3)) continue;
+        const r = 0.3 + hashInt(k, 36, sd) * 0.6;
+        g.fillStyle = 'rgba(70,52,30,0.5)'; ell(p.x + r * 0.3, p.y + r * 0.4, r, r * 0.6);
+        g.fillStyle = hashInt(k, 37, sd) < 0.5 ? 'rgba(150,136,112,0.95)' : 'rgba(208,194,164,0.95)'; ell(p.x, p.y, r * 0.85, r * 0.5);
+      }
+      // kiezels langs de wegen
+      for (let k = 0; k < 500; k++) {
+        const along = T_MIN + hashInt(k, 31, sd) * T_W;
+        const side = (hashInt(k, 32, sd) - 0.5) * 0.9;
+        const vertical = k % 2 === 0;
+        const gx = vertical ? mid + side : along; const gy = vertical ? along : mid + side;
+        if (Math.hypot(gx - mid, gy - mid) < 3.4) continue;
+        const p = toWorld(gx, gy);
+        if (!vis(p.x, p.y, 3)) continue;
+        if (S) { NAT.pebble(g, p.x, p.y, 0.55, hashInt(k, 33, sd) < 0.5 ? '#8f8573' : '#c9bb9c'); continue; }
+        g.fillStyle = hashInt(k, 33, sd) < 0.5 ? 'rgba(140,125,100,0.8)' : 'rgba(205,190,160,0.8)';
+        ell(p.x, p.y, 1.4, 0.8);
+      }
+      // gras, bloemenweitjes, steentjes en een rijke bosbodem
+      if (S) {
+        // grasplukjes met echte sprieten, wilde bloemen en stenen
+        GH.grassClumps(g, fineClumps.filter((c, k) => (S >= 3 || k % 2 === 0) && vis(c.x, c.y, 6)));
+        for (const r of rockList) if (vis(r.x, r.y, r.r * 1.6)) GH.rock(g, r.x, r.y, r.r, r.h, r.moss);
+        GH.grassClumps(g, tuftHD.filter((c) => vis(c.x, c.y, 9)));
+        GH.flowers(g, wildFlowers.filter((f) => vis(f.x, f.y, 4)));
+      } else {
+        for (const r of rockList) if (vis(r.x, r.y, 4)) NAT.pebble(g, r.x, r.y, r.r / 2.2, r.moss ? '#8f9784' : '#a49e90');
+        for (const t of tuftList) if (vis(t.x, t.y, 7)) NAT.tuft(g, t.x, t.y, t.s, t.col, t.tip);
+        for (const f of wildFlowers) if (vis(f.x, f.y, 2)) { g.fillStyle = f.col; g.fillRect(f.x - 0.6, f.y - 1.4, 1.2, 1.2); }
+      }
+      for (let k = 0; k < meadows; k++) {
+        const ci = T_MIN + hashInt(k, 71, sd) * T_W; const cj = T_MIN + hashInt(k, 72, sd) * T_W;
+        if (!gvis(ci, cj, 80) || !okGround(ci, cj) || fAt(ci, cj) > 0.35) continue;
+        const col = FLOWERS[k % FLOWERS.length]; const col2 = FLOWERS[(k + 3) % FLOWERS.length];
+        const n = 6 + Math.floor(hashInt(k, 73, sd) * 12);
+        const batch = [];
+        for (let q = 0; q < n; q++) {
+          const a = hashInt(k, 80 + q, sd) * Math.PI * 2; const d = Math.sqrt(hashInt(k, 120 + q, sd)) * 1.1;
+          const i = ci + Math.cos(a) * d; const j = cj + Math.sin(a) * d;
+          if (!okGround(i, j)) continue;
+          const p = toWorld(i, j);
+          if (!vis(p.x, p.y, 4)) continue;
+          if (S) batch.push({ x: p.x, y: p.y, col: q % 4 === 0 ? col2 : col, s: 1.1, h: hashInt(k, 160 + q, sd) });
+          else NAT.flower(g, p.x, p.y, q % 4 === 0 ? col2 : col);
+        }
+        if (S) GH.flowers(g, batch);
+      }
+      for (let k = 0; k < (FX.LOW_POWER ? 160 : 300); k++) {
+        const i = T_MIN + hashInt(k, 91, sd) * T_W; const j = T_MIN + hashInt(k, 92, sd) * T_W;
+        const p = toWorld(i, j);
+        if (!vis(p.x, p.y, 4) || !okGround(i, j)) continue;
+        NAT.pebble(g, p.x, p.y, 0.45 + hashInt(k, 93, sd) * 0.6, hashInt(k, 94, sd) < 0.5 ? '#9c978b' : '#b3ad9f');
+      }
+      // bosbodem: gevallen blad, varens, struikjes, paddenstoelen en een omgevallen stam
+      for (let j = T_MIN; j < T_MAX; j++) {
+        for (let i = T_MIN; i < T_MAX; i++) {
+          if (terr.tiles[tileIndex(i, j)] !== TILE.FOREST || ringOf(i, j) === 0 || onRoad(i + 0.5, j + 0.5)) continue;
+          if (!gvis(i + 0.5, j + 0.5, 48)) continue;
+          for (let q = 0; q < 7; q++) {
+            const p = toWorld(i + hashInt(i * 7 + q, j, sd + 101), j + hashInt(i, j * 7 + q, sd + 102));
+            g.fillStyle = LEAVES[q % 4]; g.beginPath(); g.ellipse(p.x, p.y, 1.4, 0.7, q, 0, Math.PI * 2); g.fill();
+          }
+          const r1 = hashInt(i, j, sd + 103); const r2 = hashInt(i, j, sd + 104); const r3 = hashInt(i, j, sd + 105);
+          if (r1 < 0.6) {
+            const p = toWorld(i + 0.2 + r2 * 0.6, j + 0.2 + r3 * 0.6);
+            if (S) GH.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#4f8f34' : '#62a03e', r1); else NAT.fern(g, p.x, p.y, 0.8 + r3 * 0.5, r2 < 0.5 ? '#3f7a2c' : '#4f8a34');
+          }
+          if (r2 < 0.3) {
+            const p = toWorld(i + 0.15 + r3 * 0.7, j + 0.6 * r1 + 0.2);
+            if (S) GH.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#86c050' : '#97c85a', '#2f5e22', r2); else NAT.shrub(g, p.x, p.y, 0.7 + r1 * 0.5, r3 < 0.5 ? '#6faa44' : '#7fb84a', '#3a6e28');
+          }
+          if (r3 < 0.06) { const p = toWorld(i + 0.5, j + 0.6); NAT.mushroom(g, p.x, p.y, 1); NAT.mushroom(g, p.x + 3, p.y + 1, 0.75); }
+          if (r3 > 0.975) { const p = toWorld(i + 0.5, j + 0.5); NAT.log(g, p.x, p.y, 0.9); }
+        }
+      }
+      // riet en waterlelies bij de meertjes
+      for (const [x, y] of lakes) {
+        if (!gvis(x, y, 60)) continue;
+        const i = Math.floor(x); const j = Math.floor(y);
+        const h = hashInt(i, j, sd + 111);
+        const dry = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => tileAt(i + dx, j + dy) !== TILE.WATER);
+        if (dry.length && h < 0.55) {
+          const [dx, dy] = dry[Math.floor(h * 10) % dry.length];
+          const p = toWorld(x + dx * 0.62, y + dy * 0.62);
+          NAT.reed(g, p.x, p.y, 0.8 + h * 0.5);
+        } else if (!dry.length && h < 0.14) {
+          const p = toWorld(x + (h - 0.07) * 4, y);
+          NAT.lily(g, p.x, p.y, 1, h < 0.05);
+        }
+      }
+      // riet rond de vijver
+      for (let k = 0; k < 34; k++) {
+        const a = hashInt(k, 9, sd) * Math.PI * 2;
+        const rr = pd.r * (0.95 + hashInt(k, 10, sd) * 0.25);
+        const p = toWorld(pd.x + Math.cos(a) * rr, pd.y + Math.sin(a) * rr * 0.8);
+        if (!vis(p.x, p.y, 14)) continue;
+        g.strokeStyle = k % 2 ? '#4f7d2c' : '#6a9a3a'; g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - 1.5, p.y - 9); g.moveTo(p.x + 2, p.y); g.lineTo(p.x + 3, p.y - 7); g.moveTo(p.x - 1, p.y); g.lineTo(p.x - 4, p.y - 6); g.stroke();
+        if (k % 3 === 0) { g.fillStyle = '#6b4523'; g.fillRect(p.x - 2.3, p.y - 12, 2, 4.5); }
+      }
+      // kiezels op de oever van de vijver
+      for (let k = 0; k < 60; k++) {
+        const a = hashInt(k, 801, sd) * Math.PI * 2;
+        const rr = pd.r + 0.18 + hashInt(k, 802, sd) * 0.32;
+        const p = toWorld(pd.x + Math.cos(a) * rr * Math.cos(0.4) - Math.sin(a) * rr * 0.8 * Math.sin(0.4), pd.y + Math.cos(a) * rr * Math.sin(0.4) + Math.sin(a) * rr * 0.8 * Math.cos(0.4));
+        if (!vis(p.x, p.y, 4)) continue;
+        if (S) GH.rock(g, p.x, p.y, 0.8 + hashInt(k, 803, sd) * 1.1, hashInt(k, 804, sd), false);
+        else NAT.pebble(g, p.x, p.y, 0.5, '#a9a291');
+      }
+    };
+
+    // de gebakken grond (uitgezoomd)
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(W * BAKE); cv.height = Math.round(H * BAKE);
+    const g = cv.getContext('2d');
+    g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
+    this.paintGround(g, { x0: this.groundOrigin.x, y0: this.groundOrigin.y, x1: this.groundOrigin.x + W, y1: this.groundOrigin.y + H }, 0);
     this.ground = { cv, W, H };
     this.groundComp = null;
+    if (this.hdg) this.hdg.clear();
 
     // vaste versiering: struiken, rotsen en de grondstofplekjes vlak bij de stad
     const decor = [];
@@ -782,6 +941,63 @@ export class TownView {
 
   // meertjes in de wildernis met vloeiende oevers: een zacht 'metaball'-veld rond de watertegels,
   // met zandrand, schuimlijn, ondiep en diep water. Geeft [beeld, x, y, breedte, hoogte] in tegelruimte.
+  // Meren in een scherp stuk: het diepte-beeld (zacht, bilineair vergroot) per pixel omzetten naar kleur. Omdat de diepte
+  // glad verloopt, worden de randen (zand, schuim, ondiep, diep) haarscherp op elke resolutie.
+  lakeHD(g, L) {
+    const T = g.getTransform();
+    const [x0, y0, x1, y1] = L.box;
+    let bx0 = Infinity; let by0 = Infinity; let bx1 = -Infinity; let by1 = -Infinity;
+    for (const [gx, gy] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) {
+      const w = toWorld(gx, gy);
+      const dx = T.a * w.x + T.c * w.y + T.e; const dy = T.b * w.x + T.d * w.y + T.f;
+      bx0 = Math.min(bx0, dx); by0 = Math.min(by0, dy); bx1 = Math.max(bx1, dx); by1 = Math.max(by1, dy);
+    }
+    const cw = g.canvas.width; const ch = g.canvas.height;
+    const bx = Math.max(0, Math.floor(bx0)); const by = Math.max(0, Math.floor(by0));
+    const bw = Math.min(cw, Math.ceil(bx1)) - bx; const bh = Math.min(ch, Math.ceil(by1)) - by;
+    if (bw <= 0 || bh <= 0) return;
+    if (!this.lakeTmp) this.lakeTmp = document.createElement('canvas');
+    const tmp = this.lakeTmp;
+    if (tmp.width < cw || tmp.height < ch) { tmp.width = cw; tmp.height = ch; }
+    const t = tmp.getContext('2d', { willReadFrequently: true });
+    t.setTransform(1, 0, 0, 1, 0, 0);
+    t.clearRect(0, 0, tmp.width, tmp.height);
+    t.setTransform(T); t.transform(A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0);
+    t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'high';
+    const [, ix, iy, iw, ih] = L.img;
+    t.drawImage(L.field, ix, iy, iw, ih);
+    const id = t.getImageData(bx, by, bw, bh);
+    const d = id.data;
+    const lut = lakeLUT();
+    // golfjes: dunne, lichte, golvende lijnen in wereldcoördinaten (lopen naadloos door over de stukken)
+    const ia = 1 / T.a;
+    for (let i = 0, k = 0; i < d.length; i += 4, k++) {
+      if (d[i + 3] === 0) continue;
+      const v = d[i];
+      const o = v * 4;
+      const a = lut[o + 3];
+      if (!a) { d[i + 3] = 0; continue; }
+      let r = lut[o]; let gg = lut[o + 1]; let b = lut[o + 2];
+      if (a === 255) {
+        const n = ((((k * 2654435761) >>> 27) - 16) * 0.25); // fijne ruis
+        r += n; gg += n; b += n;
+        if (v > 100) {
+          const px = bx + (k % bw); const py = by + ((k / bw) | 0);
+          const wx = (px - T.e) * ia; const wy = (py - T.f) * ia;
+          const w = Math.sin(wx * 0.11 + wy * 0.42 + Math.sin(wx * 0.045 + wy * 0.03) * 2.6);
+          if (w > 0.9) { const l = (w - 0.9) * 140; r += l; gg += l; b += l * 0.8; }
+          else if (w < -0.95) { const l = (-0.95 - w) * 160; r -= l; gg -= l; b -= l * 0.6; }
+        }
+      }
+      d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = a;
+    }
+    t.putImageData(id, bx, by);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(tmp, bx, by, bw, bh, bx, by, bw, bh);
+    g.restore();
+  }
+
   lakeImage(lakes, sd) {
     const RS = FX.LOW_POWER ? 10 : 14; // pixels per tegel
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
@@ -802,6 +1018,13 @@ export class TownView {
     const c = cv.getContext('2d');
     const img = c.createImageData(W, H);
     const d = img.data;
+    // tweede beeld: de 'diepte' f zelf (grijswaarde), voor scherpe meren in de HD-stukken (zie lakeHD)
+    const fcv = document.createElement('canvas');
+    fcv.width = W; fcv.height = H;
+    const fc = fcv.getContext('2d');
+    const fimg = fc.createImageData(W, H);
+    const fd = fimg.data;
+    for (let i = 3; i < fd.length; i += 4) fd[i] = 255;
     const R2 = 1.3 * 1.3;
     const ramp = (f, a, b) => Math.min(1, Math.max(0, (f - a) / (b - a)));
     for (let v = 0; v < H; v++) {
@@ -815,6 +1038,7 @@ export class TownView {
           if (q > 0) f += q * q;
         }
         f += (fbm(gx * 0.8, gy * 0.8, sd + 141, 2) - 0.5) * 0.5 + (fbm(gx * 2.6, gy * 2.6, sd + 142, 2) - 0.5) * 0.14;
+        { const fv = Math.max(0, Math.min(255, Math.round((f / 1.6) * 255))); const fo = (v * W + u) * 4; fd[fo] = fv; fd[fo + 1] = fv; fd[fo + 2] = fv; }
         if (f < 0.22) continue;
         const o = (v * W + u) * 4;
         let r; let gg; let b; let a;
@@ -834,7 +1058,8 @@ export class TownView {
       }
     }
     c.putImageData(img, 0, 0);
-    return [cv, x0, y0, TWd, THd];
+    fc.putImageData(fimg, 0, 0);
+    return { img: [cv, x0, y0, TWd, THd], field: fcv, box: [x0, y0, x1, y1] };
   }
 
   tcDoor() {
@@ -896,9 +1121,9 @@ export class TownView {
         } else {
           tg = { gx: door.gx + (Math.random() - 0.5) * 0.8, gy: door.gy + Math.random() * 0.3 };
         }
-        // in een ommuurde stad: via de poort naar buiten en weer binnen
-        const via = gateRoute(this.state, { x: w.gx, y: w.gy }, { x: tg.gx, y: tg.gy });
-        if (via) { w.target = { gx: via[0].x, gy: via[0].y }; w.queue = [{ gx: via[1].x, gy: via[1].y }, tg]; } else { w.target = tg; w.queue = null; }
+        // rond water en muren; in een ommuurde stad via de poort naar buiten en weer binnen
+        const q = routeTo(this.state, { x: w.gx, y: w.gy }, { x: tg.gx, y: tg.gy }).map((p) => ({ gx: p.x, gy: p.y }));
+        w.target = q.shift() || tg; w.queue = q.length ? q : null;
       }
       const dx = w.target.gx - w.gx; const dy = w.target.gy - w.gy;
       const d = Math.hypot(dx, dy);
@@ -979,10 +1204,24 @@ export class TownView {
     return out;
   }
 
+  // uitzicht van de eigen troepen (smidse en Academie), even bewaard
+  troopLook() {
+    const st = this.state;
+    const k = `${bLevel(st, 'smithy')}|${Object.keys(st.tech || {}).join(',')}`;
+    if (this._lookKey !== k) { this._lookKey = k; this._look = lookOf(bLevel(st, 'smithy'), st.tech); }
+    return this._look;
+  }
+
+  // welke soorten onderzoek er klaar zijn (voor het uitzicht van de Academie)
+  academyVariant() {
+    const t = this.state.tech || {};
+    return (techTier(t, 'inf') ? 1 : 0) | (techTier(t, 'rng') ? 2 : 0) | (techTier(t, 'cav') ? 4 : 0) | (techTier(t, 'town') ? 8 : 0);
+  }
+
   drawSoldier(ctx, s, x, y, t) {
     const team = this.team;
     const bob = s.walking ? 0 : Math.sin(t * 0.004 + s.gx * 3 + s.gy * 5) * 0.3;
-    const o = { s: 1.05, team, phase: t * 0.012, walking: !!s.walking };
+    const o = { s: 1.05, team, phase: t * 0.012, walking: !!s.walking, attack: s.attack };
     const sl = this.sel;
     if (sl && !s.walking && ((sl.type === 'soldier' && sl.kind === s.kind && Math.abs(sl.gx - s.gx) < 0.01 && Math.abs(sl.gy - s.gy) < 0.01)
       || ((sl.type === 'soldiers' || sl.type === 'kind') && sl.kind === s.kind) || sl.type === 'army')) {
@@ -991,16 +1230,12 @@ export class TownView {
     }
     if (s.kind === 'stonethrower') { A.stoneThrower(ctx, x, y, 0.8, t); return; }
     if (FIG.uniqueUnit(ctx, s.kind, x, y + bob, o)) return;
-    switch (s.kind) {
-      case 'spear': A.person(ctx, x, y + bob, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
-      case 'sword': A.person(ctx, x, y + bob, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
-      case 'archer': A.person(ctx, x, y + bob, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
-      case 'scout': A.horseman(ctx, x, y, { s: 0.8, team, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b', walking: o.walking, phase: o.phase }); break;
-      case 'rider': A.horseman(ctx, x, y, { s: 0.85, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear', horse: '#7b4f2c', walking: o.walking, phase: o.phase }); break;
-      case 'knight': A.horseman(ctx, x, y, { s: 0.9, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530', walking: o.walking, phase: o.phase }); break;
-      case 'ram': A.ram(ctx, x, y, 0.9); break;
-      default: A.person(ctx, x, y, o);
-    }
+    if (s.kind === 'ram') { A.ram(ctx, x, y, 0.9); return; }
+    // uitrusting volgens de smidse en het onderzoek van de Academie
+    const look = soldierOpts(s.kind, this.troopLook());
+    if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: o.walking, phase: o.phase, attack: o.attack });
+    else if (look) A.person(ctx, x, y + bob, { ...o, ...look });
+    else A.person(ctx, x, y, o);
   }
 
   // waar is de dorpeling die een vondst gaat halen? (heen, werken, terug met de buit)
@@ -1051,9 +1286,9 @@ export class TownView {
       top = 24;
     } else if (n.kind === 'tree') {
       const spr = this.trees[1];
-      ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1);
+      if (!A.prop3d(ctx, 'tree', 1, p.x - 3, p.y, 1.1)) ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1);
       // stapeltje brandhout
-      for (let i = 0; i < 3; i++) {
+      if (!A.prop3d(ctx, 'woodpile', 0, p.x + 10, p.y + 3, 1.1)) for (let i = 0; i < 3; i++) {
         const lx = p.x + 10; const ly = p.y + 3 - i * 3.2;
         ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(lx - 6 + i, ly); ctx.lineTo(lx + 5 - i, ly - 2); ctx.stroke();
@@ -1067,10 +1302,13 @@ export class TownView {
       A.rock(ctx, p.x + 1, p.y + 7, 1.3);
       top = 28;
     } else {
-      A.rock(ctx, p.x - 3, p.y + 2, 2.3);
-      A.rock(ctx, p.x + 9, p.y + 4, 1.5);
-      ctx.fillStyle = '#f2c230';
-      for (const [dx, dy, r] of [[-7, -7, 1.9], [-1, -10, 1.5], [4, -5, 1.7], [9, 1, 1.2]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      if (A.prop3d(ctx, 'gold', n.id % 8, p.x - 1, p.y + 3, 1.6)) A.prop3d(ctx, 'gold', (n.id + 3) % 8, p.x + 9, p.y + 5, 0.9);
+      else {
+        A.rock(ctx, p.x - 3, p.y + 2, 2.3);
+        A.rock(ctx, p.x + 9, p.y + 4, 1.5);
+        ctx.fillStyle = '#f2c230';
+        for (const [dx, dy, r] of [[-7, -7, 1.9], [-1, -10, 1.5], [4, -5, 1.7], [9, 1, 1.2]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      }
       const tw = Math.sin(t * 0.006 + n.id);
       if (tw > 0.6) {
         ctx.strokeStyle = `rgba(255,255,220,${(tw - 0.6) * 2.5})`; ctx.lineWidth = 1;
@@ -1175,7 +1413,7 @@ export class TownView {
     };
     // achterste toren eerst (verder weg in de isometrie); torens en boog als afbeelding (enkel de deuren bewegen)
     const [back, front] = t1.x + t1.y <= t2.x + t2.y ? [t1, t2] : [t2, t1];
-    const t3 = (p) => S3.getWall({ x0: p.x - tw, y0: p.y - tw, x1: p.x + tw, y1: p.y + tw, tower: true }, level, th);
+    const t3 = (p) => S3.getWall({ x0: p.x - tw, y0: p.y - tw, x1: p.x + tw, y1: p.y + tw, tower: true }, level, th, this.treeNeed);
     const tb = t3(back); const tf = t3(front);
     const use3d = tb && tf;
     if (use3d) { const w = toWorld(back.x, back.y); A.drawSprite(ctx, tb, w.x, w.y, 1); }
@@ -1223,7 +1461,8 @@ export class TownView {
 
   // vaste stukken van een poort (torens, boog) één keer tekenen en daarna als afbeelding hergebruiken
   gatePart(ctx, seg, level, which, top, draw) {
-    if (!this.gateSprites || this.gateSprites.level !== level) this.gateSprites = { level, map: new Map() };
+    const Q = spriteQ(this.treeNeed);
+    if (!this.gateSprites || this.gateSprites.level !== level || this.gateSprites.q !== Q) this.gateSprites = { level, q: Q, map: new Map() };
     const key = `${seg.cx},${seg.cy},${seg.ax},${seg.w || 1},${which}`;
     let spr = this.gateSprites.map.get(key);
     if (!spr) {
@@ -1234,7 +1473,6 @@ export class TownView {
         }
       }
       x0 = Math.floor(x0 - 3); y0 = Math.floor(y0 - 3); x1 = Math.ceil(x1 + 3); y1 = Math.ceil(y1 + 3);
-      const Q = 2.5;
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round((x1 - x0) * Q)); cv.height = Math.max(1, Math.round((y1 - y0) * Q));
       const c = cv.getContext('2d');
@@ -1254,14 +1492,15 @@ export class TownView {
   // muurstukken één keer tekenen en daarna als afbeelding hergebruiken (stenen textuur is duur)
   drawWallPiece(ctx, seg, level) {
     if (seg.gateTile) { this.drawGate(ctx, seg, Math.max(1, level)); return; }
-    const w3 = S3.getWall(seg, level, this.wallHeight(seg, level));
+    const w3 = S3.getWall(seg, level, this.wallHeight(seg, level), this.treeNeed);
     if (w3) {
       const c = toWorld((seg.x0 + seg.x1) / 2, (seg.y0 + seg.y1) / 2);
       A.drawSprite(ctx, w3, c.x, c.y, 1);
       if (seg.gate) this.drawTorch(ctx, seg, level);
       return;
     }
-    if (!this.wallSprites || this.wallSprites.level !== level) this.wallSprites = { level, map: new Map() };
+    const Q = spriteQ(this.treeNeed);
+    if (!this.wallSprites || this.wallSprites.level !== level || this.wallSprites.q !== Q) this.wallSprites = { level, q: Q, map: new Map() };
     const key = `${seg.x0},${seg.y0},${seg.x1},${seg.y1},${seg.tower ? 1 : 0}${seg.gate ? 1 : 0}`;
     let spr = this.wallSprites.map.get(key);
     if (!spr) {
@@ -1273,7 +1512,6 @@ export class TownView {
         }
       }
       x0 = Math.floor(x0 - 3); y0 = Math.floor(y0 - 3); x1 = Math.ceil(x1 + 3); y1 = Math.ceil(y1 + 3);
-      const Q = 2.5;
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round((x1 - x0) * Q)); cv.height = Math.max(1, Math.round((y1 - y0) * Q));
       const c = cv.getContext('2d');
@@ -1339,20 +1577,70 @@ export class TownView {
     return toWorld(b.x + size / 2, b.y + size / 2);
   }
 
+  // het beeld dat drawBuilding voor dit gebouw tekent, met de schaal (null voor steigers)
+  buildingImage(b) {
+    if (b.level === 0) return null;
+    const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null, this.treeNeed);
+    if (s3) return { spr: s3, sc: 1 };
+    return { spr: A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id, S3.has(b.type) ? 0 : this.treeNeed * bScale(b)), sc: bScale(b) };
+  }
+
+  // raakt het punt (wereldpixels) het getekende gebouw? Kijkt naar de doorzichtigheid van het beeld rond dat punt.
+  hitsBuilding(b, w) {
+    const size = BUILDINGS[b.type].size;
+    const c = toWorld(b.x + size / 2, b.y + size / 2);
+    const im = this.buildingImage(b);
+    if (!im) return Math.abs(w.x - c.x) < size * 22 && w.y < c.y + 6 && w.y > c.y - 30;
+    const { spr, sc } = im;
+    const x0 = c.x - spr.ax * sc; const y0 = c.y - spr.ay * sc;
+    const R = 2.5; // marge in wereldpixels: dunne torens en palen blijven raak te tikken
+    if (w.x < x0 - R || w.y < y0 - R || w.x > x0 + spr.w * sc + R || w.y > y0 + spr.h * sc + R) return false;
+    const cv = spr.cv; const kx = cv.width / (spr.w * sc); const ky = cv.height / (spr.h * sc);
+    if (!this.pickCv) { this.pickCv = document.createElement('canvas'); this.pickCv.width = 8; this.pickCv.height = 8; this.pickCtx = this.pickCv.getContext('2d', { willReadFrequently: true }); }
+    const g = this.pickCtx;
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, 8, 8);
+    try { g.drawImage(cv, (w.x - R - x0) * kx, (w.y - R - y0) * ky, 2 * R * kx, 2 * R * ky, 0, 0, 8, 8); } catch { return true; }
+    const d = g.getImageData(0, 0, 8, 8).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 165) return true; // slagschaduw op de grond (hooguit 60% dekking) telt niet
+    return false;
+  }
+
+  // alle gebouwen onder dit punt, het voorste eerst (zelfde volgorde als het tekenen)
+  buildingsAt(sx, sy) {
+    const s = this.state;
+    const w = this.cam.screenToWorld(sx, sy); const g = toGrid(w.x, w.y);
+    const out = [];
+    s.buildings.forEach((b, k) => {
+      if (!isPlaced(b) || b.hide) return;
+      const size = BUILDINGS[b.type].size;
+      const foot = g.gx >= b.x && g.gx < b.x + size && g.gy >= b.y && g.gy < b.y + size;
+      if (foot || this.hitsBuilding(b, w)) out.push({ b, d: b.x + b.y + size, k });
+    });
+    out.sort((a, b) => b.d - a.d || b.k - a.k);
+    return out.map((o) => o.b);
+  }
+
   pick(sx, sy) {
     const s = this.state;
     if (!s) return null;
     const w = this.cam.screenToWorld(sx, sy);
     const g = toGrid(w.x, w.y);
-    const list = s.buildings.filter(isPlaced).map((b) => ({ b, d: b.x + b.y + BUILDINGS[b.type].size }))
-      .sort((a, b) => b.d - a.d);
-    for (const { b } of list) {
-      const size = BUILDINGS[b.type].size;
-      if (g.gx >= b.x && g.gx < b.x + size && g.gy >= b.y && g.gy < b.y + size) return b;
-      const c = this.footprintCenter(b);
-      const h = b.level > 0 ? (SPRITE_H[b.type] || 55) : 30;
-      if (Math.abs(w.x - c.x) < size * 22 && w.y < c.y && w.y > c.y - h) return b;
+    const hits = this.buildingsAt(sx, sy);
+    if (hits.length) {
+      // staat het gekozen (of net nog gekozen) gebouw op deze plek, dan kiest een nieuwe tik het gebouw erachter, en zo rond.
+      // 'Net nog' = zelfde plek binnen 8 s, ook als het paneel intussen dicht ging (gsm).
+      const last = this.lastPick; const tnow = performance.now();
+      const ref = hits.some((b) => b.id === this.selected) ? this.selected
+        : last && tnow - last.t < 8000 && Math.hypot(sx - last.sx, sy - last.sy) < 24 ? last.id : null;
+      const k = hits.findIndex((b) => b.id === ref);
+      const b = k >= 0 ? hits[(k + 1) % hits.length] : hits[0];
+      this.lastPick = { sx, sy, t: tnow, id: b.id };
+      this.pickStack = hits.length > 1 ? hits.map((x) => x.id) : null;
+      if (hits.length > 1 && k < 0) this.hintBehind();
+      return b;
     }
+    this.pickStack = null;
     // een muurtegel aanklikken = het muurpaneel
     const wall = s.buildings.find((b) => b.type === 'wall');
     if (wall && ((s.walls || []).length || (s.gates || []).length)) {
@@ -1368,8 +1656,26 @@ export class TownView {
     return null;
   }
 
+  // eenmalige tip (hooguit 3 keer per toestel) wanneer er op de getikte plek meer dan één gebouw staat
+  hintBehind() {
+    let n = 0;
+    try { n = Number(localStorage.getItem('rvdv-hint-behind')) || 0; } catch { /* geen opslag */ }
+    if (n >= 3 || this.hintShown) return;
+    this.hintShown = true;
+    try { localStorage.setItem('rvdv-hint-behind', String(n + 1)); } catch { /* geen opslag */ }
+    if (this.onNotice) this.onNotice('Hier staan meer gebouwen: tik nog eens, of kies bij "Ook op deze plek".', 'magnifier');
+  }
+
   click(sx, sy, e, order) {
     if (!this.state) return;
+    if (this.moveB) {
+      // muis: klikken zet het gebouw meteen neer; aanraken: het gebouw gaat naar die plek (bevestigen met 'Zet hier')
+      if (order) { this.cancelMove(); return; }
+      this.moveB.gdx = 0; this.moveB.gdy = 0;
+      this.updateMove(sx, sy);
+      if (this.cam.lastType === 'mouse') this.dropMove();
+      return;
+    }
     const w = this.cam.screenToWorld(sx, sy);
     const tnow = performance.now();
     const dbl = !order && this.lastTap && tnow - this.lastTap.t < 420 && Math.hypot(sx - this.lastTap.x, sy - this.lastTap.y) < 28;
@@ -1504,12 +1810,177 @@ export class TownView {
     if (key(sel) !== before && this.onSelChange) this.onSelChange(sel);
   }
 
+  // ingedrukt houden = je hele leger kiezen
   longPress(sx, sy) {
-    if (this.placing || this.landMode || this.wallMode || !this.state) return;
-    if (!this.selectArmy()) return;
+    if (this.placing || this.landMode || this.wallMode || this.moveB || !this.state || this.battleMode) return false;
+    if (!this.selectArmy()) return false;
     const w = this.cam.screenToWorld(sx, sy);
     this.pressMark = { x: w.x, y: w.y, at: performance.now() };
     if (navigator.vibrate) try { navigator.vibrate(30); } catch { /* geen trilfunctie */ }
+    return false;
+  }
+
+  // ---------- gebouw verplaatsen (knop Verplaatsen in het gebouwpaneel) ----------
+  // Het gebouw staat eerst doorschijnend op zijn eigen plek. Tik (of klik) op de nieuwe plek, of sleep het gebouw zelf;
+  // met een muis zet een klik het meteen neer, op een aanraakscherm bevestig je met 'Zet hier' (dropMove).
+  startMove(b) {
+    if (!b || b.type === 'tc' || !isPlaced(b)) return;
+    this.setSel(null);
+    this.selected = b.id;
+    this.moveB = { id: b.id, size: BUILDINGS[b.type].size, x: b.x, y: b.y, ok: false, same: true, gdx: 0, gdy: 0, sx: null, sy: null, dragging: false };
+    if (this.onMoveChange) this.onMoveChange(this.moveB);
+  }
+
+  // muurstukken (of een poort) verplaatsen: tiles = de tegels, (ai, aj) = het stuk waarop je tikte (ankerpunt)
+  startWallMove(tiles, ai, aj, label) {
+    if (!tiles || !tiles.length) return;
+    this.setSel(null);
+    this.selected = null;
+    this.moveB = { kind: 'walls', tiles, ai, aj, label, size: 1, x: ai, y: aj, ok: false, same: true, gdx: 0, gdy: 0, sx: null, sy: null, dragging: false };
+    if (this.onMoveChange) this.onMoveChange(this.moveB);
+  }
+
+  cancelMove() {
+    if (!this.moveB) return;
+    this.moveB = null;
+    if (this.onMoveEnd) this.onMoveEnd();
+  }
+
+  updateMove(sx, sy) {
+    const m = this.moveB;
+    if (!m || !this.state) return;
+    m.sx = sx; m.sy = sy;
+    const w = this.cam.screenToWorld(sx + m.gdx, sy + m.gdy);
+    const g = toGrid(w.x, w.y);
+    const x = Math.floor(g.gx - m.size / 2 + 0.5); const y = Math.floor(g.gy - m.size / 2 + 0.5);
+    const before = `${m.x},${m.y},${m.ok}`;
+    m.x = x; m.y = y;
+    if (m.kind === 'walls') {
+      m.same = x === m.ai && y === m.aj;
+      m.ok = !m.same && !checkMoveWalls(this.state, m.tiles, x - m.ai, y - m.aj);
+    } else {
+      const b = this.state.buildings.find((q) => q.id === m.id);
+      if (!b) { this.cancelMove(); return; }
+      m.same = b.x === x && b.y === y;
+      m.ok = !m.same && !checkMove(this.state, m.id, x, y);
+    }
+    if (before !== `${m.x},${m.y},${m.ok}` && this.onMoveChange) this.onMoveChange(m);
+  }
+
+  // neerdrukken op het doorschijnende gebouw = het verslepen (in plaats van de kaart te verschuiven)
+  grabMove(sx, sy) {
+    const m = this.moveB;
+    // met een muis volgt het gebouw de muis al en zet een klik het neer: niets vast te pakken
+    if (!m || !this.state || this.cam.lastType === 'mouse') return false;
+    const w = this.cam.screenToWorld(sx, sy);
+    const g = toGrid(w.x, w.y);
+    if (m.kind === 'walls') { // op een van de doorschijnende muurstukken
+      const dx = m.x - m.ai; const dy = m.y - m.aj;
+      const hit = m.tiles.some(([i, j]) => g.gx >= i + dx - 0.2 && g.gx < i + dx + 1.2 && g.gy >= j + dy - 0.2 && g.gy < j + dy + 1.2);
+      if (!hit) return false;
+      const c = toWorld(m.x + 0.5, m.y + 0.5); const sc = this.cam.worldToScreen(c.x, c.y);
+      m.gdx = sc.x - sx; m.gdy = sc.y - sy;
+      m.dragging = true;
+      return true;
+    }
+    const c = toWorld(m.x + m.size / 2, m.y + m.size / 2);
+    const b = this.state.buildings.find((q) => q.id === m.id);
+    const h = b && b.level > 0 ? (SPRITE_H[b.type] || 55) : 30;
+    const onFoot = g.gx >= m.x - 0.15 && g.gx < m.x + m.size + 0.15 && g.gy >= m.y - 0.15 && g.gy < m.y + m.size + 0.15;
+    const onSprite = Math.abs(w.x - c.x) < m.size * 24 && w.y < c.y + 6 && w.y > c.y - h;
+    if (!onFoot && !onSprite) return false;
+    const sc = this.cam.worldToScreen(c.x, c.y);
+    m.gdx = sc.x - sx; m.gdy = sc.y - sy;
+    m.dragging = true;
+    return true;
+  }
+
+  holdDrag(ph, sx, sy) {
+    const m = this.moveB;
+    if (!m) return;
+    if (ph === 'move') this.updateMove(sx, sy);
+    else { if (ph === 'end') this.updateMove(sx, sy); m.dragging = false; }
+  }
+
+  // neerzetten (enkel als de nieuwe plek mag); anders blijft de verplaatsstand open
+  dropMove() {
+    const m = this.moveB;
+    if (!m) return;
+    if (m.kind === 'walls') {
+      if (!m.ok) {
+        const why = m.same ? null : checkMoveWalls(this.state, m.tiles, m.x - m.ai, m.y - m.aj);
+        if (this.onNotice) this.onNotice(why || 'Kies eerst een nieuwe plek voor de muur.');
+        return;
+      }
+      this.moveB = null;
+      if (this.onMoveWalls) this.onMoveWalls(m.tiles, m.x - m.ai, m.y - m.aj);
+      if (this.onMoveEnd) this.onMoveEnd();
+      return;
+    }
+    if (!m.ok) { if (this.onNotice) this.onNotice(m.same ? 'Kies eerst een nieuwe plek voor het gebouw.' : 'Daar kan het gebouw niet staan: kies vrije bouwgrond.'); return; }
+    this.moveB = null;
+    if (this.onMove) this.onMove(m.id, m.x, m.y);
+    if (this.onMoveEnd) this.onMoveEnd();
+  }
+
+  // tijdens het slepen: kaart mee laten schuiven aan de rand van het scherm
+  moveEdgePan(dt) {
+    const m = this.moveB;
+    if (!m || !m.dragging || m.sx == null) return;
+    const cam = this.cam; const e = 44;
+    let vx = 0; let vy = 0;
+    if (m.sx < e) vx = -1; else if (m.sx > cam.w - e) vx = 1;
+    if (m.sy < e + 30) vy = -1; else if (m.sy > cam.h - e) vy = 1;
+    if (!vx && !vy) return;
+    const sp = (0.45 * dt) / cam.zoom;
+    cam.x += vx * sp; cam.y += vy * sp;
+    cam.clamp();
+    this.updateMove(m.sx, m.sy);
+  }
+
+  // het gebouw op zijn nieuwe plek (doorschijnend), met een groene of rode voet
+  drawMoveGhost(ctx, t, now) {
+    const m = this.moveB;
+    if (!m || !this.state) return;
+    if (m.kind === 'walls') { this.drawWallGhost(ctx, m); return; }
+    const b = this.state.buildings.find((q) => q.id === m.id);
+    if (!b) { this.moveB = null; return; }
+    const c = toWorld(m.x + m.size / 2, m.y + m.size / 2);
+    const ok = m.ok || m.same;
+    A.diamond(ctx, c.x, c.y, m.size * A.TW, m.size * A.TH, ok ? 'rgba(80,220,90,0.35)' : 'rgba(230,60,50,0.4)', ok ? '#5fe06a' : '#e64a3c');
+    ctx.save();
+    ctx.globalAlpha = ok ? 0.82 : 0.5;
+    const sel = this.selected; this.selected = null;
+    this.drawBuilding(ctx, { ...b, x: m.x, y: m.y }, null, t, now, false);
+    this.selected = sel;
+    ctx.restore();
+  }
+
+  // doorschijnende muurstukken op hun nieuwe plek: een blok per tegel (steen of hout volgens het muurniveau), groene of rode voet
+  drawWallGhost(ctx, m) {
+    const dx = m.x - m.ai; const dy = m.y - m.aj;
+    const ok = m.ok || m.same;
+    const wall = this.state.buildings.find((b) => b.type === 'wall');
+    const stone = wall && wall.level >= 3;
+    const gates = new Set(this.state.gates || []);
+    const H = stone ? 20 : 17;
+    const list = m.tiles.map(([i, j]) => ({ i: i + dx, j: j + dy, gate: gates.has(tileIndex(i, j)) })).sort((a, b) => a.i + a.j - (b.i + b.j));
+    for (const q of list) {
+      const c = toWorld(q.i + 0.5, q.j + 0.5);
+      A.diamond(ctx, c.x, c.y, A.TW, A.TH, ok ? 'rgba(80,220,90,0.35)' : 'rgba(230,60,50,0.4)', ok ? '#5fe06a' : '#e64a3c');
+    }
+    ctx.save();
+    ctx.globalAlpha = ok ? 0.8 : 0.5;
+    for (const q of list) {
+      const c = toWorld(q.i + 0.5, q.j + 0.5);
+      const w = A.TW * 0.34; const hh = A.TH * 0.34; const h = q.gate ? H * 0.35 : H;
+      const top = stone ? '#cfc7b6' : '#a87a48'; const left = stone ? '#a39b8a' : '#7f5a33'; const right = stone ? '#8a8373' : '#6b4a2a';
+      ctx.fillStyle = left; ctx.beginPath(); ctx.moveTo(c.x - w, c.y); ctx.lineTo(c.x, c.y + hh); ctx.lineTo(c.x, c.y + hh - h); ctx.lineTo(c.x - w, c.y - h); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = right; ctx.beginPath(); ctx.moveTo(c.x + w, c.y); ctx.lineTo(c.x, c.y + hh); ctx.lineTo(c.x, c.y + hh - h); ctx.lineTo(c.x + w, c.y - h); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = top; ctx.beginPath(); ctx.moveTo(c.x, c.y - hh - h); ctx.lineTo(c.x + w, c.y - h); ctx.lineTo(c.x, c.y + hh - h); ctx.lineTo(c.x - w, c.y - h); ctx.closePath(); ctx.fill();
+      if (q.gate) { ctx.strokeStyle = '#6b4224'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c.x - w * 0.6, c.y - h - 2); ctx.lineTo(c.x + w * 0.6, c.y - h - 2); ctx.stroke(); }
+    }
+    ctx.restore();
   }
 
   // waar staat het eerste figuurtje van die soort in een groep?
@@ -1704,9 +2175,8 @@ export class TownView {
     this.fogAt = now;
     if (!s || !s.terr) { this.explored = null; this.visibleArr = null; return; }
     const ex = exploredNow(s, now);
-    const k = buildRing(s);
-    const vis = new Uint8Array(T_W * T_W);
-    for (let j = T_MIN; j < T_MAX; j++) for (let i = T_MIN; i < T_MAX; i++) if (ringOf(i, j) <= k + 3) vis[tileIndex(i, j)] = 1;
+    // je eigen stad (bouwgrond, muren en alles erbinnen) en een rand errond zie je altijd
+    const vis = homeSight(s).slice();
     for (const g of s.field || []) {
       const p = groupPos(g, now);
       const r = groupVision(g);
@@ -1815,39 +2285,54 @@ export class TownView {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, cv.width, cv.height);
     g.drawImage(gnd.cv, 0, 0);
-    if (alpha >= 0.02) {
-      g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
-      g.beginPath();
-      const Ls = 26 * (Math.round(len * 10) / 10);
-      const rx = Ls * 0.55 + 6;
-      for (const d of this.visTrees) {
-        const p = toWorld(d.gx, d.gy);
-        const ex = p.x + 4 + Ls * 0.5; const ey = p.y + 2 + Ls * 0.2;
-        g.moveTo(ex + rx * Math.cos(0.38), ey + rx * Math.sin(0.38));
-        g.ellipse(ex, ey, rx, 5, 0.38, 0, Math.PI * 2);
-      }
-      g.fillStyle = `rgba(20,32,8,${Math.round(alpha * 40) / 40})`;
-      g.fill('nonzero');
-    }
+    g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
+    this.paintTreeShadows(g, null, len, alpha);
     if (dress) {
       g.setTransform(BAKE, 0, 0, BAKE, -this.groundOrigin.x * BAKE, -this.groundOrigin.y * BAKE);
       g.drawImage(dress.cv, dress.x, dress.y, dress.W, dress.H);
     }
-    this.groundComp = { cv, key };
+    this.groundComp = { cv, key, len, alpha };
     return cv;
   }
 
-  // fijne grassprietjes en korrels over de grond zodra je dichtbij kijkt (de gebakken grond wordt dan wazig)
-  drawGroundDetail(ctx, v) {
-    const zf = this.cam.zoom * this.cam.dpr;
-    if (zf < 1.3 || (FX.LOW_POWER && this.cam.zoom < 1.8)) return;
-    if (!this.detailPat) this.detailPat = ctx.createPattern(groundDetail(), 'repeat');
-    ctx.save();
-    ctx.globalCompositeOperation = 'soft-light';
-    ctx.globalAlpha = Math.min(0.85, (zf - 1.3) * 0.9);
-    ctx.fillStyle = this.detailPat;
-    ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
-    ctx.restore();
+  // schaduwen van de bomen op de grond (R = enkel dit stuk, null = alles)
+  paintTreeShadows(g, R, len, alpha) {
+    if (alpha < 0.02) return;
+    g.beginPath();
+    const Ls = 26 * (Math.round(len * 10) / 10);
+    const rx = Ls * 0.55 + 6;
+    for (const d of this.visTrees) {
+      const p = toWorld(d.gx, d.gy);
+      const ex = p.x + 4 + Ls * 0.5; const ey = p.y + 2 + Ls * 0.2;
+      if (R && (ex < R.x0 - rx || ex > R.x1 + rx || ey < R.y0 - 8 || ey > R.y1 + 8)) continue;
+      g.moveTo(ex + rx * Math.cos(0.38), ey + rx * Math.sin(0.38));
+      g.ellipse(ex, ey, rx, 5, 0.38, 0, Math.PI * 2);
+    }
+    g.fillStyle = `rgba(20,32,8,${Math.round(alpha * 40) / 40})`;
+    g.fill('nonzero');
+  }
+
+  // Ingezoomd: de grond in scherpe stukken op schermresolutie (zie groundhd.js), over de gebakken grond heen.
+  drawGroundHD(ctx, vis, dress) {
+    const need = this.cam.zoom * this.cam.dpr;
+    if (!GH.hdTier(need) || !this.groundComp) return;
+    if (!this.hdg) this.hdg = new GH.HDGround();
+    const L = this.groundComp;
+    const o = this.groundOrigin;
+    const bounds = { x0: o.x, y0: o.y, x1: o.x + this.ground.W, y1: o.y + this.ground.H };
+    const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
+    this.hdPending = this.hdg.draw(ctx, vis, need, bounds, L.key, (g, R, S) => {
+      this.paintGround(g, R, S);
+      this.paintTreeShadows(g, R, L.len, L.alpha);
+      if (dress) dress.paint(g, R, S);
+      // fijne korrel over alles (stenen, aarde, gras), enkel binnen het gebied
+      const WM = g.getTransform();
+      g.save();
+      g.transform(...ISO); g.beginPath(); g.rect(T_MIN, T_MIN, T_W, T_W); g.setTransform(WM); g.clip();
+      g.globalCompositeOperation = 'overlay';
+      for (const [pat, a] of GH.hdPatterns(g, 'grain', S)) { g.globalAlpha = a; g.fillStyle = pat; g.fillRect(R.x0, R.y0, R.x1 - R.x0, R.y1 - R.y0); }
+      g.restore();
+    });
   }
 
   // ligt er in beeld ergens mist? (anders hoeft die laag niet getekend te worden)
@@ -1934,6 +2419,7 @@ export class TownView {
     this.birds.update(dt);
     this.clouds.update(dt);
     this.adaptQuality(dt);
+    if (this.moveB && this.moveB.dragging) this.moveEdgePan(dt);
     if (!this.battleMode && (now - this.fogAt > 120 || now < this.fogAt)) this.updateFog(now);
     cam.apply(ctx);
     const gnd = this.ground;
@@ -1945,15 +2431,16 @@ export class TownView {
     // aankleding (straten, paadjes, tuintjes, zachte schaduwen) zit mee in de grondafbeelding; in een slag gewone schaduwen
     const dress = this.battleMode ? null : this.townDress(segs, wallLevel, light);
     drawSub(ctx, this.groundLayer(this.light, dress), BAKE, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H, vis);
-    this.drawGroundDetail(ctx, vis);
+    this.drawGroundHD(ctx, vis, dress);
     this.drawPond(ctx, t);
     this.drawLakes(ctx, t);
 
     const v = this.viewRect();
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
     this.treeMip = cam.zoom * cam.dpr < 0.95;
+    this.treeNeed = cam.zoom * cam.dpr;
     if (this.battleMode) this.underlay(ctx, t, now); // slagveld: opstelplaats en looplijnen op de grond
-    else if (this.placing) this.drawGrid(ctx); else this.drawBuildArea(ctx);
+    else if (this.placing || this.moveB) this.drawGrid(ctx); else this.drawBuildArea(ctx);
     if (this.landMode) this.drawLandLots(ctx);
     if (this.wallMode) this.drawWallPreview(ctx);
     if (this.gateMode) this.drawGatePreview(ctx);
@@ -2035,7 +2522,9 @@ export class TownView {
         case 'tree': this.drawTree(ctx, it.tr, t, it.shake); break;
         case 'stump': this.drawStump(ctx, it.st); break;
         case 'wall': this.drawWallPiece(ctx, it.seg, wallLevel); break;
-        case 'building': this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, emit); break;
+        case 'building':
+          if (this.moveB && it.b.id === this.moveB.id) { ctx.save(); ctx.globalAlpha = 0.35; this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, false); ctx.restore(); } else this.drawBuilding(ctx, it.b, jobs.get(it.b.id), t, now, emit);
+          break;
         case 'walker': this.drawWalker(ctx, it.w, t); break;
         case 'sheep': this.drawSheep(ctx, it.sh, t); break;
         case 'node': this.drawNode(ctx, it.n, t, emit); break;
@@ -2050,6 +2539,7 @@ export class TownView {
         default: { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, t); }
       }
     }
+    this.drawSelXray(ctx, t);
 
     // vuurwerk bij een nieuw tijdperk
     const pn = performance.now();
@@ -2068,6 +2558,7 @@ export class TownView {
     if (this.flutter && night >= 0.5) this.flutter.draw(ctx, t, night);
 
     if (this.placing && this.hoverTile) this.drawGhost(ctx);
+    if (this.moveB) this.drawMoveGhost(ctx, t, now);
     for (const b of s.buildings) {
       const job = jobs.get(b.id);
       if (!job || !isPlaced(b)) continue;
@@ -2167,11 +2658,15 @@ export class TownView {
     const spr = this.trees[tr.kind ?? tr.v];
     let sway = Math.sin(t * 0.0012 + tr.gx) * 0.6;
     if (shake) sway += Math.sin(t * 0.05) * 1.6;
+    // 3D-boom (zelfde stijl als de gebouwen); de schaduw zit al in de grondlaag
+    const d3 = S3.getProp('tree', tr.kind ?? tr.v, this.treeNeed);
+    if (d3) { ctx.drawImage(d3.cv, p.x - d3.ax + sway, p.y - d3.ay, d3.w, d3.h); return; }
     ctx.drawImage(this.treeMip ? spr.small : spr.cv, p.x - spr.ax + sway, p.y - spr.ay, spr.w, spr.h);
   }
 
   drawStump(ctx, st) {
     const p = toWorld(st.gx, st.gy);
+    if (A.prop3d(ctx, 'stump', Math.floor(st.gx * 7 + st.gy * 3) & 7, p.x, p.y, 0.9)) return;
     ctx.fillStyle = 'rgba(20,30,10,0.25)'; ctx.beginPath(); ctx.ellipse(p.x + 1, p.y, 6, 2.6, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#6b4523'; ctx.fillRect(p.x - 3.5, p.y - 4, 7, 4);
     ctx.fillStyle = '#d9b27a'; ctx.beginPath(); ctx.ellipse(p.x, p.y - 4, 3.5, 1.6, 0, 0, Math.PI * 2); ctx.fill();
@@ -2200,20 +2695,25 @@ export class TownView {
   drawDepositInner(ctx, d, t) {
     const p = { x: 0, y: 0 };
     if (d.kind === 'gold') {
-      A.rock(ctx, p.x - 8, p.y + 2, 2.8); A.rock(ctx, p.x + 9, p.y + 4, 2.1); A.rock(ctx, p.x, p.y + 8, 1.6);
-      ctx.fillStyle = '#f2c230';
-      for (const [dx, dy, r] of [[-12, -9, 2.2], [-5, -13, 1.8], [2, -7, 2], [10, -3, 1.6], [-1, 2, 1.5], [6, -9, 1.3]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      if (A.prop3d(ctx, 'gold', d.id % 8, p.x - 8, p.y + 2, 2.4)) { A.prop3d(ctx, 'gold', (d.id + 2) % 8, p.x + 9, p.y + 4, 1.8); A.prop3d(ctx, 'gold', (d.id + 5) % 8, p.x, p.y + 9, 1.3); } else {
+        A.rock(ctx, p.x - 8, p.y + 2, 2.8); A.rock(ctx, p.x + 9, p.y + 4, 2.1); A.rock(ctx, p.x, p.y + 8, 1.6);
+        ctx.fillStyle = '#f2c230';
+        for (const [dx, dy, r] of [[-12, -9, 2.2], [-5, -13, 1.8], [2, -7, 2], [10, -3, 1.6], [-1, 2, 1.5], [6, -9, 1.3]]) { ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, r, 0, Math.PI * 2); ctx.fill(); }
+      }
       const tw = Math.sin(t * 0.005 + d.id * 3);
       if (tw > 0.5) { ctx.fillStyle = `rgba(255,255,230,${(tw - 0.5) * 2})`; ctx.fillRect(p.x - 6, p.y - 15, 2, 2); ctx.fillRect(p.x + 3, p.y - 9, 1.6, 1.6); }
     } else if (d.kind === 'stone') {
       A.rock(ctx, p.x - 10, p.y + 1, 3.2); A.rock(ctx, p.x + 7, p.y, 2.8); A.rock(ctx, p.x - 1, p.y + 9, 2.2); A.rock(ctx, p.x + 13, p.y + 7, 1.5);
     } else if (d.kind === 'wood') {
       for (const [dx, dy, sc] of [[-12, 2, 1.75], [10, 0, 1.6], [-1, 9, 1.85]]) A.broadleaf(ctx, p.x + dx, p.y + dy, sc, 0.15);
-      ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(p.x + 14 - i, p.y + 12 - i * 3); ctx.lineTo(p.x + 26 - i, p.y + 9 - i * 3); ctx.stroke(); }
-      ctx.lineCap = 'butt';
+      if (!A.prop3d(ctx, 'logs', 0, p.x + 20, p.y + 11, 0.8)) {
+        ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(p.x + 14 - i, p.y + 12 - i * 3); ctx.lineTo(p.x + 26 - i, p.y + 9 - i * 3); ctx.stroke(); }
+        ctx.lineCap = 'butt';
+      }
     } else {
       for (const [dx, dy] of [[-12, 0], [0, -5], [11, 1], [-4, 8], [8, 9]]) {
+        if (A.prop3d(ctx, 'berry', (dx + 20) % 3, p.x + dx, p.y + dy, 0.85)) continue;
         A.bush(ctx, p.x + dx, p.y + dy, 1.6);
         ctx.fillStyle = '#d6324a';
         for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(p.x + dx - 3 + i * 2, p.y + dy - 4 - (i % 2) * 2, 1.1, 0, Math.PI * 2); ctx.fill(); }
@@ -2241,7 +2741,11 @@ export class TownView {
     }
     // dorp uit vooraf getekende lagen (achterkant en voorkant van de palissade), daartussen vuur en barbaren
     const spr = campSprites();
-    ctx.drawImage(spr.back, -spr.w / 2, -spr.ay, spr.w, spr.h);
+    // 3D (zelfde stijl als de stad) zodra beide lagen klaar zijn, anders de getekende versie
+    const cm = ctx.getTransform(); const cneed = Math.hypot(cm.a, cm.b);
+    const b3 = S3.getProp('campback', 0, cneed); const f3 = b3 && S3.getProp('campfront', 0, cneed);
+    if (b3 && f3) ctx.drawImage(b3.cv, -b3.ax, -b3.ay, b3.w, b3.h);
+    else ctx.drawImage(spr.back, -spr.w / 2, -spr.ay, spr.w, spr.h);
     A.fire(ctx, p.x - 4, p.y + 4, 1.15, t);
     A.smoke(ctx, p.x - 26, p.y - 30, t, 3, 0.7);
     A.smoke(ctx, p.x + 24, p.y - 34, t, 5, 0.7);
@@ -2259,7 +2763,8 @@ export class TownView {
         facing(ctx, p.x + dx, dir, () => A.person(ctx, p.x + dx, p.y + dy + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: ph % 2 ? '#4f3a2a' : '#5b4636', weapon: ph === 2 || ph === 5 ? 'spear' : 'sword', barb: true, skin: 1 + (ph % 3) }));
       }
     }
-    ctx.drawImage(spr.front, -spr.w / 2, -spr.ay, spr.w, spr.h);
+    if (b3 && f3) ctx.drawImage(f3.cv, -f3.ax, -f3.ay, f3.w, f3.h);
+    else ctx.drawImage(spr.front, -spr.w / 2, -spr.ay, spr.w, spr.h);
     if (!busy) {
       // hoeveel barbaren wonen hier? (altijd zichtbaar, zodat je weet waar je aan begint)
       const txt = `${Math.max(1, campSize(s))} barbaren`;
@@ -2352,7 +2857,10 @@ export class TownView {
     const ls = lastSwing(sc.f, u.side, u.i, u.k, now);
     const swing = ls != null && now - ls < 340 ? Math.sin(((now - ls) / 340) * Math.PI) : 0;
     const q = toWorld(u.x + u.ux * swing * 0.16, u.y + u.uy * swing * 0.16);
-    this.drawFightFigure(ctx, u, q.x, q.y, t, swing > 0 || u.charging, dir, ls != null ? (now - ls) / 340 : t * 0.004);
+    // aanvalsbeweging: fase tussen twee slagen (0 = de slag of het schot), daarvoor in de aanslag
+    const R = (UNITS[u.k] && UNITS[u.k].rate) || 1500;
+    const atk = !u.charging && FIG.hasAttackAnim(u.k) ? (ls != null && now - ls < R ? (now - ls) / R : FIG.attackReady(u.k)) : null;
+    this.drawFightFigure(ctx, u, q.x, q.y, t, (swing > 0 && atk == null) || u.charging, dir, ls != null ? (now - ls) / 340 : t * 0.004, atk);
     // levensbalk (pas na de eerste treffer, anders wordt het te druk)
     if (u.hp >= u.max) return;
     const tall = u.k === 'elephant' ? 50 : UNITS[u.k] && UNITS[u.k].type === 'cav' ? 38 : u.k === 'boar' ? 22 : 30;
@@ -2377,20 +2885,18 @@ export class TownView {
         const f = age / 380;
         const x = a.x + (b.x - a.x) * f; const y = a.y - 14 + (b.y - a.y + 6) * f - Math.sin(f * Math.PI) * 18;
         const ang = Math.atan2((b.y - a.y + 6) - Math.cos(f * Math.PI) * 18 * Math.PI, b.x - a.x);
-        ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
-        if (from.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 2.4, 0, Math.PI * 2); ctx.fill(); }
-        else { ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(4, 0); ctx.stroke(); ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(5.5, 0); ctx.lineTo(3.5, -1.2); ctx.lineTo(3.5, 1.2); ctx.fill(); ctx.fillStyle = '#f4efe0'; ctx.fillRect(-5.5, -1, 1.6, 2); }
-        ctx.restore();
+        // bij uitzoomen (gsm) groter, zodat je de pijlen blijft zien
+        A.shot(ctx, x, y, ang, 0.85 * Math.max(1, 1 / this.cam.zoom), from.k === 'stonethrower' ? 'stone' : 'arrow');
       }
     }
   }
 
-  drawFightFigure(ctx, u, x, y, t, swinging, dir, sp = 0) {
+  drawFightFigure(ctx, u, x, y, t, swinging, dir, sp = 0, atk = null) {
     facing(ctx, x, dir, () => {
-      if (u.k === 'barbarian') A.person(ctx, x, y, { s: 1.05, body: u.i % 2 ? '#4f3a2a' : '#5b4636', weapon: u.i % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.i % 3), walking: swinging, phase: sp * Math.PI });
+      if (u.k === 'barbarian') A.person(ctx, x, y, { s: 1.05, body: u.i % 2 ? '#4f3a2a' : '#5b4636', weapon: u.i % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.i % 3), walking: swinging, phase: sp * Math.PI, attack: atk });
       else if (u.k === 'boar') FIG.boar(ctx, x, y, { s: 1.15, walking: swinging, phase: sp * 6 });
-      else if (u.k === 'villager') A.person(ctx, x, y, { s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe', working: swinging, phase: sp * Math.PI * 2 });
-      else this.drawSoldier(ctx, { kind: u.k, gx: u.x, gy: u.y, walking: swinging }, x, y, t);
+      else if (u.k === 'villager') A.person(ctx, x, y, { s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe', working: swinging, phase: sp * Math.PI * 2, attack: atk });
+      else this.drawSoldier(ctx, { kind: u.k, gx: u.x, gy: u.y, walking: swinging, attack: atk }, x, y, t);
     });
   }
 
@@ -2806,7 +3312,7 @@ export class TownView {
     for (const b of s.buildings) {
       if (!isPlaced(b) || b.level === 0) continue;
       const c = this.footprintCenter(b);
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null);
       const spr = s3 || A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id);
       const k = s3 ? 1 : bScale(b);
       for (const [lx, ly, r] of spr.lights || []) {
@@ -2830,7 +3336,7 @@ export class TownView {
       FX.drawGlow(ctx, px, py, 22, FX.FIRE, night * (0.75 + Math.sin(t * 0.015 + px) * 0.15));
     }
     // kampvuur van de barbaren en groepen in het veld
-    if (s.terr && this.terr.camp && campAlive(s, this.now) && this.isExplored(this.terr.camp.x, this.terr.camp.y)) {
+    if (s.terr && s.terr.camp && this.terr.camp && campAlive(s, this.now) && this.isExplored(this.terr.camp.x, this.terr.camp.y)) {
       const p = toWorld(this.terr.camp.x, this.terr.camp.y);
       FX.drawGlow(ctx, p.x - 6, p.y - 2, 46, FX.FIRE, night * (0.8 + Math.sin(t * 0.013) * 0.15));
     }
@@ -2878,12 +3384,14 @@ export class TownView {
     if (d.kind === 'bush') A.bush(ctx, p.x, p.y, 1.2);
     else if (d.kind === 'rock') A.rock(ctx, p.x, p.y, 1.2);
     else if (d.kind === 'stone') A.rock(ctx, p.x, p.y, d.s);
+    else if (d.kind === 'gold' && A.prop3d(ctx, 'gold', Math.floor(d.gx * 5 + d.gy * 3) & 7, p.x, p.y + 1.2 * d.s, d.s)) { /* 3D */ }
     else if (d.kind === 'gold') {
       A.rock(ctx, p.x, p.y, d.s);
       ctx.fillStyle = '#f2c230';
       ctx.beginPath(); ctx.arc(p.x - 2, p.y - 5 * d.s, 1.6, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(p.x + 3, p.y - 3 * d.s, 1.2, 0, Math.PI * 2); ctx.fill();
       if (Math.sin(t * 0.003 + d.gx * 7) > 0.92) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x - 2.5, p.y - 6 * d.s, 1.5, 1.5); }
+    } else if (d.kind === 'berry' && A.prop3d(ctx, 'berry', Math.floor(d.gx * 3 + d.gy) % 3, p.x, p.y, 0.7)) { /* 3D */
     } else if (d.kind === 'berry') {
       A.bush(ctx, p.x, p.y, 1.4);
       ctx.fillStyle = '#d6324a';
@@ -2911,6 +3419,49 @@ export class TownView {
     }));
   }
 
+  // schermvak (wereldpixels) van het getekende gebouw
+  buildingRect(b) {
+    const size = BUILDINGS[b.type].size;
+    const c = toWorld(b.x + size / 2, b.y + size / 2);
+    const im = this.buildingImage(b);
+    if (!im) return { x0: c.x - size * 32, y0: c.y - 50, x1: c.x + size * 32, y1: c.y + size * 16, c };
+    const { spr, sc } = im;
+    return { x0: c.x - spr.ax * sc, y0: c.y - spr.ay * sc, x1: c.x - spr.ax * sc + spr.w * sc, y1: c.y - spr.ay * sc + spr.h * sc, c, im };
+  }
+
+  // het gekozen gebouw doorschijnend bovenop tekenen als een ander gebouw ervoor staat:
+  // zo zie je ook een klein gebouw achter het stadscentrum (dat je niet kunt verplaatsen)
+  drawSelXray(ctx, t) {
+    const s = this.state;
+    if (this.selected == null || this.moveB || this.battleMode) return;
+    const k = s.buildings.findIndex((x) => x.id === this.selected);
+    const b = s.buildings[k];
+    if (!b || !isPlaced(b) || b.hide || b.type === 'wall') return;
+    const size = BUILDINGS[b.type].size; const d = b.x + b.y + size;
+    const r = this.buildingRect(b);
+    const area = Math.max(1, (r.x1 - r.x0) * (r.y1 - r.y0));
+    let cover = 0;
+    s.buildings.forEach((o, j) => {
+      if (o === b || !isPlaced(o) || o.hide || o.type === 'wall') return;
+      const od = o.x + o.y + BUILDINGS[o.type].size;
+      if (od < d || (od === d && j < k)) return; // staat erachter
+      const q = this.buildingRect(o);
+      const w = Math.min(r.x1, q.x1) - Math.max(r.x0, q.x0); const h = Math.min(r.y1, q.y1) - Math.max(r.y0, q.y0);
+      if (w > 0 && h > 0) cover = Math.max(cover, (w * h) / area);
+    });
+    if (cover < 0.2) return;
+    const pulse = 0.7 + Math.sin(t * 0.006) * 0.2;
+    ctx.save();
+    if (r.im) { ctx.globalAlpha = 0.55; A.drawSprite(ctx, r.im.spr, r.c.x, r.c.y, r.im.sc); }
+    const w = (size * A.TW) / 2 + 5; const hh = (size * A.TH) / 2 + 2.5;
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = 'rgba(255,210,80,0.9)'; ctx.shadowBlur = 8;
+    ctx.strokeStyle = `rgba(255,228,120,${pulse})`; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(r.c.x - w, r.c.y); ctx.lineTo(r.c.x, r.c.y - hh); ctx.lineTo(r.c.x + w, r.c.y); ctx.lineTo(r.c.x, r.c.y + hh); ctx.closePath(); ctx.stroke();
+    ctx.restore();
+  }
+
   drawBuilding(ctx, b, job, t, now, emit) {
     const size = BUILDINGS[b.type].size;
     const c = toWorld(b.x + size / 2, b.y + size / 2);
@@ -2925,9 +3476,9 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null, this.treeNeed);
       if (s3) A.drawSprite(ctx, s3, c.x, c.y, 1);
-      else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id), c.x, c.y, bScale(b));
+      else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id, S3.has(b.type) ? 0 : this.treeNeed * bScale(b)), c.x, c.y, bScale(b));
       if (s3) this.drawOverlay3d(ctx, b, c, t, s3); else this.drawOverlay(ctx, b, c, t);
       if (sel) {
         // voorste randen van de voet in goud, over het gebouw heen: zo zie je duidelijk wat gekozen is
@@ -2950,10 +3501,22 @@ export class TownView {
   // vlag, rook en gloed op de ankerpunten van het 3D-model
   drawOverlay3d(ctx, b, c, t, s3) {
     const a = s3.anchors || {};
+    if (a.blades) {
+      // wieken van het molentje op de boerderij (draaien)
+      ctx.save(); ctx.translate(c.x + a.blades[0], c.y + a.blades[1]); ctx.rotate(t * 0.0015);
+      ctx.fillStyle = '#efe6cf'; ctx.strokeStyle = '#6b4527'; ctx.lineWidth = 0.6;
+      for (let i = 0; i < 4; i++) {
+        ctx.rotate(Math.PI / 2);
+        ctx.fillStyle = '#5a3a1e'; ctx.fillRect(0, -0.6, 12, 1.2);
+        ctx.fillStyle = '#efe6cf'; ctx.fillRect(3, 0.6, 9, 2.6); ctx.strokeRect(3, 0.6, 9, 2.6);
+      }
+      ctx.fillStyle = '#4d4f54'; ctx.beginPath(); ctx.arc(0, 0, 1.4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
     if (a.flag) A.flag(ctx, c.x + a.flag[0], c.y + a.flag[1], b.type === 'tower' ? 14 : 17, this.team, t + b.id * 300);
     if (a.smoke && (b.type !== 'house' || b.level >= 2 || b.id % 2 === 0)) A.smoke(ctx, c.x + a.smoke[0], c.y + a.smoke[1], t, b.id);
     if (a.glow) {
-      if (b.type === 'smithy') {
+      if (b.type === 'smithy' || b.type === 'tower') { // vuur van de smidse of het vuurbaken op de toren
         const fl = 0.35 + Math.sin(t * 0.02) * 0.1 + Math.sin(t * 0.047) * 0.08;
         FX.drawGlow(ctx, c.x + a.glow[0], c.y + a.glow[1], 12, FX.FIRE, fl + 0.2);
       } else {

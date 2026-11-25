@@ -622,6 +622,16 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
 .bt-card b { position: absolute; right: 2px; top: 1px; font-size: 11px; color: #fff; background: rgba(40, 25, 10, 0.85); border-radius: 6px; padding: 0 4px; }
 .bt-card i { position: absolute; left: 3px; bottom: 3px; height: 4px; max-width: calc(100% - 6px); background: #5fbf3f; border-radius: 2px; box-shadow: 0 0 0 1px rgba(40, 25, 10, 0.5); }
 .bt-card.on { border-color: var(--gold2); box-shadow: 0 0 0 2px rgba(242, 201, 90, 0.6); background: linear-gradient(#fff6dc, #f0d58e); }
+.bt-card.fight { border-color: #b2372a; }
+.bt-card.on.fight { border-color: var(--gold2); }
+.bt-card.rout { filter: grayscale(0.85); opacity: 0.7; border-style: dashed; }
+.bot-tag { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #5a4a2a; background: #e9dcb8; border: 1px solid #b89a5e; border-radius: 6px; padding: 0 5px; vertical-align: 1px; }
+.bt-card .bt-form { position: absolute; left: 1px; top: 1px; width: 15px; height: 15px; background: rgba(255, 248, 228, 0.92); border-radius: 4px; display: grid; place-items: center; box-shadow: 0 0 0 1px rgba(60, 40, 15, 0.35); }
+.bt-card .bt-form .ic { width: 13px; height: 13px; }
+.bt-forms { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.bt-fbtn { display: inline-flex; gap: 4px; align-items: center; padding: 4px 8px; }
+.bt-fbtn .ic { width: 18px; height: 18px; }
+.bt-fbtn.on { border-color: var(--gold2); box-shadow: 0 0 0 2px rgba(242, 201, 90, 0.55); background: linear-gradient(#fff6dc, #f0d58e); color: var(--ink); }
 .bt-cmds { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: auto; }
 .bt-cmds .btn .ic { width: 15px; height: 15px; }
 .bt-cmds .btn.ghost { color: #e8d7b0; }
@@ -655,6 +665,8 @@ body.in-battle #toasts { top: 74px; }
   .bt-card img { width: 34px; height: 34px; }
   .bt-cards { flex-basis: 100%; }
   .bt-cmds { margin-left: 0; }
+  .bt-fbtn { padding: 4px 6px; }
+  .bt-fbtn span { display: none; }
   .bt-hint { font-size: 11.5px; bottom: 6px; }
 }
 
@@ -742,6 +754,9 @@ body.in-battle #toasts { top: 74px; }
   .bt-card { width: 36px; height: 40px; }
   .bt-card img { width: 30px; height: 30px; }
   .bt-hint { font-size: 11px; bottom: 4px; padding: 4px 10px; }
+  .bt-fbtn { padding: 3px 5px; }
+  .bt-fbtn span { display: none; }
+  .bt-fbtn .ic { width: 16px; height: 16px; }
 }
 
 /* aftelbalk: je leger komt binnen 2 minuten aan */
@@ -773,3 +788,50 @@ body.in-battle #toasts { top: 74px; }
   .arrival .arr-count { font-size: 22px; margin: 0 0 2px; }
   .arrival .arr-note { display: none; }
 }
+
+/* ---------- Academie, trouw en vazallen ---------- */
+.techgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.techline { display: flex; flex-direction: column; gap: 6px; }
+.tl-head { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 5px; color: #5a3a1e; }
+.tl-head .ic, .tl-head svg { width: 16px; height: 16px; }
+.tech { background: #fbf4e2; border: 1px solid #d8c39a; border-radius: 8px; padding: 6px 7px; font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+.tech .tn { font-weight: 700; font-size: 12.5px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tech .tn svg { width: 14px; height: 14px; }
+.tech.done { background: #eaf3dc; border-color: #9fc27a; }
+.tech.done .ok { color: var(--green); font-weight: 700; }
+.tech.busy { background: #fff3d1; border-color: var(--gold); box-shadow: 0 0 0 2px rgba(217, 164, 58, 0.25); }
+.tech.locked { opacity: 0.62; }
+.tech .btn { align-self: flex-start; }
+.tech .req { margin: 2px 0 0; }
+.loybar { position: relative; display: inline-block; width: 110px; max-width: 100%; height: 12px; border-radius: 6px; background: #4a3a28; overflow: hidden; vertical-align: middle; border: 1px solid #2e2418; }
+.loybar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(#f2c95a, #c9932e); }
+.loybar.low i { background: linear-gradient(#e8735e, #b2372a); }
+.loybar span { position: relative; display: block; text-align: center; font-size: 9.5px; line-height: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.7); }
+.card .loybar { width: 100%; height: 14px; }
+.card .loybar span { line-height: 14px; font-size: 10.5px; }
+.kv dd .loybar { width: 120px; margin-right: 6px; }
+.vassal-card { border-color: var(--gold); background: linear-gradient(#fff6dc, #fbefd0); }
+.vassal-tag { margin: 6px 0; padding: 6px 9px; border-radius: 8px; background: #fff3d1; border: 1px solid var(--gold); font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vassal-tag svg, .vassal-mini svg { width: 14px; height: 14px; }
+.vassal-mini { display: inline-flex; align-items: center; gap: 2px; font-size: 10.5px; font-weight: 700; color: #6b4a12; background: #fbe7b0; border: 1px solid #d9a43a; border-radius: 6px; padding: 0 5px; vertical-align: 1px; }
+.vassal-mini.lord { background: #f2c95a; }
+@media (max-width: 420px) { .techgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* wat een nieuw niveau oplevert (verbeterpaneel) */
+.gains { background: rgba(255, 250, 235, 0.65); border: 1px solid #dcc595; border-radius: 8px; padding: 7px 9px; margin: 4px 0 8px; }
+.gains .gh { font-weight: 700; font-size: 12.5px; color: var(--ink2); margin-bottom: 4px; }
+.gains .kv { gap: 3px 10px; font-size: 12.5px; }
+.gains .kv dd { white-space: nowrap; }
+.gains .was { color: var(--muted); font-weight: 500; }
+.gains .up { color: #2f7a2c; }
+.gains .gnote { margin: 5px 0 0; color: var(--ink2); line-height: 1.35; }
+.gcost { margin-top: 2px; }
+
+/* knop Verplaatsen bovenaan in het gebouwpaneel */
+.move-row { margin: 0 0 10px; }
+.also-here { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 10px; padding: 7px 9px; border-radius: 10px;
+  background: rgba(212, 160, 23, 0.14); border: 1px solid rgba(160, 110, 20, 0.35); font-size: 0.92em; }
+.also-here > svg, .also-here > img { width: 18px; height: 18px; flex: none; }
+.also-here .btn { padding: 5px 10px; font-size: 13px; }
+.also-here .btn small { opacity: 0.7; }
+.move-row .btn svg, .move-row .btn img { width: 18px; height: 18px; vertical-align: -4px; }
