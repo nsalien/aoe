@@ -1604,6 +1604,22 @@ test('verbeterpaneel toont voor elk gebouw wat het volgende niveau oplevert', as
   assert.match(gainsHtml(app, s, house, 2), new RegExp(`${popCap(s)}.*${popCap(s) + 5}`, 's'));
 });
 
+test("paneel toont 'Ook op deze plek' met de gebouwen achter het gekozen gebouw", async () => {
+  const { alsoHereHtml } = await import('../public/js/ui.js');
+  const s = newTownState(0, 'greek');
+  const tc = s.buildings.find((b) => b.type === 'tc');
+  s.buildings.push({ id: 90, type: 'house', x: 1, y: 1, level: 2 }, { id: 91, type: 'smithy', x: 3, y: 1, level: 0 });
+  const app = { pickStack: [tc.id, 90, 91] };
+  const h = alsoHereHtml(app, s, tc);
+  assert.match(h, /Ook op deze plek/);
+  assert.match(h, /data-action="pickBuilding" data-id="90">Huis <small>niv\. 2<\/small>/);
+  assert.match(h, /data-id="91">Smidse<\/button>/);
+  assert.doesNotMatch(h, new RegExp(`data-id="${tc.id}"`), 'niet het gekozen gebouw zelf');
+  assert.equal(alsoHereHtml({ pickStack: [90, 91] }, s, tc), '', 'gekozen gebouw niet op die plek');
+  assert.equal(alsoHereHtml({ pickStack: [tc.id] }, s, tc), '', 'maar één gebouw');
+  assert.equal(alsoHereHtml({}, s, tc), '');
+});
+
 test('gebouwen verplaatsen: enkel naar vrije bouwgrond, het stadscentrum blijft staan', async () => {
   const { doMove, checkMove } = await import('../public/shared/sim.js');
   const s = newTownState(0);
