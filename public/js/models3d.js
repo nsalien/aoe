@@ -63,23 +63,30 @@ function roof(s, st, x0, y0, x1, y1, z, h, along = 'x', o = {}) {
     if (kind === 'hip') s.hip(x0, y0, x1, y1, z, h, m, 0.06); else s.gable(x0, y0, x1, y1, z, h, along, m, 0.07);
     return z + h;
   }
+  // o.level (1 = eerste tijdperk): ook de daken van de volkeren worden beter per niveau (riet → hout/pleister → pannen, glazuur)
+  const lv = o.level || 3;
   if (kind === 'greek') {
     const hh = h * 0.45;
-    s.gable(x0, y0, x1, y1, z + 0.03, hh, along, mat.tiles(st.roofC, mat.plaster(st.plaster, z, z + hh)), 0.06);
+    s.gable(x0, y0, x1, y1, z + 0.03, hh, along, lv <= 1 ? mat.thatch(mat.plaster(st.plaster, z, z + hh)) : mat.tiles(st.roofC, mat.plaster(st.plaster, z, z + hh)), 0.06);
     s.box(x0 - 0.02, y0 - 0.02, z, x1 + 0.02, y1 + 0.02, z + 0.035, mat.plain(st.plaster));
     band(s, x0, y0, x1, y1, z - 0.03, 0.025, st.trim);
     return z + hh;
   }
   if (kind === 'pagoda') {
-    const m = mat.slate(st.roofC, mat.wood(st.wood));
+    const m = lv <= 1 ? mat.thatch(mat.wood(st.wood)) : lv === 2 ? mat.slate('#5b4636', mat.wood(st.wood)) : mat.slate(st.roofC, mat.wood(st.wood));
     s.hip(x0, y0, x1, y1, z, h * 0.8, m, 0.14);
     s.box(x0 - 0.13, y0 - 0.13, z - 0.02, x1 + 0.13, y1 + 0.13, z + 0.005, mat.plain(tint(st.roofC, -0.3)));
     return z + h * 0.8;
   }
   // platte daken: Egypte (kroonlijst), Babylon (kantelen), Perzië (koepel)
+  if (lv <= 1) { // eerste tijdperk: een plat dak met een rieten mat, nog zonder sierbanden
+    s.box(x0 - 0.02, y0 - 0.02, z, x1 + 0.02, y1 + 0.02, z + 0.04, mat.wood(st.wood || '#8a6238'));
+    s.box(x0 - 0.005, y0 - 0.005, z + 0.04, x1 + 0.005, y1 + 0.005, z + 0.07, mat.thatch());
+    return z + 0.07;
+  }
   s.box(x0 - 0.015, y0 - 0.015, z, x1 + 0.015, y1 + 0.015, z + 0.05, mat.plain(tint(st.plaster, -0.08)));
   if (st.trim) band(s, x0, y0, x1, y1, z - 0.05, 0.03, st.trim);
-  if (st.trim2) band(s, x0, y0, x1, y1, z - 0.075, 0.018, st.trim2);
+  if (st.trim2 && lv >= 3) band(s, x0, y0, x1, y1, z - 0.075, 0.018, st.trim2);
   if (kind === 'flat') {
     s.box(x0 - 0.04, y0 - 0.04, z + 0.05, x1 + 0.04, y1 + 0.04, z + 0.09, mat.plain(tint(st.stone, 0.1)));
     return z + 0.09;
@@ -90,10 +97,10 @@ function roof(s, st, x0, y0, x1, y1, z, h, along = 'x', o = {}) {
     for (let y = y0; y < y1 - 0.01; y += 0.1) { s.box(x1 - w, y, top, x1, Math.min(y1, y + w), top + 0.08, mat.brick(st.stone)); s.box(x0, y, top, x0 + w, Math.min(y1, y + w), top + 0.08, mat.brick(st.stone)); }
     return top + 0.08;
   }
-  // koepel op een trommel
+  // koepel op een trommel (tweede tijdperk: gepleisterd, daarna geglazuurd)
   const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const r = Math.min(x1 - x0, y1 - y0) * (o.domeR || 0.38);
   s.cyl(cx, cy, r * 1.02, z + 0.05, z + 0.05 + r * 0.35, mat.plaster(st.plaster, z, z + 1));
-  s.ell(cx, cy, z + 0.05 + r * 0.35, r, r, r * 1.15, mat.glaze(st.roofC, cx, cy), z + 0.05 + r * 0.35);
+  s.ell(cx, cy, z + 0.05 + r * 0.35, r, r, r * 1.15, lv === 2 ? mat.plaster(tint(st.plaster, -0.04), z, z + 1) : mat.glaze(st.roofC, cx, cy), z + 0.05 + r * 0.35);
   s.cyl(cx, cy, 0.012, z + r * 1.4, z + r * 1.62, mat.gold());
   s.ell(cx, cy, z + r * 1.66, 0.022, 0.022, 0.022, mat.gold());
   return z + r * 1.7;
@@ -116,6 +123,55 @@ function logPile(s, x, y, n = 3) {
 }
 function flagPole(s, x, y, z0, h) { s.cyl(x, y, 0.012, z0, z0 + h, mat.wood('#5a3a1e')); return [x, y, z0 + h]; }
 function window2(s, face, c, a, z, w = 0.11, h = 0.15) { s.win(face, c, a, a + w, z, z + h); }
+
+// ---------- hulpstukken voor de niveaus ----------
+// gezaagde planken op een stapel (langs x)
+function planks(s, x, y, n = 4) {
+  for (let k = 0; k < n; k++) {
+    const z = k * 0.025; const o = (k % 2) * 0.012;
+    s.box(x - 0.13 + o, y - 0.06, z, x + 0.13 + o, y - 0.01, z + 0.022, mat.wood(k % 2 ? '#c39a64' : '#b58a55'));
+    s.box(x - 0.13 - o, y + 0.01, z, x + 0.13 - o, y + 0.06, z + 0.022, mat.wood(k % 2 ? '#b58a55' : '#c39a64'));
+  }
+}
+// gehouwen steenblokken op een stapel
+function blocks(s, x, y, n, c = '#d3cbb8') {
+  const P = [[0, 0, 0], [0.095, 0, 0], [0, 0.085, 0], [0.095, 0.085, 0], [0.047, 0.042, 0.075], [0.047, 0.042, 0.15]];
+  for (let k = 0; k < Math.min(n, P.length); k++) { const [dx, dy, z] = P[k]; s.box(x + dx - 0.042, y + dy - 0.038, z, x + dx + 0.042, y + dy + 0.038, z + 0.072, mat.stone(k % 2 ? c : '#c9c0ab')); }
+}
+// hijsbalk (galg) met een touw en een last
+function hoist(s, x, y, h, load = 'crate', dir = 1) {
+  const e = x + dir * 0.18;
+  s.box(x - 0.02, y - 0.02, 0, x + 0.02, y + 0.02, h, mat.wood('#5a3a1e'));
+  s.box(Math.min(x, e) - 0.02, y - 0.02, h - 0.04, Math.max(x, e) + 0.02, y + 0.02, h, mat.wood('#5a3a1e'));
+  s.cap([x + dir * 0.02, y, h - 0.12], [x + dir * 0.1, y, h - 0.03], 0.008, mat.wood('#6b4523'));
+  s.cap([e, y, h - 0.04], [e, y, h * 0.45], 0.004, mat.plain('#cdbb92'));
+  if (load === 'crate') s.box(e - 0.04, y - 0.04, h * 0.37, e + 0.04, y + 0.04, h * 0.45, mat.wood('#a8743f'));
+  else s.ell(e, y, h * 0.41, 0.04, 0.035, 0.05, mat.plain('#cdb88c'));
+}
+// lantaarn op een paal
+function lampPost(s, x, y, h = 0.36) {
+  s.cyl(x, y, 0.01, 0, h, mat.wood('#3e2a18'));
+  s.box(x - 0.022, y - 0.022, h, x + 0.022, y + 0.022, h + 0.05, mat.plain('#ffd27a', true));
+  s.hip(x - 0.03, y - 0.03, x + 0.03, y + 0.03, h + 0.05, 0.035, mat.metal('#3a3c40'), 0);
+}
+// klein gebouwtje (muren + dak in de stijl van het volk); geeft de top terug
+function hut(s, st, x0, y0, x1, y1, h, level, along = 'x', wall = null) {
+  s.box(x0 - 0.015, y0 - 0.015, 0, x1 + 0.015, y1 + 0.015, 0.04, mat.stone(st.base));
+  walls(s, st, x0, y0, x1, y1, 0.04, h, wall ? { wall } : {});
+  return roof(s, st, x0 - 0.01, y0 - 0.01, x1 + 0.01, y1 + 0.01, h, Math.min(0.26, (x1 - x0 + y1 - y0) * 0.28), along, { level });
+}
+// gouden windwijzer / piek
+function goldVane(s, x, y, z, h = 0.14) {
+  s.cyl(x, y, 0.007, z, z + h, mat.metal('#3a3c40'));
+  s.box(x - 0.045, y - 0.004, z + h - 0.035, x + 0.045, y + 0.004, z + h - 0.015, mat.gold());
+  s.ell(x, y, z + h + 0.01, 0.018, 0.018, 0.018, mat.gold());
+}
+// hekje van paaltjes met twee latten tussen twee punten (langs x of y)
+function fenceLine(s, ax, ay, bx, by, h = 0.16, c = '#7a5129') {
+  const n = Math.max(2, Math.round(Math.hypot(bx - ax, by - ay) / 0.12));
+  for (let k = 0; k <= n; k++) { const x = ax + ((bx - ax) * k) / n; const y = ay + ((by - ay) * k) / n; s.box(x - 0.01, y - 0.01, 0, x + 0.01, y + 0.01, h, mat.wood(c)); }
+  for (const z of [h * 0.45, h * 0.85]) s.box(Math.min(ax, bx) - 0.006, Math.min(ay, by) - 0.006, z, Math.max(ax, bx) + 0.006, Math.max(ay, by) + 0.006, z + 0.016, mat.wood('#8a5f33'));
+}
 
 // ---------- gebouwen ----------
 
@@ -153,31 +209,77 @@ function house(s, st, L) {
     window2(s, 'x', x1 + 0.02, -0.22, 0.46, 0.12, 0.17); window2(s, 'x', x1 + 0.02, 0.07, 0.46, 0.12, 0.17);
     window2(s, 'x', x1, -0.05, 0.1, 0.12, 0.15);
     A.smoke = st.roof === 'gable' ? [-0.2, -0.16, h + 0.62] : [0, 0, top];
-    if (L >= 4) { // een aanbouw met een eigen dakje aan de voorkant
+    if (L >= 4) { // een aanbouw met een eigen dakje aan de voorkant, bloembakken onder de ramen
       walls(s, st, 0.1, y1 + 0.02, x1, y1 + 0.13, 0.0, 0.34);
       roof(s, st, 0.08, y1, x1 + 0.02, y1 + 0.15, 0.34, 0.12, 'x', { level: 3 });
       window2(s, 'y', y1 + 0.13, 0.2, 0.1, 0.1, 0.14);
+      for (const a of [-0.3, 0.17]) {
+        s.box(a - 0.005, y1 + 0.02, 0.43, a + 0.125, y1 + 0.07, 0.46, mat.wood('#6b4523'));
+        for (let k = 0; k < 4; k++) s.ell(a + 0.015 + k * 0.03, y1 + 0.045, 0.475, 0.016, 0.016, 0.016, mat.plain(['#d9483b', '#f2c94c', '#e86f9a', '#ffffff'][k]));
+      }
+      for (const a of [-0.22, 0.07]) {
+        s.box(x1 + 0.02, a - 0.005, 0.43, x1 + 0.07, a + 0.125, 0.46, mat.wood('#6b4523'));
+        for (let k = 0; k < 4; k++) s.ell(x1 + 0.045, a + 0.015 + k * 0.03, 0.475, 0.016, 0.016, 0.016, mat.plain(['#f2c94c', '#d9483b', '#ffffff', '#b48cf0'][k]));
+      }
     }
-    if (L >= 5) { // hoektorentje
+    if (L >= 5) { // hoektorentje met een gouden windwijzer, lantaarns bij de deur
       s.cyl(x0, y1, 0.09, 0, h + 0.25, roundM(st, 0, h + 0.25));
-      turretTop(s, st, x0, y1, 0.09, h + 0.25, 0.3);
+      const tt = turretTop(s, st, x0, y1, 0.09, h + 0.25, 0.3);
+      goldVane(s, x0, y1, tt);
       window2(s, 'y', y1 + 0.085, x0 - 0.03, h - 0.1, 0.06, 0.1);
+      for (const a of [-0.13, 0.13]) lampPost(s, a, y1 + 0.1, 0.32);
     }
   }
   return A;
 }
 
+// Houthakkerskamp: 1 afdakje met riet; 2 grotere loods met pannen en planken wanden; 3 gesloten werkplaats op een
+// stenen voet met een zaagbok; 4 hijsbalk, gezaagde planken en een kar; 5 een torentje met vaandel en gouden piek.
 function lumber(s, st, L) {
-  // open schuur op palen met een dak, ernaast stapels stammen en een hakblok
-  const x0 = -0.36; const x1 = 0.1; const y0 = -0.36; const y1 = 0.12; const h = 0.42 + L * 0.03;
-  for (const [x, y] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) s.box(x - 0.025, y - 0.025, 0, x + 0.025, y + 0.025, h, mat.wood('#6b4523'));
-  s.box(x0, y0 - 0.02, 0, x1, y0 + 0.01, h * 0.7, mat.wood('#7a5129'));
-  roof(s, st, x0, y0, x1, y1, h, 0.26, 'x', { level: L >= 3 ? 2 : 1, roof: st.roof === 'gable' || st.roof === 'greek' || st.roof === 'pagoda' ? st.roof : 'gable' });
-  logPile(s, -0.13, -0.12, 3);
-  logPile(s, 0.24, 0.0, L >= 2 ? 4 : 3);
-  s.cyl(0.25, 0.3, 0.06, 0, 0.09, mat.logs('#8a6238'));
-  s.box(0.24, 0.29, 0.09, 0.25, 0.3, 0.2, mat.wood('#6b4523'));
-  return {};
+  const W = '#6b4523';
+  const x0 = -0.4; const y0 = -0.4; const x1 = L >= 2 ? 0.14 : 0.02; const y1 = L >= 2 ? 0.14 : 0.02;
+  const h = [0, 0.32, 0.42, 0.5, 0.56, 0.6][L];
+  const z0 = L >= 3 ? 0.06 : 0;
+  if (L >= 3) s.box(x0 - 0.03, y0 - 0.03, 0, x1 + 0.03, y1 + 0.03, z0, mat.stone(st.base));
+  const posts = [[x0, y1], [x1, y1], [x1, y0], [x0, y0]];
+  if (L >= 2) posts.push([(x0 + x1) / 2, y1]);
+  for (const [x, y] of posts) s.box(x - 0.024, y - 0.024, z0, x + 0.024, y + 0.024, h, mat.wood(W));
+  if (L === 1) s.box(x0, y0 - 0.02, 0, x1, y0 + 0.01, h * 0.45, mat.wood('#7a5129'));
+  else if (L === 2) { s.box(x0, y0 - 0.02, 0, x1, y0 + 0.01, h, mat.wood('#7a5129')); s.box(x0 - 0.02, y0, 0, x0 + 0.01, y1, h, mat.wood('#7a5129')); }
+  else {
+    // achteraan een gesloten werkplaats
+    walls(s, st, x0, y0, x1, y0 + 0.22, z0, h, { wall: st.wall === 'timber' ? (L >= 4 ? 'stone' : 'timber') : st.wall });
+    door(s, 'y', y0 + 0.22, -0.24, -0.1, z0, z0 + 0.28, st);
+    window2(s, 'x', x1, -0.36, z0 + 0.16, 0.08, 0.1);
+  }
+  const rk = st.roof === 'gable' || st.roof === 'greek' || st.roof === 'pagoda' ? st.roof : 'gable';
+  const top = roof(s, st, x0 - 0.03, y0 - 0.03, x1 + 0.03, y1 + 0.03, h, 0.2 + L * 0.03, 'x', { level: Math.min(3, L), roof: rk });
+  logPile(s, -0.17, L >= 3 ? -0.02 : -0.14, L >= 2 ? 3 : 2);
+  logPile(s, 0.28, 0.0, L >= 2 ? 4 : 2);
+  s.cyl(0.25, 0.32, 0.06, 0, 0.09, mat.logs('#8a6238'));
+  s.box(0.245, 0.295, 0.09, 0.255, 0.305, 0.2, mat.wood(W));
+  if (L >= 3) { // zaagbok met een stam en een zaag
+    for (const x of [-0.3, -0.06]) for (const d of [-0.045, 0.045]) s.cap([x - 0.05, 0.3 + d, 0], [x + 0.05, 0.3 - d, 0.18], 0.01, mat.wood(W));
+    s.hcyl('x', 0.3, 0.2, 0.038, -0.36, 0.02, mat.logs('#8a6238'));
+    s.box(-0.19, 0.285, 0.18, -0.18, 0.315, 0.34, mat.metal('#9aa3ad'));
+  }
+  if (L >= 4) { // hijsbalk, planken en een kar
+    planks(s, 0.3, -0.3, 5);
+    hoist(s, 0.42, -0.06, 0.62, 'crate', -1);
+    s.box(0.04, 0.34, 0.05, 0.2, 0.44, 0.1, mat.wood('#7a5129'));
+    for (const x of [0.07, 0.17]) s.hcyl('y', x, 0.045, 0.04, 0.33, 0.45, mat.wood('#4a3220'));
+  }
+  let flag = null;
+  if (L >= 5) { // zagerij met een torentje
+    const tx = -0.3; const ty = -0.3;
+    walls(s, st, tx - 0.09, ty - 0.09, tx + 0.09, ty + 0.09, h - 0.05, top + 0.22);
+    window2(s, 'y', ty + 0.09, tx - 0.03, top + 0.02, 0.06, 0.1);
+    const tt = turretTop(s, st, tx, ty, 0.1, top + 0.22, 0.28);
+    goldVane(s, tx, ty, tt);
+    bannerCloth(s, x1 + 0.06, y1 + 0.06, 0.26, 0.24, st.trim || '#7a2b2b');
+    flag = flagPole(s, x1 - 0.02, y0 + 0.04, top - 0.04, 0.3);
+  }
+  return flag ? { flag } : {};
 }
 
 // een hoop gefacetteerde rotsblokken (zoals de losse rotsen in de stad)
@@ -192,120 +294,333 @@ function rocks(s, cx, cy, R, H, c, seed) {
   }
 }
 
+// Steengroeve: 1 rotsen met een paar blokken; 2 een plankier, kist en meer blokken; 3 een houten kraan;
+// 4 een stenen werkhuisje en een kar met blokken; 5 een gebeeldhouwde zuil, vaandel en gouden piek op de kraan.
 function quarry(s, st, L) {
-  rocks(s, -0.1, -0.12, 0.36, 0.34, '#a29d92', 7);
-  // uitgehakte trap in de rots
-  s.box(-0.2, 0.0, 0, 0.12, 0.14, 0.12, mat.rock('#b3ada0'));
-  s.box(-0.2, -0.1, 0.12, 0.08, 0.04, 0.22, mat.rock('#aaa496'));
-  for (const [x, y, z] of [[0.2, 0.18, 0], [0.32, 0.12, 0], [0.26, 0.15, 0.08]]) s.box(x - 0.05, y - 0.04, z, x + 0.05, y + 0.04, z + 0.08, mat.stone('#d3cbb8'));
-  if (L >= 2) { s.box(0.02, 0.24, 0, 0.32, 0.3, 0.02, mat.wood('#7a5129')); crate(s, -0.02, 0.32, 0.05); }
-  if (L >= 3) { // hijsbalk
-    s.box(-0.36, 0.28, 0, -0.33, 0.31, 0.7, mat.wood('#6b4523'));
-    s.box(-0.36, 0.0, 0.66, -0.33, 0.31, 0.7, mat.wood('#6b4523'));
+  rocks(s, -0.12, -0.14, 0.3 + L * 0.012, 0.3 + L * 0.02, '#a29d92', 7);
+  for (let k = 0; k < Math.min(3, L); k++) s.box(-0.24 + k * 0.03, 0.04 - k * 0.09, k * 0.09, 0.1 - k * 0.03, 0.18 - k * 0.09, (k + 1) * 0.09, mat.rock(k % 2 ? '#aaa496' : '#b3ada0'));
+  blocks(s, 0.22, 0.2, L >= 3 ? 6 : L >= 2 ? 4 : 2);
+  if (L >= 2) {
+    for (const x of [-0.02, 0.18]) s.box(x - 0.012, 0.31, 0, x + 0.012, 0.33, 0.12, mat.wood('#6b4523'));
+    s.box(-0.04, 0.3, 0.12, 0.2, 0.36, 0.14, mat.wood('#8a5f33'));
+    crate(s, -0.2, 0.36, 0.05);
+    s.cap([0.36, 0.0, 0], [0.4, 0.04, 0.2], 0.008, mat.wood('#6b4523')); // houweel tegen de rots
+    s.cap([0.37, -0.02, 0.2], [0.43, 0.08, 0.19], 0.01, mat.metal('#8e959f'));
+  }
+  let flag = null;
+  if (L >= 3) { // kraan met tredmolen
+    const cx = -0.36; const cy = 0.22; const ch = 0.75 + L * 0.05;
+    s.box(cx - 0.025, cy - 0.025, 0, cx + 0.025, cy + 0.025, ch, mat.wood('#5a3a1e'));
+    s.cap([cx, cy, ch - 0.04], [cx + 0.34, cy - 0.06, ch + 0.08], 0.016, mat.wood('#6b4523'));
+    s.cap([cx + 0.32, cy - 0.06, ch + 0.06], [cx + 0.32, cy - 0.06, 0.3], 0.004, mat.plain('#cdbb92'));
+    s.box(cx + 0.27, cy - 0.11, 0.2, cx + 0.37, cy - 0.01, 0.3, mat.stone('#d3cbb8'));
+    s.hcyl('y', cx + 0.06, 0.12, 0.11, cy - 0.04, cy, mat.wood('#7a5129'));
+    if (L >= 5) goldVane(s, cx, cy, ch);
+  }
+  if (L >= 4) { // werkhuisje en een kar met blokken
+    hut(s, st, 0.14, -0.44, 0.42, -0.2, 0.32, 2, 'x');
+    door(s, 'y', -0.2, 0.22, 0.32, 0.04, 0.26, st);
+    s.box(-0.02, 0.36, 0.06, 0.16, 0.46, 0.12, mat.wood('#7a5129'));
+    for (const x of [0.01, 0.13]) s.hcyl('y', x, 0.05, 0.045, 0.35, 0.47, mat.wood('#4a3220'));
+    s.box(0.03, 0.38, 0.12, 0.1, 0.44, 0.18, mat.stone('#d3cbb8'));
+  }
+  if (L >= 5) { // gebeeldhouwde zuil met een gouden bol en een vaandel
+    s.box(0.36, 0.3, 0, 0.46, 0.4, 0.06, mat.stone('#c9c0ab'));
+    s.cyl(0.41, 0.35, 0.035, 0.06, 0.5, mat.stone('#e6dfcf'));
+    s.box(0.37, 0.31, 0.5, 0.45, 0.39, 0.54, mat.stone('#d3cbb8'));
+    s.ell(0.41, 0.35, 0.58, 0.035, 0.035, 0.04, mat.gold());
+    flag = flagPole(s, 0.28, -0.32, 0.36, 0.3);
+  }
+  return flag ? { flag } : {};
+}
+
+// Goudmijn: 1 ingang met stutten en een karretje; 2 een dakje boven de ingang, rails en een lantaarn; 3 een schachttoren
+// met een wiel; 4 een smeltoven met schoorsteen en baren goud; 5 een schatkamertje met een gouden dak en een vaandel.
+function goldmine(s, st, L) {
+  rocks(s, -0.04, -0.12, 0.34 + L * 0.012, 0.36 + L * 0.025, '#8a8274', 11);
+  const nug = [[-0.18, 0.12, 0.2], [0.12, 0.2, 0.18], [-0.05, -0.1, 0.36], [0.28, -0.05, 0.25], [-0.25, -0.2, 0.3], [0.05, -0.25, 0.42]];
+  for (let k = 0; k < Math.min(nug.length, 2 + L); k++) { const [x, y, z] = nug[k]; s.ell(x, y, z, 0.03, 0.03, 0.03, mat.gold()); }
+  // stutten van de mijningang
+  const eh = L >= 2 ? 0.34 : 0.3;
+  s.box(-0.14, 0.18, 0, -0.1, 0.32, eh, mat.wood('#6b4523'));
+  s.box(0.06, 0.18, 0, 0.1, 0.32, eh, mat.wood('#6b4523'));
+  s.box(-0.16, 0.18, eh - 0.02, 0.12, 0.32, eh + 0.03, mat.wood('#5a3a1e'));
+  s.box(-0.1, 0.25, 0, 0.06, 0.31, eh - 0.03, mat.plain('#14100c'));
+  if (L >= 2) {
+    s.gable(-0.18, 0.16, 0.14, 0.36, eh + 0.03, 0.1, 'y', L >= 3 ? mat.slate('#5c6370') : mat.tiles('#9a4630'), 0.02);
+    for (const x of [-0.06, 0.02]) s.box(x - 0.006, 0.3, 0, x + 0.006, 0.47, 0.012, mat.metal('#6e747c')); // rails
+    lampPost(s, 0.15, 0.36, 0.3);
+  }
+  // karretje met goud
+  const cy = L >= 2 ? 0.4 : 0.3; const cx = L >= 2 ? -0.02 : 0.27;
+  s.box(cx - 0.08, cy - 0.06, 0.05, cx + 0.08, cy + 0.06, 0.12, mat.wood('#7a5129'));
+  for (const dx of [-0.06, 0.06]) s.hcyl('y', cx + dx, 0.04, 0.035, cy - 0.07, cy + 0.07, mat.wood('#4a3220'));
+  for (const [dx, dy] of [[-0.04, -0.02], [0.01, 0.02], [0.05, -0.02], [-0.02, 0.01]]) s.ell(cx + dx, cy + dy, 0.13, 0.03, 0.03, 0.025, mat.gold());
+  let glow = null; let flag = null;
+  if (L >= 3) { // schachttoren met een wiel
+    const tx = -0.3; const ty = -0.28; const th = 0.8 + (L - 3) * 0.08;
+    for (const [dx, dy] of [[-0.08, -0.08], [0.08, -0.08], [-0.08, 0.08], [0.08, 0.08]]) s.cap([tx + dx * 1.4, ty + dy * 1.4, 0.2], [tx + dx * 0.4, ty + dy * 0.4, th], 0.014, mat.wood('#5a3a1e'));
+    s.box(tx - 0.06, ty - 0.06, th - 0.03, tx + 0.06, ty + 0.06, th, mat.wood('#6b4523'));
+    s.hcyl('y', tx, th + 0.06, 0.07, ty - 0.012, ty + 0.012, mat.metal('#4d4f54'));
+    s.cap([tx + 0.07, ty, th + 0.06], [tx + 0.07, ty, 0.3], 0.004, mat.plain('#cdbb92'));
+  }
+  if (L >= 4) { // smeltoven en baren goud
+    s.box(0.2, 0.12, 0, 0.42, 0.3, 0.2, mat.stone('#7a7368'));
+    s.cyl(0.36, 0.17, 0.045, 0.2, 0.56, mat.stone('#857f74'));
+    s.box(0.22, 0.295, 0.04, 0.32, 0.305, 0.12, mat.plain('#ff8a2a', true));
+    for (let k = 0; k < 3; k++) s.box(0.24 + k * 0.05, 0.36, 0, 0.28 + k * 0.05, 0.42, 0.025, mat.gold());
+    s.box(0.26, 0.37, 0.025, 0.3, 0.41, 0.05, mat.gold());
+    glow = [0.27, 0.31, 0.08];
+  }
+  if (L >= 5) { // schatkamertje met een gouden dak
+    walls(s, st, 0.16, -0.44, 0.42, -0.2, 0.0, 0.34, { wall: st.wall === 'timber' ? 'stone' : st.wall });
+    s.hip(0.14, -0.46, 0.44, -0.18, 0.34, 0.18, mat.gold(), 0.02);
+    door(s, 'y', -0.2, 0.25, 0.33, 0.0, 0.24, st);
+    flag = flagPole(s, 0.29, -0.32, 0.52, 0.3);
+  }
+  const A = {};
+  if (glow) A.glow = glow;
+  if (flag) A.flag = flag;
+  return A;
+}
+
+// Opslagplaats: 1 houten schuur met riet; 2 groter, pannen en een stenen voet; 3 stenen onderbouw, leien en een
+// hijsbalk; 4 een vleugel ernaast en een kar; 5 een koepeltje met een gouden windwijzer.
+function storage(s, st, L) {
+  const x0 = -0.38; const y0 = -0.36; const x1 = L >= 2 ? 0.28 : 0.18; const y1 = L >= 2 ? 0.24 : 0.12;
+  const h = [0, 0.36, 0.46, 0.58, 0.62, 0.68][L];
+  s.box(x0, y0, 0, x1, y1, L >= 2 ? 0.08 : 0.04, L >= 2 ? mat.stone(st.base) : mat.wood('#6b4523'));
+  const z0 = L >= 2 ? 0.08 : 0.04;
+  if (L >= 3) {
+    walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, z0, 0.28, { wall: st.wall === 'timber' ? 'stone' : st.wall });
+    walls(s, st, x0 + 0.015, y0 + 0.015, x1 - 0.015, y1 - 0.015, 0.28, h, { wall: st.wall === 'timber' ? 'timber' : st.wall });
+  } else walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, z0, h, { wall: st.wall === 'timber' ? 'wood' : st.wall });
+  const top = roof(s, st, x0, y0, x1, y1, h, 0.32 + L * 0.02, 'y', { level: Math.min(3, L) });
+  door(s, 'y', y1 - 0.01, -0.14, 0.06, z0, z0 + 0.28, st);
+  window2(s, 'x', x1 - 0.01, -0.14, h - 0.2, 0.1, 0.1);
+  if (L >= 2) window2(s, 'y', y1 - 0.01, 0.12, h - 0.2, 0.08, 0.1);
+  sacks(s, -0.25, y1 + 0.12);
+  if (L < 4) { crate(s, x1 + 0.08, 0.1); if (L >= 2) crate(s, x1 + 0.1, -0.06, 0.06); } else { crate(s, 0.36, 0.36); crate(s, 0.24, 0.4, 0.05); }
+  if (L >= 2) barrel(s, 0.1, y1 + 0.13);
+  if (L >= 3) hoist(s, -0.02, y1 + 0.02, h + 0.12, 'sack');
+  if (L >= 4) { // vleugel aan de zijkant en een kar
+    walls(s, st, x1, y0 + 0.08, 0.44, y1 - 0.12, z0, h * 0.62, { wall: st.wall === 'timber' ? 'timber' : st.wall });
+    roof(s, st, x1 - 0.01, y0 + 0.06, 0.46, y1 - 0.1, h * 0.62, 0.16, 'x', { level: 3 });
+    door(s, 'x', 0.44, -0.14, -0.02, z0, z0 + 0.22, st);
+    for (const [x, z] of [[-0.06, 0], [0.04, 0], [-0.01, 0.13]]) { s.cyl(x, 0.42, 0.045, z, z + 0.13, mat.wood('#7d5128')); s.cyl(x, 0.42, 0.047, z + 0.03, z + 0.045, mat.metal('#4d4f54')); }
+  }
+  if (L >= 5) { // koepeltje op de nok
+    const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2;
+    walls(s, st, cx - 0.07, cy - 0.07, cx + 0.07, cy + 0.07, top - 0.12, top + 0.1);
+    const tt = turretTop(s, st, cx, cy, 0.075, top + 0.1, 0.18);
+    goldVane(s, cx, cy, tt);
   }
   return {};
 }
 
-function goldmine(s, st, L) {
-  rocks(s, -0.02, -0.1, 0.4, 0.42, '#8a8274', 11);
-  for (const [x, y, z] of [[-0.18, 0.12, 0.2], [0.12, 0.2, 0.18], [-0.05, -0.1, 0.36], [0.28, -0.05, 0.25]]) s.ell(x, y, z, 0.03, 0.03, 0.03, mat.gold());
-  // stutten van de mijningang aan de voorkant
-  s.box(-0.14, 0.18, 0, -0.1, 0.32, 0.3, mat.wood('#6b4523'));
-  s.box(0.06, 0.18, 0, 0.1, 0.32, 0.3, mat.wood('#6b4523'));
-  s.box(-0.16, 0.18, 0.28, 0.12, 0.32, 0.33, mat.wood('#5a3a1e'));
-  s.box(-0.1, 0.25, 0, 0.06, 0.31, 0.27, mat.plain('#14100c'));
-  // karretje met goud
-  s.box(0.18, 0.24, 0.05, 0.36, 0.36, 0.12, mat.wood('#7a5129'));
-  for (const dx of [0.2, 0.34]) s.hcyl('y', dx, 0.04, 0.035, 0.23, 0.37, mat.wood('#4a3220'));
-  for (const [x, y] of [[0.22, 0.28], [0.27, 0.32], [0.32, 0.27], [0.25, 0.3]]) s.ell(x, y, 0.13, 0.03, 0.03, 0.025, mat.gold());
-  return {};
-}
-
-function storage(s, st, L) {
-  const x0 = -0.36; const x1 = 0.3; const y0 = -0.32; const y1 = 0.26; const h = 0.42 + L * 0.05;
-  s.box(x0, y0, 0, x1, y1, 0.06, mat.stone(st.base));
-  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.06, h, { wall: st.wall === 'timber' ? 'wood' : st.wall });
-  roof(s, st, x0, y0, x1, y1, h, 0.36, 'y', { level: L >= 2 ? 2 : 1 });
-  door(s, 'y', y1 - 0.01, -0.12, 0.08, 0.06, 0.34, st);
-  window2(s, 'x', x1 - 0.01, -0.12, 0.25, 0.1, 0.1);
-  crate(s, 0.38, 0.1); crate(s, 0.4, -0.06, 0.06); crate(s, 0.38, 0.1, 0.05, 0.11);
-  sacks(s, -0.25, 0.38); barrel(s, 0.12, 0.38);
-  return {};
-}
-
+// Kazerne: 1 houten hal met riet; 2 stenen hal met pannen en een tweede oefenpop; 3 leien en een omheind oefenplein;
+// 4 een vleugel achteraan; 5 een hoektoren met kantelen.
 function barracks(s, st, L) {
-  const x0 = -0.4; const x1 = 0.34; const y0 = -0.34; const y1 = 0.24; const h = 0.5 + L * 0.06;
+  const x0 = -0.4; const x1 = 0.3; const y0 = -0.36; const y1 = 0.16; const h = 0.42 + L * 0.06;
   s.box(x0, y0, 0, x1, y1, 0.1, mat.stone(st.base));
   walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.1, h, { wall: st.wall === 'timber' ? (L >= 2 ? 'stone' : 'timber') : st.wall });
-  const top = roof(s, st, x0, y0, x1, y1, h, 0.34, 'x', { level: L >= 2 ? 3 : 2 });
-  door(s, 'y', y1 - 0.01, -0.12, 0.06, 0.1, 0.42, st);
-  window2(s, 'y', y1 - 0.01, 0.14, 0.28, 0.09, 0.14); window2(s, 'y', y1 - 0.01, -0.33, 0.28, 0.09, 0.14);
-  window2(s, 'x', x1 - 0.01, -0.2, 0.28, 0.09, 0.14);
-  // wapenrek en strooien pop voor de deur
-  for (let k = 0; k < 4; k++) s.box(0.36 + k * 0.025, 0.28, 0, 0.37 + k * 0.025, 0.29, 0.42, mat.wood('#6b4523'));
-  s.box(0.35, 0.27, 0.3, 0.46, 0.3, 0.32, mat.wood('#5a3a1e'));
-  s.cyl(-0.3, 0.38, 0.012, 0, 0.36, mat.wood('#6b4523'));
-  s.ell(-0.3, 0.38, 0.3, 0.05, 0.05, 0.08, mat.hay());
-  const f = flagPole(s, x1 - 0.06, y0 + 0.06, top - 0.1, 0.5);
-  return { flag: f };
+  const top = roof(s, st, x0, y0, x1, y1, h, 0.3 + L * 0.02, 'x', { level: Math.min(3, L) });
+  door(s, 'y', y1 - 0.01, -0.12, 0.06, 0.1, 0.4, st);
+  window2(s, 'y', y1 - 0.01, 0.14, 0.26, 0.09, 0.13); window2(s, 'y', y1 - 0.01, -0.33, 0.26, 0.09, 0.13);
+  window2(s, 'x', x1 - 0.01, -0.2, 0.26, 0.09, 0.13);
+  // wapenrek en strooien poppen
+  for (let k = 0; k < 4; k++) s.box(0.36 + k * 0.025, 0.26, 0, 0.37 + k * 0.025, 0.27, 0.42, mat.wood('#6b4523'));
+  s.box(0.35, 0.25, 0.3, 0.46, 0.28, 0.32, mat.wood('#5a3a1e'));
+  const dummies = L >= 2 ? [[-0.3, 0.36], [-0.12, 0.38]] : [[-0.3, 0.36]];
+  for (const [x, y] of dummies) { s.cyl(x, y, 0.012, 0, 0.36, mat.wood('#6b4523')); s.ell(x, y, 0.3, 0.05, 0.05, 0.08, mat.hay()); s.box(x - 0.08, y - 0.006, 0.3, x + 0.08, y + 0.006, 0.32, mat.wood('#6b4523')); }
+  if (L >= 3) { fenceLine(s, -0.44, 0.46, 0.44, 0.46, 0.14); fenceLine(s, -0.44, 0.22, -0.44, 0.46, 0.14); }
+  if (L >= 4) { // vleugel aan de rechterkant
+    walls(s, st, x1 - 0.01, y0 + 0.02, 0.46, y1 - 0.18, 0.0, h * 0.72, { wall: st.wall === 'timber' ? 'stone' : st.wall });
+    roof(s, st, x1 - 0.03, y0, 0.48, y1 - 0.16, h * 0.72, 0.16, 'y', { level: 3 });
+    door(s, 'y', y1 - 0.18, 0.34, 0.42, 0.0, 0.24, st);
+    window2(s, 'x', 0.46, -0.28, h * 0.4, 0.08, 0.12);
+  }
+  if (L >= 5) { // hoektoren met kantelen (vooraan links)
+    const tx = x0 + 0.02; const ty = y1 + 0.02; const th = h + 0.45;
+    s.cyl(tx, ty, 0.11, 0, th, roundM(st, 0, th));
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; s.box(tx + Math.cos(a) * 0.1 - 0.02, ty + Math.sin(a) * 0.1 - 0.02, th, tx + Math.cos(a) * 0.1 + 0.02, ty + Math.sin(a) * 0.1 + 0.02, th + 0.06, towerM(st)); }
+    window2(s, 'y', ty + 0.11, tx - 0.03, th - 0.2, 0.06, 0.1);
+    return { flag: flagPole(s, tx, ty, th, 0.35) };
+  }
+  return { flag: flagPole(s, x1 - 0.06, y0 + 0.06, top - 0.1, 0.5) };
 }
 
+// Schietbaan: 1 houten hut met riet en één schijf; 2 pannen, twee schijven en een boogrek; 3 een overdekte schietstand en
+// drie schijven; 4 een houten uitkijkpost; 5 een stenen toren met vaandel en een gouden schijf.
 function range(s, st, L) {
-  const x0 = -0.38; const x1 = 0.1; const y0 = -0.36; const y1 = 0.1; const h = 0.44 + L * 0.04;
-  s.box(x0, y0, 0, x1, y1, 0.06, mat.stone(st.base));
-  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.06, h, { wall: st.wall === 'timber' ? 'wood' : st.wall });
-  roof(s, st, x0, y0, x1, y1, h, 0.32, 'y', { level: 2 });
-  door(s, 'y', y1 - 0.01, -0.2, -0.06, 0.06, 0.34, st);
-  // schietschijven op palen
-  for (const [x, y] of [[0.3, -0.2], [0.34, 0.12], [0.06, 0.34]]) {
+  const x0 = -0.4; const x1 = L >= 2 ? 0.08 : 0.0; const y0 = -0.4; const y1 = L >= 2 ? 0.08 : 0.0; const h = 0.36 + L * 0.05;
+  s.box(x0, y0, 0, x1, y1, 0.06, L >= 3 ? mat.stone(st.base) : mat.wood('#6b4523'));
+  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.06, h, { wall: st.wall === 'timber' ? (L >= 3 ? 'timber' : 'wood') : st.wall });
+  const top = roof(s, st, x0, y0, x1, y1, h, 0.28, 'y', { level: Math.min(3, L) });
+  door(s, 'y', y1 - 0.01, -0.24, -0.1, 0.06, 0.32, st);
+  const targets = L >= 3 ? [[0.32, -0.24], [0.36, 0.08], [0.06, 0.36]] : L >= 2 ? [[0.32, -0.2], [0.06, 0.34]] : [[0.28, -0.1]];
+  targets.forEach(([x, y], k) => {
     s.box(x - 0.01, y - 0.01, 0, x + 0.01, y + 0.01, 0.2, mat.wood('#6b4523'));
-    s.hcyl('x', y, 0.26, 0.09, x - 0.015, x + 0.015, { k: 'target', cy: y, cz: 0.26, r: 0.09 });
+    s.hcyl('x', y, 0.26, 0.09, x - 0.015, x + 0.015, L >= 5 && k === 0 ? mat.gold() : { k: 'target', cy: y, cz: 0.26, r: 0.09 });
+  });
+  if (L >= 2) { // boogrek
+    s.box(-0.36, 0.14, 0, -0.34, 0.16, 0.3, mat.wood('#5a3a1e')); s.box(-0.16, 0.14, 0, -0.14, 0.16, 0.3, mat.wood('#5a3a1e'));
+    s.box(-0.36, 0.14, 0.26, -0.14, 0.16, 0.28, mat.wood('#5a3a1e'));
+    for (const x of [-0.31, -0.25, -0.19]) s.cap([x, 0.16, 0.04], [x, 0.16, 0.27], 0.006, mat.wood('#7a4a24'));
+  }
+  if (L >= 3) { // overdekte schietstand aan de voorkant
+    for (const [x, y] of [[0.14, 0.18], [0.42, 0.18], [0.14, 0.44], [0.42, 0.44]]) s.box(x - 0.015, y - 0.015, 0, x + 0.015, y + 0.015, 0.3, mat.wood('#6b4523'));
+    s.gable(0.12, 0.16, 0.44, 0.46, 0.3, 0.1, 'x', mat.tiles('#9a4630'), 0.02);
+    s.box(0.14, 0.18, 0.1, 0.42, 0.2, 0.13, mat.wood('#8a5f33'));
+  }
+  if (L >= 4 && L < 5) { // houten uitkijkpost
+    for (const [dx, dy] of [[-0.05, -0.05], [0.05, -0.05], [-0.05, 0.05], [0.05, 0.05]]) s.box(-0.3 + dx - 0.012, 0.3 + dy - 0.012, 0, -0.3 + dx + 0.012, 0.3 + dy + 0.012, 0.7, mat.wood('#5a3a1e'));
+    s.box(-0.37, 0.23, 0.7, -0.23, 0.37, 0.74, mat.wood('#7a5129'));
+    s.hip(-0.38, 0.22, -0.22, 0.38, 0.82, 0.1, mat.thatch(), 0.02);
+    return { flag: flagPole(s, -0.3, 0.3, 0.92, 0.25) };
+  }
+  if (L >= 5) { // stenen toren
+    const th = 1.0;
+    s.cyl(-0.3, 0.3, 0.1, 0, th, roundM(st, 0, th));
+    window2(s, 'y', 0.4, -0.33, th - 0.25, 0.06, 0.1);
+    const tt = turretTop(s, st, -0.3, 0.3, 0.1, th, 0.3);
+    return { flag: flagPole(s, -0.3, 0.3, tt, 0.25) };
   }
   return {};
 }
 
+// Stal: 1 kleine houten stal met riet; 2 groter met pannen en drie deuren; 3 een hooizolder met hijsbalk en een
+// drinkbak; 4 een tweede vleugel; 5 een koepeltje met een gouden windwijzer.
 function stable(s, st, L) {
-  const x0 = -0.38; const x1 = 0.32; const y0 = -0.34; const y1 = 0.14; const h = 0.42 + L * 0.04;
+  const x0 = -0.4; const x1 = L >= 2 ? 0.32 : 0.12; const y0 = -0.36; const y1 = 0.12; const h = 0.36 + L * 0.06;
   s.box(x0, y0, 0, x1, y1, 0.05, mat.stone(st.base));
-  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.05, h, { wall: st.wall === 'timber' ? 'wood' : st.wall });
-  roof(s, st, x0, y0, x1, y1, h, 0.34, 'x', { level: L >= 2 ? 2 : 1 });
-  for (const a of [-0.3, -0.06, 0.18]) s.win('y', y1 - 0.01, a, a + 0.14, 0.05, 0.3, mat.door('#5a3a1e'));
+  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.05, h, { wall: st.wall === 'timber' ? (L >= 3 ? 'timber' : 'wood') : st.wall });
+  const top = roof(s, st, x0, y0, x1, y1, h, 0.3 + L * 0.02, 'x', { level: Math.min(3, L) });
+  const doors = L >= 2 ? [-0.32, -0.08, 0.16] : [-0.3, -0.08];
+  for (const a of doors) s.win('y', y1 - 0.01, a, a + 0.14, 0.05, 0.3, mat.door('#5a3a1e'));
   // omheining en hooi
-  for (let x = -0.36; x <= 0.4; x += 0.19) s.box(x - 0.012, 0.4, 0, x + 0.012, 0.42, 0.18, mat.wood('#7a5129'));
-  s.box(-0.36, 0.4, 0.13, 0.4, 0.415, 0.15, mat.wood('#8a5f33')); s.box(-0.36, 0.4, 0.07, 0.4, 0.415, 0.09, mat.wood('#8a5f33'));
-  s.box(0.32, 0.18, 0, 0.44, 0.3, 0.1, mat.hay()); s.box(0.34, 0.2, 0.1, 0.42, 0.28, 0.18, mat.hay());
-  s.box(-0.1, 0.22, 0, 0.12, 0.28, 0.06, mat.wood('#6b4523'));
+  const fx1 = L >= 2 ? 0.44 : 0.3;
+  fenceLine(s, -0.42, 0.42, fx1, 0.42, 0.18);
+  s.box(0.3, 0.18, 0, 0.42, 0.3, 0.1, mat.hay()); s.box(0.32, 0.2, 0.1, 0.4, 0.28, 0.18, mat.hay());
+  if (L >= 3) { // hooizolder met een luik en een hijsbalk, drinkbak
+    s.win('y', y1 - 0.01, -0.06, 0.06, h - 0.2, h - 0.04, mat.door('#6b4224'));
+    s.box(-0.02, y1 - 0.01, h + 0.02, 0.02, y1 + 0.12, h + 0.06, mat.wood('#5a3a1e'));
+    s.box(-0.14, 0.22, 0, 0.06, 0.3, 0.08, mat.wood('#7a5129'));
+    s.box(-0.13, 0.23, 0.06, 0.05, 0.29, 0.075, mat.plain('#4f86b8', true));
+  }
+  if (L >= 4) { // tweede vleugel rechts, met een eigen staldeur
+    walls(s, st, x1 - 0.01, y0 + 0.02, 0.46, y1 - 0.02, 0.0, h * 0.75, { wall: st.wall === 'timber' ? 'timber' : st.wall });
+    roof(s, st, x1 - 0.03, y0, 0.48, y1, h * 0.75, 0.16, 'y', { level: 3 });
+    s.win('x', 0.46, -0.2, -0.04, 0.0, 0.26, mat.door('#5a3a1e'));
+  }
+  if (L >= 5) { // koepeltje
+    const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2;
+    walls(s, st, cx - 0.07, cy - 0.07, cx + 0.07, cy + 0.07, top - 0.12, top + 0.08);
+    const tt = turretTop(s, st, cx, cy, 0.075, top + 0.08, 0.18);
+    goldVane(s, cx, cy, tt);
+  }
   return {};
 }
 
+// Smidse: 1 open smidse onder een afdak; 2 een stenen werkplaats met pannen; 3 groter met leien, een hogere schoorsteen,
+// een bluskuip en een wapenrek; 4 een aanbouw met een tweede schoorsteen; 5 kantelen, een gouden uithangbord en een harnas.
 function smithy(s, st, L) {
-  const x0 = -0.36; const x1 = 0.3; const y0 = -0.34; const y1 = 0.22; const h = 0.5 + L * 0.02;
+  const x0 = -0.38; const y0 = -0.36;
+  if (L === 1) {
+    // open smidse: afdak op palen, achterwand, stenen schouw
+    const x1 = 0.12; const y1 = 0.1; const h = 0.42;
+    for (const [x, y] of [[x0, y1], [x1, y1], [x1, y0], [x0, y0]]) s.box(x - 0.022, y - 0.022, 0, x + 0.022, y + 0.022, h, mat.wood('#6b4523'));
+    s.box(x0, y0 - 0.02, 0, x1, y0 + 0.01, h, mat.wood('#7a5129'));
+    roof(s, st, x0 - 0.02, y0 - 0.02, x1 + 0.02, y1 + 0.02, h, 0.22, 'y', { level: 1, roof: st.roof === 'pagoda' ? 'pagoda' : 'gable' });
+    s.box(-0.3, -0.34, 0, -0.12, -0.2, 0.2, mat.stone('#7a7368'));
+    s.box(-0.26, -0.32, 0.2, -0.16, -0.22, h + 0.3, mat.stone('#857f74'));
+    s.box(-0.28, -0.205, 0.06, -0.14, -0.195, 0.16, mat.plain('#ff8a2a', true));
+    s.box(0.18, 0.26, 0, 0.28, 0.32, 0.12, mat.stone('#6f6a62')); s.box(0.16, 0.25, 0.12, 0.3, 0.33, 0.16, mat.metal('#3a3c40'));
+    return { smoke: [-0.21, -0.27, h + 0.3], glow: [-0.21, -0.2, 0.12] };
+  }
+  const x1 = L >= 3 ? 0.3 : 0.2; const y1 = L >= 3 ? 0.22 : 0.14; const h = 0.42 + L * 0.05;
   s.box(x0, y0, 0, x1, y1, 0.1, mat.stone(st.base));
   walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.1, h, { wall: st.wall === 'timber' ? 'stone' : st.wall, c: st.wall === 'timber' ? '#9c968b' : null });
-  s.box(0.06, -0.3, 0, 0.22, -0.16, h + 0.6, mat.stone('#857f74'));
-  roof(s, st, x0, y0, x1, y1, h, 0.32, 'y', { level: 3 });
-  door(s, 'y', y1 - 0.01, -0.2, -0.04, 0.1, 0.4, st);
-  // open werkplaats met aambeeld en vuur
-  s.box(0.06, 0.3, 0, 0.16, 0.36, 0.12, mat.stone('#6f6a62'));
-  s.box(0.04, 0.29, 0.12, 0.18, 0.37, 0.16, mat.metal('#3a3c40'));
-  s.box(-0.1, 0.34, 0, -0.02, 0.4, 0.1, mat.stone('#7a7368'));
-  s.box(-0.12, 0.33, 0.1, 0.0, 0.41, 0.13, mat.plain('#d9682a'));
-  barrel(s, x1 + 0.08, y1 - 0.04);
-  return { smoke: [0.14, -0.23, h + 0.6], glow: [-0.06, 0.37, 0.14] };
+  const ch = h + 0.3 + L * 0.08;
+  s.box(0.0, -0.3, 0, 0.16, -0.16, ch, mat.stone('#857f74'));
+  if (L >= 3) s.box(-0.01, -0.31, ch - 0.06, 0.17, -0.15, ch, mat.stone('#6f6a62'));
+  const top = roof(s, st, x0, y0, x1, y1, h, 0.3, 'y', { level: Math.min(3, L) });
+  door(s, 'y', y1 - 0.01, -0.22, -0.06, 0.1, 0.4, st);
+  window2(s, 'x', x1 - 0.01, -0.2, 0.26, 0.09, 0.12);
+  // aambeeld en vuur voor de deur
+  s.box(0.06, y1 + 0.08, 0, 0.16, y1 + 0.14, 0.12, mat.stone('#6f6a62'));
+  s.box(0.04, y1 + 0.07, 0.12, 0.18, y1 + 0.15, 0.16, mat.metal('#3a3c40'));
+  s.box(-0.12, y1 + 0.12, 0, -0.02, y1 + 0.18, 0.1, mat.stone('#7a7368'));
+  s.box(-0.14, y1 + 0.11, 0.1, 0.0, y1 + 0.19, 0.13, mat.plain('#d9682a'));
+  const A = { smoke: [0.08, -0.23, ch], glow: [-0.07, y1 + 0.15, 0.14] };
+  if (L >= 3) { // bluskuip en wapenrek
+    s.cyl(x1 + 0.08, y1 - 0.04, 0.06, 0, 0.12, mat.wood('#7d5128')); s.cyl(x1 + 0.08, y1 - 0.04, 0.05, 0.11, 0.115, mat.plain('#4f86b8', true));
+    s.box(x1 + 0.04, -0.3, 0, x1 + 0.06, -0.28, 0.34, mat.wood('#5a3a1e')); s.box(x1 + 0.04, -0.06, 0, x1 + 0.06, -0.04, 0.34, mat.wood('#5a3a1e'));
+    s.box(x1 + 0.04, -0.3, 0.3, x1 + 0.06, -0.04, 0.32, mat.wood('#5a3a1e'));
+    for (const y of [-0.24, -0.17, -0.1]) s.cap([x1 + 0.06, y, 0.05], [x1 + 0.06, y, 0.32], 0.006, mat.metal('#c3c9d0'));
+  }
+  if (L >= 4) { // overdekte werkplaats voor de deur en een tweede schoorsteen
+    for (const x of [-0.2, 0.28]) s.box(x - 0.016, y1 + 0.22, 0, x + 0.016, y1 + 0.252, 0.34, mat.wood('#5a3a1e'));
+    s.box(-0.22, y1 + 0.215, 0.32, 0.3, y1 + 0.255, 0.35, mat.wood('#5a3a1e'));
+    s.hip(-0.24, y1 - 0.02, 0.32, y1 + 0.27, 0.35, 0.09, mat.tiles('#9a4630'), 0.01);
+    s.box(-0.36, -0.42, 0, -0.26, -0.32, h + 0.5, mat.stone('#857f74'));
+  }
+  if (L >= 5) { // kantelen op de schoorsteen, gouden uithangbord en een harnas op een paal
+    for (const [dx, dy] of [[0, 0], [0.12, 0], [0, 0.12], [0.12, 0.12]]) s.box(-0.01 + dx, -0.31 + dy, ch, 0.05 + dx, -0.25 + dy, ch + 0.06, mat.stone('#6f6a62'));
+    s.box(x1, y1 - 0.08, 0.5, x1 + 0.12, y1 - 0.07, 0.52, mat.metal('#3a3c40'));
+    s.hcyl('x', y1 - 0.075, 0.43, 0.06, x1 + 0.08, x1 + 0.095, mat.gold());
+    s.cyl(-0.32, y1 + 0.18, 0.01, 0, 0.32, mat.wood('#5a3a1e'));
+    s.ell(-0.32, y1 + 0.18, 0.26, 0.05, 0.06, 0.07, mat.metal('#dfe4ea'));
+    s.ell(-0.32, y1 + 0.18, 0.35, 0.03, 0.03, 0.035, mat.metal('#eef2f6'));
+  }
+  void top;
+  return A;
 }
 
+// Markt: 1 twee kraampjes; 2 vier kraampjes; 3 een put met een dakje in het midden; 4 een overdekte markthal achteraan;
+// 5 een stenen hal met een klokkentorentje, een gouden windwijzer en vaandels.
 function market(s, st, L) {
-  // kraampjes met gestreepte luifels
   const cols = [['#c0392b', '#efe6cf'], ['#2e7d4f', '#efe6cf'], ['#2c5fae', '#efe6cf'], ['#d9a441', '#7a2b2b']];
-  const stalls = L >= 2 ? [[-0.2, -0.2], [0.18, -0.18], [-0.2, 0.18], [0.2, 0.2]] : [[-0.15, -0.1], [0.18, 0.12]];
-  stalls.forEach(([x, y], k) => {
-    for (const [dx, dy] of [[-0.13, -0.1], [0.13, -0.1], [-0.13, 0.1], [0.13, 0.1]]) s.box(x + dx - 0.01, y + dy - 0.01, 0, x + dx + 0.01, y + dy + 0.01, 0.32, mat.wood('#6b4523'));
-    s.box(x - 0.13, y - 0.1, 0.12, x + 0.13, y + 0.1, 0.15, mat.wood('#8a5f33'));
+  const stall = (x, y, k, sc = 1) => {
+    for (const [dx, dy] of [[-0.13, -0.1], [0.13, -0.1], [-0.13, 0.1], [0.13, 0.1]]) s.box(x + dx * sc - 0.01, y + dy * sc - 0.01, 0, x + dx * sc + 0.01, y + dy * sc + 0.01, 0.32, mat.wood('#6b4523'));
+    s.box(x - 0.13 * sc, y - 0.1 * sc, 0.12, x + 0.13 * sc, y + 0.1 * sc, 0.15, mat.wood('#8a5f33'));
     const [c1, c2] = cols[k % cols.length];
-    s.gable(x - 0.14, y - 0.11, x + 0.14, y + 0.11, 0.32, 0.08, 'x', mat.cloth(c1, c2, false), 0.03);
-    for (const [dx, dy, c] of [[-0.06, 0, '#d9483b'], [0, 0.03, '#e9b93a'], [0.06, -0.02, '#6ba33a']]) s.ell(x + dx, y + dy, 0.17, 0.03, 0.03, 0.025, mat.plain(c));
-  });
-  crate(s, 0.36, -0.02, 0.05); barrel(s, -0.38, 0.0); sacks(s, 0.0, 0.38);
+    s.gable(x - 0.14 * sc, y - 0.11 * sc, x + 0.14 * sc, y + 0.11 * sc, 0.32, 0.08, 'x', mat.cloth(c1, c2, false), 0.03);
+    for (const [dx, dy, c] of [[-0.06, 0, '#d9483b'], [0, 0.03, '#e9b93a'], [0.06, -0.02, '#6ba33a']]) s.ell(x + dx * sc, y + dy * sc, 0.17, 0.03, 0.03, 0.025, mat.plain(c));
+  };
+  if (L >= 4) {
+    // markthal achteraan (zuilen + groot dak; op niveau 5 van steen met een klokkentorentje)
+    const hx0 = -0.44; const hx1 = 0.44; const hy0 = -0.44; const hy1 = -0.06; const hh = L >= 5 ? 0.46 : 0.4;
+    s.box(hx0, hy0, 0, hx1, hy1, 0.05, mat.stone(st.base));
+    if (L >= 5) walls(s, st, hx0 + 0.02, hy0 + 0.02, hx1 - 0.02, hy0 + 0.12, 0.05, hh, { wall: st.wall === 'timber' ? 'stone' : st.wall });
+    for (let k = 0; k < 5; k++) { const x = hx0 + 0.04 + k * ((hx1 - hx0 - 0.08) / 4); s.cyl(x, hy1 - 0.03, 0.025, 0.05, hh, L >= 5 ? mat.plaster('#f1ebde', 0.05, hh) : mat.wood('#6b4523')); }
+    const top = roof(s, st, hx0 - 0.02, hy0 - 0.02, hx1 + 0.02, hy1 + 0.02, hh, 0.22, 'x', { level: 3 });
+    for (const x of [-0.25, 0.0, 0.25]) { crate(s, x, -0.24, 0.05); sacks(s, x + 0.08, -0.2); }
+    if (L >= 5) {
+      walls(s, st, -0.08, -0.33, 0.08, -0.17, top - 0.12, top + 0.16);
+      s.hcyl('y', 0, top + 0.05, 0.045, -0.172, -0.165, mat.plain('#f4efe0'));
+      s.cap([0, -0.16, top + 0.05], [0, -0.16, top + 0.08], 0.004, mat.plain('#2a1d12'));
+      const tt = turretTop(s, st, 0, -0.25, 0.085, top + 0.16, 0.2);
+      goldVane(s, 0, -0.25, tt);
+      bannerCloth(s, -0.44, 0.0, 0.24, 0.24, st.trim || '#7a2b2b');
+      bannerCloth(s, 0.44, -0.44, 0.24, 0.24, st.trim2 || st.trim || '#2c5fae', 'x');
+    }
+    stall(-0.22, 0.2, 0, 0.9); stall(0.2, 0.22, 1, 0.9);
+  } else {
+    const stalls = L >= 3 ? [[-0.22, -0.2], [0.2, -0.18], [-0.22, 0.2]] : L >= 2 ? [[-0.22, -0.2], [0.2, -0.18], [-0.22, 0.2], [0.22, 0.22]] : [[-0.15, -0.1], [0.18, 0.12]];
+    stalls.forEach(([x, y], k) => stall(x, y, k, L >= 3 ? 0.9 : 1));
+  }
+  if (L === 3) { // stenen put met een pannendak vooraan rechts
+    const wx = 0.24; const wy = 0.24;
+    s.cyl(wx, wy, 0.11, 0, 0.14, mat.stone('#a39b8c')); s.cyl(wx, wy, 0.09, 0.12, 0.14, mat.plain('#3d6f9a', true));
+    for (const x of [wx - 0.09, wx + 0.09]) s.box(x - 0.012, wy - 0.012, 0.14, x + 0.012, wy + 0.012, 0.42, mat.wood('#5a3a1e'));
+    s.hcyl('x', wy, 0.34, 0.015, wx - 0.09, wx + 0.09, mat.wood('#4a3220'));
+    s.cap([wx, wy, 0.34], [wx, wy, 0.22], 0.003, mat.plain('#cdbb92')); s.cyl(wx, wy, 0.025, 0.18, 0.22, mat.wood('#7d5128'));
+    s.gable(wx - 0.14, wy - 0.12, wx + 0.14, wy + 0.12, 0.42, 0.1, 'x', mat.tiles('#9a4630'), 0.01);
+  }
+  crate(s, 0.4, -0.02, 0.05); barrel(s, -0.4, 0.02); sacks(s, L === 3 ? -0.04 : 0.0, 0.4);
+  if (L >= 2 && L !== 3) barrel(s, 0.4, 0.4);
+  if (L >= 2) crate(s, -0.38, 0.4, 0.05);
   return {};
 }
 
@@ -334,39 +649,85 @@ function tower(s, st, L) {
   return { flag: flagPole(s, 0, 0, top - 0.05, 0.35) };
 }
 
+// Belegwerkplaats: 1 houten loods met een half afgewerkte ram; 2 stenen voet, pannen en een afgewerkte, overdekte ram;
+// 3 leien, een kraan en een blijde (werpmachine) buiten.
 function workshop(s, st, L) {
-  const x0 = -0.38; const x1 = 0.22; const y0 = -0.36; const y1 = 0.16; const h = 0.6;
-  s.box(x0, y0, 0, x1, y1, 0.08, mat.stone(st.base));
-  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.08, h, { wall: st.wall === 'timber' ? 'wood' : st.wall });
-  roof(s, st, x0, y0, x1, y1, h, 0.38, 'y', { level: 2 });
-  s.win('y', y1 - 0.01, -0.28, 0.06, 0.08, 0.5, mat.door('#5a3a1e'));
-  // half afgewerkte ram en wielen
-  s.box(0.2, 0.22, 0.05, 0.42, 0.36, 0.12, mat.wood('#7a5129'));
-  for (const x of [0.24, 0.38]) for (const y of [0.21, 0.37]) s.hcyl('y', x, 0.05, 0.05, y - 0.01, y + 0.01, mat.wood('#5a3a1e'));
-  s.hcyl('x', 0.29, 0.15, 0.035, 0.12, 0.46, mat.logs('#8a6238'));
-  s.hcyl('y', -0.35, 0.08, 0.08, 0.24, 0.27, mat.wood('#6b4523'));
-  logPile(s, 0.3, -0.18, 2);
+  const x0 = -0.4; const x1 = L >= 2 ? 0.22 : 0.1; const y0 = -0.4; const y1 = L >= 2 ? 0.14 : 0.04; const h = 0.46 + L * 0.08;
+  s.box(x0, y0, 0, x1, y1, 0.08, L >= 2 ? mat.stone(st.base) : mat.wood('#6b4523'));
+  walls(s, st, x0 + 0.01, y0 + 0.01, x1 - 0.01, y1 - 0.01, 0.08, h, { wall: st.wall === 'timber' ? (L >= 2 ? 'timber' : 'wood') : st.wall });
+  roof(s, st, x0, y0, x1, y1, h, 0.32 + L * 0.03, 'y', { level: L });
+  s.win('y', y1 - 0.01, -0.3, 0.02, 0.08, 0.08 + h * 0.75, mat.door('#5a3a1e'));
+  if (L === 1) { // half afgewerkte ram en wielen
+    s.box(0.2, 0.22, 0.05, 0.42, 0.36, 0.12, mat.wood('#7a5129'));
+    for (const x of [0.24, 0.38]) for (const y of [0.21, 0.37]) s.hcyl('y', x, 0.05, 0.05, y - 0.01, y + 0.01, mat.wood('#5a3a1e'));
+    s.hcyl('x', 0.29, 0.15, 0.035, 0.12, 0.46, mat.logs('#8a6238'));
+    logPile(s, 0.3, -0.18, 2);
+  } else { // afgewerkte ram onder een dakje
+    const rx = 0.3; const ry = 0.3;
+    s.box(rx - 0.14, ry - 0.08, 0.05, rx + 0.14, ry + 0.08, 0.1, mat.wood('#7a5129'));
+    for (const x of [rx - 0.1, rx + 0.1]) for (const y of [ry - 0.09, ry + 0.09]) s.hcyl('y', x, 0.05, 0.05, y - 0.01, y + 0.01, mat.wood('#5a3a1e'));
+    for (const [x, y] of [[rx - 0.12, ry - 0.07], [rx + 0.12, ry - 0.07], [rx - 0.12, ry + 0.07], [rx + 0.12, ry + 0.07]]) s.box(x - 0.01, y - 0.01, 0.1, x + 0.01, y + 0.01, 0.26, mat.wood('#6b4523'));
+    s.gable(rx - 0.15, ry - 0.1, rx + 0.15, ry + 0.1, 0.26, 0.1, 'x', mat.hay(), 0.02);
+    s.hcyl('x', ry, 0.17, 0.035, rx - 0.2, rx + 0.18, mat.logs('#8a6238'));
+    s.ell(rx + 0.19, ry, 0.17, 0.03, 0.04, 0.04, mat.metal('#6e747c'));
+    logPile(s, 0.3, -0.2, 3);
+  }
+  if (L >= 3) { // blijde: een werparm op een driehoekig gestel
+    const bx = -0.28; const by = 0.3;
+    for (const d of [-0.06, 0.06]) { s.cap([bx - 0.12, by + d, 0], [bx, by + d, 0.4], 0.014, mat.wood('#5a3a1e')); s.cap([bx + 0.12, by + d, 0], [bx, by + d, 0.4], 0.014, mat.wood('#5a3a1e')); }
+    s.hcyl('y', bx, 0.4, 0.02, by - 0.08, by + 0.08, mat.wood('#4a3220'));
+    s.cap([bx - 0.2, by, 0.6], [bx + 0.1, by, 0.3], 0.012, mat.wood('#6b4523'));
+    s.box(bx + 0.06, by - 0.05, 0.18, bx + 0.16, by + 0.05, 0.3, mat.stone('#8f887c'));
+    hoist(s, x1 + 0.04, -0.3, h + 0.2);
+    return { flag: flagPole(s, x0 + 0.06, y0 + 0.06, h + 0.3, 0.3) };
+  }
   return {};
 }
 
+// Monument: elk niveau een trede en een hogere naald; 2 beelden op de hoeken; 3 een zuilengang voor de trap;
+// 4 twee obelisken ernaast en gouden randen; 5 vuurschalen en een grote gouden top.
 function monument(s, st, L) {
-  const steps = 2 + Math.min(3, L);
+  const steps = 2 + L;
   let z = 0;
   for (let k = 0; k < steps; k++) {
-    const w = 0.9 - k * 0.14;
-    s.box(-w, -w, z, w, w, z + 0.1, mat.stone(k % 2 ? '#e6dfcf' : '#d3cbb8'));
-    z += 0.1;
+    const w = 0.92 - k * 0.11;
+    s.box(-w, -w, z, w, w, z + 0.08, mat.stone(k % 2 ? '#e6dfcf' : '#d3cbb8'));
+    if (L >= 4 && k === steps - 1) band(s, -w, -w, w, w, z + 0.06, 0.02, '#d4a017');
+    z += 0.08;
   }
+  const A = {};
   if (st.roof === 'dome') {
-    s.cyl(0, 0, 0.32, z, z + 0.4, mat.plaster(st.plaster, z, z + 0.4));
-    s.ell(0, 0, z + 0.4, 0.32, 0.32, 0.4, mat.glaze(st.roofC), z + 0.4);
-    return { glow: [0, 0, z + 0.85] };
+    const dr = 0.22 + L * 0.03;
+    s.cyl(0, 0, dr, z, z + 0.3 + L * 0.04, mat.plaster(st.plaster, z, z + 0.6));
+    const dz = z + 0.3 + L * 0.04;
+    s.ell(0, 0, dz, dr, dr, dr * 1.2, mat.glaze(st.roofC), dz);
+    if (L >= 3) s.ell(0, 0, dz + dr * 1.22, 0.04, 0.04, 0.05, mat.gold());
+    A.glow = [0, 0, dz + dr * 1.3];
+  } else {
+    const h = 0.9 + L * 0.3;
+    const nw = 0.1 + L * 0.008;
+    s.box(-nw, -nw, z, nw, nw, z + h, mat.stone(st.roof === 'flat' ? '#e2cc96' : '#e8e2d2'));
+    s.hip(-nw, -nw, nw, nw, z + h, 0.14 + L * 0.02, mat.gold(), 0);
+    A.glow = [0, 0, z + h + 0.12];
   }
-  const h = 1.2 + L * 0.25;
-  s.box(-0.12, -0.12, z, 0.12, 0.12, z + h, mat.stone(st.roof === 'flat' ? '#e2cc96' : '#e8e2d2'));
-  s.hip(-0.12, -0.12, 0.12, 0.12, z + h, 0.16, mat.gold(), 0);
-  for (const [x, y] of [[-0.6, 0.6], [0.6, 0.6], [0.6, -0.6]]) { s.box(x - 0.06, y - 0.06, z - 0.1 * (steps - 1), x + 0.06, y + 0.06, z - 0.1 * (steps - 1) + 0.12, mat.stone('#a39a89')); s.ell(x, y, z - 0.1 * (steps - 1) + 0.18, 0.05, 0.05, 0.06, mat.gold()); }
-  return { glow: [0, 0, z + h + 0.12] };
+  const base = 0.08; // beelden op de onderste trede
+  if (L >= 2) for (const [x, y] of [[-0.86, 0.86], [0.86, 0.86], [0.86, -0.86], [-0.86, -0.86]].slice(0, L >= 3 ? 4 : 3)) {
+    s.box(x - 0.055, y - 0.055, base, x + 0.055, y + 0.055, base + 0.14, mat.stone('#a39a89'));
+    s.ell(x, y, base + 0.24, 0.05, 0.05, 0.09, L >= 4 ? mat.gold() : mat.stone('#d8d0bf'));
+    s.ell(x, y, base + 0.35, 0.03, 0.03, 0.035, L >= 4 ? mat.gold() : mat.stone('#d8d0bf'));
+  }
+  if (L >= 3) for (let k = 0; k < 4; k++) { const x = -0.42 + k * 0.28; s.cyl(x, 0.86, 0.035, base, base + 0.5, mat.plaster('#f4efe4', base, base + 0.5)); }
+  if (L >= 3) s.box(-0.47, 0.82, base + 0.5, 0.47, 0.9, base + 0.56, mat.plaster('#efe7d6', base, base + 1));
+  if (L >= 4) for (const x of [-0.86, 0.86]) {
+    s.box(x - 0.05, -0.05, base, x + 0.05, 0.05, base + 0.9, mat.stone('#e2cc96'));
+    s.hip(x - 0.05, -0.05, x + 0.05, 0.05, base + 0.9, 0.12, mat.gold(), 0);
+  }
+  if (L >= 5) for (const [x, y] of [[-0.62, 0.88], [0.62, 0.88]]) {
+    s.cyl(x, y, 0.03, base, base + 0.3, mat.metal('#3a3c40'));
+    s.cyl(x, y, 0.07, base + 0.3, base + 0.36, mat.gold());
+    s.ell(x, y, base + 0.42, 0.05, 0.05, 0.08, mat.plain('#ff9d2e', true));
+  }
+  return A;
 }
 
 // stadscentrum (2x2): hal, later stenen burcht; de volkeren hebben vanaf het IJzertijdperk een eigen bouwwerk
@@ -419,6 +780,11 @@ function tc(s, st, L, civ) {
   for (const a of [-0.5, 0.35]) window2(s, 'y', R - 0.08, a, 0.5, 0.08, 0.16);
   for (const a of [-0.4, 0.3]) window2(s, 'x', R - 0.08, a, 0.5, 0.08, 0.16);
   window2(s, 'y', 0.3, -0.2, kz + 0.25, 0.1, 0.18); window2(s, 'x', 0.3, -0.1, kz + 0.25, 0.1, 0.18);
+  if (L >= 5) {
+    band(s, -R + 0.08, -R + 0.08, R - 0.08, R - 0.08, kz - 0.06, 0.04, '#d4a017');
+    for (const a of [-0.45, 0.32]) bannerCloth(s, a, R - 0.02, 0.35, 0.34, st.trim || '#7a2b2b');
+    goldVane(s, -0.06, -0.06, top);
+  }
   A.flag = flagPole(s, -0.06, -0.06, top - 0.05, 0.45);
   return A;
 }
@@ -455,9 +821,14 @@ const TC_CIV = {
     band(s, -W - 0.07, -D - 0.07, W + 0.07, D + 0.07, z + ch + 0.04, 0.03, st.trim);
     s.gable(-W - 0.07, -D - 0.07, W + 0.07, D + 0.07, z + ch + 0.1, 0.32, 'y', mat.tiles(st.roofC, mat.plaster('#efe7d6', z, z + 2)), 0.05);
     s.win('y', D - 0.16, -0.12, 0.12, z, z + 0.48, mat.door('#6b4224'));
-    if (L >= 5) { // Kroon: gouden beelden op de nok en voor de trap
-      for (const x of [-W, W]) s.ell(x, 0, z + ch + 0.46, 0.05, 0.05, 0.08, mat.gold());
+    if (L >= 4) { // Gilden: een gekleurde fries onder de kroonlijst en beelden op de nok
+      band(s, -W - 0.07, -D - 0.07, W + 0.07, D + 0.07, z + ch + 0.005, 0.035, L >= 5 ? '#d4a017' : '#b0392b');
+      for (const x of [-W, W]) { s.ell(x, 0, z + ch + 0.46, 0.05, 0.05, 0.08, L >= 5 ? mat.gold() : mat.stone('#efe7d6')); s.ell(x, 0, z + ch + 0.57, 0.03, 0.03, 0.035, L >= 5 ? mat.gold() : mat.stone('#efe7d6')); }
+    }
+    if (L >= 5) { // Kroon: gouden beelden en vuurschalen voor de trap, een gouden rand op het fronton
       for (const x of [-0.45, 0.45]) { s.box(x - 0.07, D + 0.16, 0, x + 0.07, D + 0.3, 0.22, mat.stone('#e6dfcf')); s.ell(x, D + 0.23, 0.3, 0.05, 0.05, 0.09, mat.gold()); s.ell(x, D + 0.23, 0.41, 0.03, 0.03, 0.03, mat.gold()); }
+      for (const x of [-0.82, 0.82]) { s.cyl(x, D + 0.22, 0.03, 0, 0.36, mat.metal('#3a3c40')); s.cyl(x, D + 0.22, 0.08, 0.36, 0.42, mat.gold()); s.ell(x, D + 0.22, 0.48, 0.06, 0.06, 0.09, mat.plain('#ff9d2e', true)); }
+      band(s, -W - 0.07, -D - 0.07, W + 0.07, D + 0.07, z + ch + 0.08, 0.025, '#d4a017');
     }
     return { flag: flagPole(s, 0, -D + 0.1, z + ch + 0.35, 0.35) };
   },
@@ -475,7 +846,13 @@ const TC_CIV = {
     }
     s.win('y', 0.62, -0.1, 0.1, base, base + 0.26, mat.door('#3a2a20'));
     s.box(-0.04, 0.86, 0, 0.04, 0.9, 0.5, mat.plain('#b8322a'));
-    if (L >= 5) for (const x of [-0.3, 0.3]) s.ell(x, 0, top - 0.05, 0.035, 0.03, 0.05, mat.gold()); // gouden vissen op de nok
+    if (L >= 5) { // Kroon: gouden vissen op de nok, een rode torii-poort en stenen lantaarns vooraan
+      for (const x of [-0.3, 0.3]) s.ell(x, 0, top - 0.05, 0.035, 0.03, 0.05, mat.gold());
+      for (const x of [-0.3, 0.3]) s.cyl(x, 0.95, 0.03, 0, 0.55, mat.plain('#b8322a'));
+      s.box(-0.42, 0.92, 0.5, 0.42, 0.98, 0.56, mat.plain('#b8322a'));
+      s.box(-0.36, 0.93, 0.42, 0.36, 0.97, 0.46, mat.plain('#8a2620'));
+      for (const x of [-0.62, 0.62]) { s.box(x - 0.04, 0.9, 0, x + 0.04, 0.98, 0.2, mat.stone('#9a958b')); s.box(x - 0.06, 0.88, 0.2, x + 0.06, 1.0, 0.27, mat.stone('#a29d93')); s.hip(x - 0.07, 0.87, x + 0.07, 1.01, 0.27, 0.06, mat.stone('#8f8a80'), 0); }
+    }
     return { flag: flagPole(s, 0, 0, top, 0.3) };
   },
   babylon(s, st, L) { // ziggoerat: trappen van leemsteen met een heiligdom bovenaan
@@ -491,6 +868,12 @@ const TC_CIV = {
     if (L >= 5) s.hip(-w * 0.5, -w * 0.5, w * 0.5, w * 0.5, z + 0.43, 0.2, mat.gold(), 0); // gouden heiligdom
     // trap aan de voorkant
     for (let k = 0; k < tiers * 3; k++) s.box(-0.12, 0.9 - k * 0.055, 0, 0.12, 0.95 - k * 0.055, (k + 1) * (0.26 / 3), mat.brick('#d0a870'));
+    if (L >= 4) for (const x of [-0.3, 0.3]) { // leeuwen naast de trap (Kroon: van goud), vaandels op de hoeken
+      s.box(x - 0.08, 0.84, 0, x + 0.08, 0.98, 0.1, mat.brick('#b88d58'));
+      const lm = L >= 5 ? mat.gold() : mat.stone('#d8c08a');
+      s.ell(x, 0.91, 0.17, 0.07, 0.05, 0.06, lm); s.ell(x, 0.95, 0.24, 0.04, 0.04, 0.045, lm);
+    }
+    if (L >= 5) for (const [x, y] of [[-0.9, 0.9], [0.9, 0.9], [0.9, -0.9]]) bannerCloth(s, x, y, 0.4, 0.34, st.trim || '#2c5fae');
     return { flag: flagPole(s, 0, 0, z + 0.4, 0.35) };
   },
   persia(s, st, L) { // paleis met poortboog (iwan), koepel en twee slanke torens
@@ -503,6 +886,20 @@ const TC_CIV = {
     band(s, -0.32, 0.55, 0.32, 0.72, z + 0.74, 0.05, st.trim);
     s.win('y', 0.72, -0.17, 0.17, z, z + 0.6, mat.plain('#1d2a38'));
     for (const x of [-0.8, 0.8]) { s.cyl(x, 0.75, 0.07, z, z + (L >= 4 ? 1.5 : 1.2), mat.plaster('#efe4cc', z, z + 2)); s.ell(x, 0.75, z + (L >= 4 ? 1.5 : 1.2), 0.08, 0.08, 0.1, L >= 5 ? mat.gold() : mat.glaze(st.roofC, x, 0.75)); }
+    if (L >= 4) { // Gilden: twee koepels vooraan op het dak en een band van gekleurde tegels rond het paleis
+      for (const x of [-0.5, 0.5]) {
+        s.cyl(x, 0.28, 0.19, z + 0.6, z + 0.72, mat.plaster(st.plaster, z, z + 2));
+        s.ell(x, 0.28, z + 0.72, 0.19, 0.19, 0.22, mat.glaze(st.roofC, x, 0.28), z + 0.72);
+        s.ell(x, 0.28, z + 0.95, 0.025, 0.025, 0.03, L >= 5 ? mat.gold() : mat.glaze(st.roofC, x, 0.28));
+      }
+      band(s, -0.7, -0.7, 0.7, 0.55, z + 0.3, 0.05, st.trim2 || '#d4a017');
+    }
+    if (L >= 5) { // Kroon: een lange vijver in de tuin voor de iwan, gouden banden en vaandels
+      s.box(-0.14, 0.76, 0.0, 0.14, 0.98, 0.03, mat.stone('#c4ad86'));
+      s.box(-0.11, 0.78, 0.02, 0.11, 0.96, 0.035, mat.plain('#3d7fae', true));
+      band(s, -0.7, -0.7, 0.7, 0.55, z + 0.5, 0.035, '#d4a017');
+      for (const x of [-0.45, 0.45]) bannerCloth(s, x, 0.74, 0.4, 0.36, st.trim || '#1f9a9a');
+    }
     if (L >= 5) { // Kroon: twee minaretten achteraan en een gouden top op de koepel
       for (const x of [-0.8, 0.8]) { s.cyl(x, -0.78, 0.06, z, z + 1.35, mat.plaster('#efe4cc', z, z + 2)); s.ell(x, -0.78, z + 1.35, 0.07, 0.07, 0.09, mat.glaze(st.roofC, x, -0.78)); }
       s.ell(0, -0.08, top - 0.02, 0.05, 0.05, 0.07, mat.gold());
@@ -563,7 +960,7 @@ function farm(s, st, L) {
   const soil = { k: 'dirt', c: rgb('#6a4a2c') }; const ridge = { k: 'dirt', c: rgb('#84603c') };
   s.box(-0.47, -0.47, 0, 0.47, 0.47, 0.012, soil);
   const rows = 6;
-  const free = (i, k) => (L >= 3 && i <= 1 && k === 0) || (L >= 2 && i >= 4 && k === 0);
+  const free = (i, k) => (L >= 3 && i <= 1 && k === 0) || (L >= 2 && i >= 4 && k === 0) || (L >= 4 && i <= 1 && k === 1);
   for (let i = 0; i < rows; i++) {
     const y = -0.4 + (i + 0.5) * (0.8 / rows);
     s.box(-0.43, y - 0.038, 0.012, 0.43, y + 0.038, 0.032, ridge);
@@ -620,6 +1017,14 @@ function farm(s, st, L) {
     anchors.blades = [-0.19, -0.32, 0.3];
     if (L >= 5) { s.cyl(-0.32, -0.32, 0.006, 0.56, 0.68, mat.metal('#3a3c40')); s.box(-0.36, -0.324, 0.65, -0.28, -0.316, 0.67, mat.gold()); }
   }
+  if (L >= 4) { // schuur (4) of stenen graanschuur met leien en een windwijzer (5)
+    const bx0 = 0.04; const bx1 = 0.43; const by0 = -0.43; const by1 = -0.16; const bh = L >= 5 ? 0.4 : 0.32;
+    if (L >= 5) walls(s, st, bx0, by0, bx1, by1, 0.012, bh, { wall: st.wall === 'timber' ? 'stone' : st.wall });
+    else s.box(bx0, by0, 0.012, bx1, by1, bh, mat.wood('#8a5a30'));
+    const rt = roof(s, st, bx0 - 0.02, by0 - 0.02, bx1 + 0.02, by1 + 0.02, bh, 0.2, 'x', { level: L >= 5 ? 3 : 2 });
+    s.win('y', by1, 0.16, 0.3, 0.012, 0.26, mat.door('#5a3a1e'));
+    if (L >= 5) { goldVane(s, 0.235, -0.295, rt); for (const [x, y] of [[0.47, 0.47], [-0.47, 0.47]]) lampPost(s, x, y, 0.3); }
+  }
   return anchors;
 }
 
@@ -663,53 +1068,93 @@ function academy(s, st, L, civ, v = 0) {
   return A;
 }
 
-// Gildehuis: hoog koopmanshuis met een trapgevel, een hijsbalk en een gouden uithangbord
+// Gildehuis: hoog koopmanshuis met een trapgevel; 2 een pakhuisje ernaast; 3 een erker met een eigen dakje;
+// 4 een klokkentorentje; 5 gouden sierstukken op de gevel en vaandels.
 function guild(s, st, L) {
-  const x0 = -0.32; const x1 = 0.3; const y0 = -0.36; const y1 = 0.2; const h = 0.86 + L * 0.07;
+  const x0 = -0.32; const x1 = 0.3; const y0 = -0.36; const y1 = 0.2; const h = 0.82 + L * 0.08;
   s.box(x0 - 0.03, y0 - 0.03, 0, x1 + 0.03, y1 + 0.03, 0.1, mat.stone(st.base));
   walls(s, st, x0, y0, x1, y1, 0.1, h, { wall: st.wall === 'timber' ? 'stone' : st.wall, c: st.wall === 'timber' ? '#b9a07a' : null });
-  // trapgevel aan de voorkant (+y), anders het dak van het volk
+  let top = h + 0.42;
   if (st.roof === 'gable' || st.roof === 'greek' || st.roof === 'flat' || st.roof === 'crenel') {
     s.gable(x0, y0, x1, y1, h, 0.42, 'y', mat.tiles(st.roofC || '#9a4630'), 0.03);
     const m = st.wall === 'brick' ? mat.brick(st.stone) : mat.stone(st.roof === 'flat' ? '#d8bf8a' : '#c9b48e');
-    for (let k = 0; k < 4; k++) { const w = (x1 - x0) / 2 - k * 0.075; s.box(-0.01 - w, y1 - 0.02, h + k * 0.1, -0.01 + w, y1 + 0.03, h + (k + 1) * 0.1, m); }
-  } else roof(s, st, x0, y0, x1, y1, h, 0.42, 'y', { level: 3 });
-  // arcade beneden, grote ramen boven
+    for (let k = 0; k < 4; k++) {
+      const w = (x1 - x0) / 2 - k * 0.075;
+      s.box(-0.01 - w, y1 - 0.02, h + k * 0.1, -0.01 + w, y1 + 0.03, h + (k + 1) * 0.1, m);
+      if (L >= 5) for (const sx of [-1, 1]) s.ell(-0.01 + sx * w, y1 + 0.005, h + (k + 1) * 0.1 + 0.02, 0.018, 0.018, 0.022, mat.gold());
+    }
+  } else top = roof(s, st, x0, y0, x1, y1, h, 0.42, 'y', { level: 3 });
   for (const a of [-0.26, -0.06, 0.14]) s.win('y', y1, a, a + 0.12, 0.1, 0.34, mat.plain('#2a2018'));
   for (let z = 0.45; z + 0.18 < h; z += 0.24) for (const a of [-0.24, -0.02, 0.18]) window2(s, 'y', y1, a, z, 0.08, 0.15);
   for (let z = 0.45; z + 0.18 < h; z += 0.24) window2(s, 'x', x1, -0.12, z, 0.1, 0.15);
   if (st.trim) band(s, x0, y0, x1, y1, h - 0.06, 0.03, st.trim);
-  // hijsbalk en balen
   s.box(-0.04, y1, h + 0.12, 0.02, y1 + 0.14, h + 0.16, mat.wood('#5a3a1e'));
   s.cap([-0.01, y1 + 0.13, h + 0.12], [-0.01, y1 + 0.13, 0.36], 0.004, mat.plain('#cdbb92'));
   s.box(-0.05, y1 + 0.1, 0.28, 0.03, y1 + 0.18, 0.36, mat.cloth('#b0854a'));
-  // uithangbord met een gouden munt
   s.box(x1, y1 - 0.06, 0.62, x1 + 0.1, y1 - 0.05, 0.64, mat.metal('#3a3c40'));
   s.hcyl('x', y1 - 0.055, 0.56, 0.05, x1 + 0.07, x1 + 0.08, mat.gold());
-  for (const [x, y] of [[0.38, -0.1], [0.4, 0.06], [0.39, -0.02]]) s.box(x - 0.05, y - 0.04, 0, x + 0.05, y + 0.04, 0.09, mat.cloth(['#8a5f33', '#a8743f', '#7a4a2a'][Math.round(x * 100) % 3]));
-  barrel(s, -0.4, 0.3); if (L >= 2) crate(s, 0.3, 0.36, 0.05);
-  return { flag: flagPole(s, x0 + 0.05, y0 + 0.05, h + 0.3, 0.3) };
+  barrel(s, -0.4, 0.3);
+  if (L >= 2) { // pakhuisje aan de zijkant met balen
+    walls(s, st, x1 + 0.02, y0 + 0.04, 0.46, y0 + 0.3, 0.0, 0.36, { wall: st.wall === 'timber' ? 'timber' : st.wall });
+    roof(s, st, x1, y0 + 0.02, 0.48, y0 + 0.32, 0.36, 0.14, 'x', { level: 2 });
+    for (const [x, y] of [[0.38, 0.0], [0.4, 0.12]]) s.box(x - 0.05, y - 0.04, 0, x + 0.05, y + 0.04, 0.09, mat.cloth('#a8743f'));
+    crate(s, 0.3, 0.36, 0.05);
+  }
+  if (L >= 3) { // erker op de verdieping en een overdekte galerij voor de deur
+    s.box(-0.12, y1, 0.5, 0.1, y1 + 0.09, 0.72, mat.wood('#6b4523'));
+    window2(s, 'y', y1 + 0.09, -0.08, 0.54, 0.14, 0.14);
+    s.hip(-0.14, y1 - 0.01, 0.12, y1 + 0.11, 0.72, 0.08, mat.slate('#5c6370'), 0.01);
+    for (const x of [x0 + 0.02, -0.14, 0.08, x1 - 0.02]) s.cyl(x, y1 + 0.16, 0.022, 0.1, 0.38, mat.plaster('#f1ebde', 0.1, 0.38));
+    s.box(x0, y1 + 0.13, 0.36, x1, y1 + 0.19, 0.39, mat.wood('#5a3a1e'));
+    s.hip(x0 - 0.02, y1 - 0.02, x1 + 0.02, y1 + 0.21, 0.39, 0.07, mat.tiles(st.roofC || '#9a4630'), 0.01);
+  }
+  let flag = flagPole(s, x0 + 0.05, y0 + 0.05, h + 0.3, 0.3);
+  if (L >= 4) { // klokkentorentje achteraan
+    const tx = x0 + 0.1; const ty = y0 + 0.1;
+    walls(s, st, tx - 0.08, ty - 0.08, tx + 0.08, ty + 0.08, h - 0.1, top + 0.15, { wall: st.wall === 'timber' ? 'stone' : st.wall, c: st.wall === 'timber' ? '#b9a07a' : null });
+    s.hcyl('y', tx, top + 0.02, 0.045, ty + 0.078, ty + 0.085, mat.plain('#f4efe0'));
+    const tt = turretTop(s, st, tx, ty, 0.09, top + 0.15, 0.24);
+    if (L >= 5) goldVane(s, tx, ty, tt); else flag = flagPole(s, tx, ty, tt, 0.22);
+  }
+  if (L >= 5) { bannerCloth(s, x0 - 0.06, y1 + 0.1, 0.3, 0.28, st.trim || '#7a2b2b'); bannerCloth(s, x1 + 0.1, y1 + 0.12, 0.3, 0.28, st.trim2 || st.trim || '#2c5fae'); }
+  return { flag };
 }
 
-// Bouwloods: open loods, een houten kraan met een steenblok en stapels balken en blokken
+// Bouwloods: 1 open loods met een kraan; 2 een opslag van steenblokken en een tweede, kleinere kraan; 3 een gesloten
+// werkplaats met pannen, een vaandel en een gouden piek op de kraan.
 function lodge(s, st, L) {
-  const x0 = -0.4; const x1 = 0.06; const y0 = -0.4; const y1 = 0.02; const h = 0.42 + L * 0.04;
-  for (const [x, y] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) s.box(x - 0.022, y - 0.022, 0, x + 0.022, y + 0.022, h, mat.wood('#6b4523'));
-  s.box(x0, y0 - 0.02, 0, x1, y0 + 0.01, h * 0.75, mat.wood('#7a5129'));
-  roof(s, st, x0, y0, x1, y1, h, 0.24, 'x', { level: 2, roof: st.roof === 'pagoda' ? 'pagoda' : 'gable' });
-  logPile(s, -0.17, -0.18, 3);
+  const x0 = -0.42; const x1 = 0.06; const y0 = -0.42; const y1 = 0.02; const h = 0.42 + L * 0.06;
+  if (L >= 3) {
+    walls(s, st, x0, y0, x1, y1, 0.04, h, { wall: st.wall === 'timber' ? 'timber' : st.wall });
+    s.box(x0 - 0.02, y0 - 0.02, 0, x1 + 0.02, y1 + 0.02, 0.04, mat.stone(st.base));
+    door(s, 'y', y1, -0.3, -0.12, 0.04, 0.32, st);
+    window2(s, 'x', x1, -0.3, 0.2, 0.1, 0.12);
+  } else {
+    for (const [x, y] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) s.box(x - 0.022, y - 0.022, 0, x + 0.022, y + 0.022, h, mat.wood('#6b4523'));
+    s.box(x0, y0 - 0.02, 0, x1, y0 + 0.01, h * 0.75, mat.wood('#7a5129'));
+    logPile(s, -0.18, -0.18, 3);
+  }
+  roof(s, st, x0 - 0.02, y0 - 0.02, x1 + 0.02, y1 + 0.02, h, 0.24, 'x', { level: L + 1, roof: st.roof === 'pagoda' ? 'pagoda' : st.roof === 'gable' || st.roof === 'greek' ? st.roof : 'gable' });
   // kraan
-  const cx = 0.26; const cy = -0.2; const ch = 0.95 + L * 0.12;
+  const cx = 0.26; const cy = -0.2; const ch = 0.9 + L * 0.14;
   s.box(cx - 0.03, cy - 0.03, 0, cx + 0.03, cy + 0.03, ch, mat.wood('#5a3a1e'));
   for (const [dx, dy] of [[-0.12, 0], [0.12, 0], [0, -0.12], [0, 0.12]]) s.cap([cx + dx, cy + dy, 0], [cx, cy, 0.32], 0.012, mat.wood('#6b4523'));
   s.cap([cx, cy, ch - 0.04], [cx - 0.04, cy + 0.52, ch + 0.14], 0.018, mat.wood('#6b4523'));
   s.cap([cx, cy, ch + 0.02], [cx - 0.04, cy + 0.52, ch + 0.14], 0.004, mat.plain('#cdbb92'));
   s.cap([cx - 0.04, cy + 0.5, ch + 0.12], [cx - 0.04, cy + 0.5, 0.42], 0.004, mat.plain('#cdbb92'));
   s.box(cx - 0.1, cy + 0.42, 0.3, cx + 0.02, cy + 0.56, 0.42, mat.stone('#d3cbb8'));
-  s.hcyl('y', cx - 0.08, 0.14, 0.12, cy - 0.06, cy - 0.02, mat.wood('#7a5129')); // tredmolen
-  for (const [x, y, z] of [[0.3, 0.3, 0], [0.4, 0.22, 0], [0.34, 0.26, 0.08], [-0.3, 0.32, 0]]) s.box(x - 0.05, y - 0.04, z, x + 0.05, y + 0.04, z + 0.08, mat.stone('#cfc6b2'));
-  if (L >= 2) { s.box(-0.42, 0.14, 0, -0.1, 0.24, 0.06, mat.wood('#9c6b3c')); s.box(-0.4, 0.15, 0.06, -0.12, 0.23, 0.1, mat.wood('#8a5f33')); }
-  if (L >= 3) for (const x of [-0.1, 0.0]) s.box(x - 0.012, 0.3, 0, x + 0.012, 0.32, 0.55, mat.wood('#7a5129'));
+  s.hcyl('y', cx - 0.08, 0.14, 0.12, cy - 0.06, cy - 0.02, mat.wood('#7a5129'));
+  blocks(s, 0.3, 0.26, L >= 2 ? 6 : 3);
+  if (L >= 2) { // steenblokken en een kleine kraan
+    blocks(s, -0.3, 0.3, 6, '#cfc6b2'); blocks(s, -0.08, 0.36, 4);
+    hoist(s, -0.44, 0.1, 0.6);
+    planks(s, -0.2, 0.18, 3);
+  }
+  if (L >= 3) {
+    goldVane(s, cx, cy, ch + 0.02);
+    bannerCloth(s, x1 + 0.08, y1 + 0.08, 0.24, 0.24, st.trim || '#7a2b2b');
+    return { flag: flagPole(s, x0 + 0.06, y0 + 0.06, h + 0.25, 0.3) };
+  }
   return {};
 }
 
