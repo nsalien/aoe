@@ -167,6 +167,11 @@ Daarom:
 - `public/js/dom.js` — `setHTML()` werkt panelen bij zonder ze te vervangen. Gebruik dit (geen `innerHTML`) voor alles
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.
+- **Clan verplaatsen** (`functions/lib/relocate.js`): `relocateTeam` zet alle steden van een clan op een willekeurige plek op
+  bebouwbaar land, zo ver mogelijk van de andere steden (clanleden naast elkaar via `findSpot`), past de lijnen van lopende
+  legers aan (`marches.from_x/to_x`) en stuurt de spelers een bericht. Beheer: knop 'Clan verplaatsen' (`/admin/relocate`).
+  **Eenmalige opdrachten** zonder toegang tot de echte database: zet ze in `ONE_OFF` (met `until`); de cron-worker voert ze
+  één keer uit (`runOneOff`, `config` `once:<key>`, eerst `busy:<tijd>`, na 5 min opnieuw als het onderbroken werd).
 - `public/js/art.js` — procedurele tekeningen (gebouwen, mensen, bomen; geen afbeeldingsbestanden).
 - `public/js/troops.js` — uitzicht van de soldaten (`soldierOpts`, `lookOf`): uitrusting volgens de smidse (`gear`, `plate`)
   en details van het onderzoek (`kit`: S schild, P pluim, G goud, F vuurpijlen, L lange boog, Q twee pijlkokers, B kleed,
