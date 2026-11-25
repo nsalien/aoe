@@ -956,7 +956,10 @@ function openPanelMobile(open) {
 // ---------- tekenlus ----------
 let lastT = performance.now();
 let modalEl = null;
+const pacer = new FX.Pacer();
 function frame(t) {
+  // hooguit ±60 beelden per seconde, ook op een scherm van 90/120 Hz (zie FX.Pacer)
+  if (!pacer.ok(t)) { requestAnimationFrame(frame); return; }
   // achter een open venster (vervaagd) is 60 beelden per seconde verspilling: 5 per seconde volstaat
   if (!modalEl) modalEl = $('#modal');
   const behind = !!(modalEl && !modalEl.hidden);

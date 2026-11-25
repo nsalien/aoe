@@ -23,6 +23,8 @@ import { runFight, lastSwing, maxHp } from '../shared/skirmish.js';
 const N = TOWN_GRID;
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
 const BAKE = FX.LOW_POWER ? 0.9 : 1.25;
+// aanraakscherm (gsm, tablet): daar remt vaak de GPU, niet het rekenwerk (adaptQuality)
+const TOUCH = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
 const SPRITE_H = { tc: 120, tower: 115, monument: 130, barracks: 70, house: 60, workshop: 60, smithy: 70 };
 // gereedschap per soort werk
@@ -193,7 +195,7 @@ const spriteQ = (need) => (need > 4.5 ? 6 : need > 3 ? 4 : 2.5);
 export class TownView {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false }); // ondoorzichtig: elk beeld begint met een volle achtergrond (sneller samenstellen op een gsm)
     this.cam = new Camera(canvas, { zoom: window.innerWidth < 700 ? 1.1 : 1.45, minZoom: 0.38, maxZoom: 2.8 });
     const c = toWorld(N / 2, N / 2);
     this.cam.x = c.x; this.cam.y = c.y - 30;
@@ -2376,11 +2378,14 @@ export class TownView {
     const cam = this.cam;
     const now = performance.now();
     const reset = () => { this.frameN = 0; this.measMs = 0; this.frameAvg = 0; this.workAvg = 0; };
-    if (this.frameAvg > 25 && (this.workAvg > 8 || this.frameAvg > 40) && cam.quality > 0.55) {
+    // traag = minder dan ±40 beelden per seconde én veel rekenwerk (of heel traag). Op een gsm (aanraakscherm) is het
+    // vullen van de pixels (GPU) vaak de rem en niet het rekenwerk: daar volstaat minder dan ±33 beelden per seconde.
+    const slow = this.frameAvg > Math.max(25, FX.frameMs * 1.4) && (this.workAvg > 8 || this.frameAvg > (TOUCH ? 30 : 40));
+    if (slow && cam.quality > 0.55) {
       this.qFail = { q: cam.quality, at: now };
       cam.quality = Math.max(0.55, Math.round((cam.quality - 0.15) * 100) / 100);
       reset();
-    } else if (cam.quality < 1 && this.measMs > 6000 && this.frameAvg < 18.5 && this.workAvg < 6) {
+    } else if (cam.quality < 1 && this.measMs > 6000 && this.frameAvg < FX.frameMs * 1.12 && this.workAvg < 6) {
       const up = Math.min(1, Math.round((cam.quality + 0.15) * 100) / 100);
       if (!this.qFail || this.qFail.q > up + 0.01 || now - this.qFail.at > 60000) { cam.quality = up; reset(); }
     }

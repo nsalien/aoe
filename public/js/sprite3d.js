@@ -19,7 +19,7 @@ const delPending = (k) => { if (pending.delete(k) && !k.includes('@')) basePendi
 let worker = null;
 let failed = false;
 let ready = 0;
-const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4);
+const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4 || /Android/i.test(navigator.userAgent || ''));
 // eenmaal gerenderde gebouwen bewaren in de browser (Cache Storage), zodat dat maar één keer gebeurt.
 // Verhoog VERSION als de modellen of de renderer veranderen. (10: figuren worden mét hun rand bewaard)
 const VERSION = 10;

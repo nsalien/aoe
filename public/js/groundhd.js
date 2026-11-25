@@ -8,7 +8,7 @@ const TAU = Math.PI * 2;
 
 // resolutie (pixels per wereldpixel) en breedte van een stuk in wereldpixels: elk stuk is ±512-576 pixels breed.
 // Ook op een gsm (klein scherm = weinig stukken) gaan we tot 6; enkel echt trage toestellen (≤ 4 kernen) tot 4,5.
-const WEAK = typeof navigator !== 'undefined' && (navigator.hardwareConcurrency || 8) <= 4;
+const WEAK = typeof navigator !== 'undefined' && ((navigator.hardwareConcurrency || 8) <= 4 || /Android/i.test(navigator.userAgent || ''));
 export const HD_TIERS = WEAK ? [[2, 256], [3, 192], [4.5, 128]] : [[2, 256], [3, 192], [4.5, 128], [6, 96]];
 export const HD_FROM = 1.4; // vanaf zoveel schermpixels per wereldpixel (lager: de gebakken grond is scherp genoeg)
 const BUDGET = (WEAK ? 5 : 8) * 1e6; // pixels in het geheugen (± 4 bytes per pixel)

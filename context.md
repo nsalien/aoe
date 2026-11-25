@@ -435,6 +435,15 @@ minuut een bot aan de beurt als niemand online is.
     `rijken-van-de-vallei-meldingen` online (elke minuut; deploylog: "✔ meldingen worden elke minuut verstuurd"). Zonder dat
     recht zouden 'bouwer vrij' en de ±2 min-melding pas uitgaan bij het eerstvolgende verzoek van eender wie.
 
+49. **Oorlog loont, bots in golven** (zie §3): meer buit per tijdperk, krijgsbuit voor de winnaar, meer gevechtspunten;
+    bots enkel tegen ongeveer even sterke spelers en clanaanvallen in golven van 10 minuten (cron-worker laat ook bots spelen).
+
+50. **Android vlotter** (gemeld: "nog behoorlijk laggy, vooral op mijn Android-gsm; op iPhone vrij vlot"). Oorzaak die we
+    zonder toestel konden vinden: Chrome op Android tekent op schermen van 90/120 Hz tot 2x zoveel beelden als Safari op een
+    iPhone (die begrenst op 60), en Android-gsm's melden 8 kernen waardoor ze liggend de zware pc-instellingen kregen.
+    Nu: hooguit ±60 beelden/s (`FX.Pacer`), Android altijd licht, ondoorzichtige canvassen, resolutie sneller omlaag op
+    een aanraakscherm. Nog niet getest op een echt Android-toestel: vraag de gebruiker of het beter is.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog

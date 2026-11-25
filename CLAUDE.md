@@ -250,6 +250,10 @@ Daarom:
   Een sprite kan dus een canvas of een `ImageBitmap` zijn: gebruik `.cv` enkel als bron voor `drawImage`.
 - **Beeldkwaliteit** (`adaptQuality` in `town.js`): beelden tijdens het laden (`S3.busy()`, grondstukken, open venster)
   tellen niet mee; traag = < ±40 beelden/s én veel tekentijd (`workMs`); gaat het vlot, dan gaat de resolutie terug omhoog.
+- **Hooguit ±60 beelden per seconde** (`FX.Pacer` in `main.js` en `battleview.js`): Chrome op Android tekent anders op 90/120 Hz
+  (Safari op de iPhone begrenst zelf). Android (`FX.ANDROID`) krijgt altijd de lichte instellingen (`LOW_POWER`, ook liggend;
+  `WEAK` in `groundhd.js`, `LOW` in `sprite3d.js`). Het stads- en wereldcanvas zijn ondoorzichtig (`alpha: false`).
+  `adaptQuality` verlaagt op een aanraakscherm de resolutie al onder ±33 beelden/s (daar remt meestal de GPU).
 - **Geen `backdrop-filter`** op iets dat altijd boven de spelkaart ligt (de kaart verandert elk beeld). Achter een open
   venster tekent de stad 5 keer per seconde.
 - **Werk bij het opstarten uitstellen**: miniaturen (`lazyThumb` in `ui.js`: eerst een leeg plaatje, de tekening volgt op de
