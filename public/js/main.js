@@ -273,6 +273,8 @@ function startGame(data) {
   town.centerOn(tc);
   setInterval(tick, 1000);
   setInterval(poll, 20000);
+  // de wereldkaart alvast op de achtergrond voorbereiden (anders hapert het even als je ze voor het eerst opent)
+  setTimeout(() => { if (!app.map) loadMap(true); }, 6000);
   initPush();
   // geopend vanuit een melding: het adres opruimen (de aftelbalk toont de rest)
   if (location.search) history.replaceState(null, '', location.pathname);
@@ -469,15 +471,16 @@ async function refresh() {
   try { applyState(await get('/state')); } catch (e) { toast(e.message, 'err'); }
 }
 
-async function loadMap() {
+// quiet: op de achtergrond (na het opstarten), zodat de wereldkaart klaar is als je ze opent
+async function loadMap(quiet = false) {
   try {
     const map = await get('/map');
     app.map = map;
     app.mapAt = Date.now();
     world.setWorld(app.data.world.seed, app.data.world.size);
-    world.setData(map, app.data.town.id, app.data.me.teamId);
+    world.setData(map, app.data.town.id, app.data.me.teamId, quiet && app.view !== 'world');
     if (app.view === 'world') renderPanel();
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) { if (!quiet) toast(e.message, 'err'); }
 }
 
 let tickN = 0;
@@ -1024,8 +1027,14 @@ function switchView(v) {
   $('#worldCanvas').hidden = v !== 'world';
   if (v === 'world') {
     cancelPlace();
+    // de eerste keer: op je eigen stad (ook als de kaart al op de achtergrond geladen werd)
+    const first = !app.worldSeen;
+    app.worldSeen = true;
     if (!app.map) loadMap().then(() => world.centerOnTile(app.data.town.x, app.data.town.y));
-    else if (Date.now() - app.mapAt > 20000) loadMap();
+    else {
+      if (first) world.centerOnTile(app.data.town.x, app.data.town.y);
+      if (Date.now() - app.mapAt > 20000) loadMap();
+    }
   }
   renderAll();
 }
