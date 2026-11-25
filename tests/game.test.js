@@ -2154,3 +2154,33 @@ test('zolang de cron-worker draait, verwerkt een gewoon verzoek enkel de eigen l
 
 // vingerafdruk van het gebied rond enkele steden, berekend met de code van vóór de versnelling (25/11)
 const GOLDEN_TERR = ["460196450:676:22,-7.4;-3.9,-12.8;7.4,-9.2;26.2,-1.1;-12.6,12.8;-11.9,-4.2;26.7,13.2;18.8,-12.8;8.7,25.3","153139303:565:21.9,-4.3;13.4,20.1;22.5,21.3;-8.6,11.9;-5,22.2;8.8,19.9;-9.3,17.5;-9,-12.1;-11.4,-7.6","-1797553060:701:-5.7,20.1;13.7,22.7;-9.5,-8.4;0.6,22;25.7,10.3;-3.1,-14.9;-7.8,12.3;-2.7,-7.9;18.6,-14.2","-1563183414:642:-12.7,16.6;10.3,24.6;-2.8,-10.6;-8.2,26.7;15.4,-11.1;9.7,-6.2;-8.8,-6;-12.5,-1.1;-10.4,21.1"];
+
+test('chat: /state telt ongelezen berichten van anderen per kanaal (max. 9) en geeft het laatste bericht mee', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 2, seed: 5 });
+  db.raw.prepare('UPDATE world SET start_at = ?').run(Date.now() - 3600000);
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
+  const b = await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greek' });
+  for (let k = 0; k < 3; k++) await call('POST', '/chat', { channel: 'world', text: `hallo ${k}` }, b.cookie);
+  for (let k = 0; k < 2; k++) await call('POST', '/chat', { channel: 'team', text: `team ${k}` }, b.cookie);
+  await call('POST', '/chat', { channel: 'world', text: 'van mij' }, a.cookie);
+  let st = (await call('GET', '/state?cw=0&ct=0', null, a.cookie)).data.chat;
+  assert.equal(st.newWorld, 3, 'eigen berichten tellen niet');
+  assert.equal(st.newTeam, 2, 'Anna en Bert zitten samen in een clan');
+  assert.equal(st.lastWorld.name, 'Anna');
+  assert.equal(st.lastWorld.me, 1);
+  assert.equal(st.lastTeam.name, 'Bert');
+  assert.equal(st.lastTeam.text, 'team 1');
+  st = (await call('GET', `/state?cw=${st.world}&ct=${st.team}`, null, a.cookie)).data.chat;
+  assert.equal(st.newWorld + st.newTeam, 0, 'alles gezien');
+  for (let k = 0; k < 14; k++) await call('POST', '/chat', { channel: 'world', text: `veel ${k}` }, b.cookie);
+  st = (await call('GET', '/state?cw=0&ct=0', null, a.cookie)).data.chat;
+  assert.equal(st.newWorld, 9, 'hooguit 9 geteld (9+)');
+});

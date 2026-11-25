@@ -225,15 +225,25 @@ route('GET', '/state', { auth: true }, async (ctx) => {
   const mySupport = (await db.prepare(
     'SELECT s.id, s.units, t.name, t.x, t.y FROM support s JOIN towns t ON t.id = s.host_town WHERE s.player_id = ?',
   ).bind(player.id).all()).results.map((r) => ({ id: r.id, host: r.name, x: r.x, y: r.y, units: JSON.parse(r.units) }));
-  // ongelezen rapporten en het laatste chatbericht per kanaal in één vraag (elke deelvraag leest via een index)
+  // ongelezen rapporten en chat in één vraag (elke deelvraag leest via een index): het laatste bericht per kanaal (met
+  // naam en tekst voor een melding) en hoeveel berichten van anderen nieuwer zijn dan wat de browser al zag (cw/ct;
+  // hooguit 9 geteld = '9+', zo blijft het aantal gelezen rijen per peiling klein)
+  const teamCh = `team:${player.team_id}`;
+  const seenW = Math.max(0, int(ctx.url.searchParams.get('cw')));
+  const seenT = Math.max(0, int(ctx.url.searchParams.get('ct')));
   const counts = await db.prepare(
     `SELECT (SELECT COUNT(*) FROM reports WHERE player_id = ? AND seen = 0) AS unseen,
             (SELECT MAX(id) FROM messages WHERE channel = 'world') AS lw,
-            (SELECT MAX(id) FROM messages WHERE channel = ?) AS lt`,
-  ).bind(player.id, `team:${player.team_id}`).first();
+            (SELECT MAX(id) FROM messages WHERE channel = ?) AS lt,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE channel = 'world' AND id > ? AND player_id != ? LIMIT 9)) AS nw,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE channel = ? AND id > ? AND player_id != ? LIMIT 9)) AS nt,
+            (SELECT json_object('name', name, 'text', substr(text, 1, 90), 'me', player_id = ?) FROM messages WHERE channel = 'world' ORDER BY id DESC LIMIT 1) AS pw,
+            (SELECT json_object('name', name, 'text', substr(text, 1, 90), 'me', player_id = ?) FROM messages WHERE channel = ? ORDER BY id DESC LIMIT 1) AS pt`,
+  ).bind(player.id, teamCh, seenW, player.id, teamCh, seenT, player.id, player.id, player.id, teamCh).first();
   const unseen = { c: counts.unseen };
   const lastWorld = { last: counts.lw };
   const lastTeam = { last: counts.lt };
+  const preview = (j) => { try { return j ? JSON.parse(j) : null; } catch { return null; } };
   const battles = await myBattles(db, player.id, now);
   const vassals = (await db.prepare(
     'SELECT v.town_id, v.until, v.next_tribute, t.name, t.x, t.y, p.name AS pname FROM vassals v JOIN towns t ON t.id = v.town_id JOIN players p ON p.id = v.player_id WHERE v.lord_player = ?',
@@ -247,7 +257,10 @@ route('GET', '/state', { auth: true }, async (ctx) => {
     team: team && { id: team.id, name: team.name, color: team.color },
     town: { id: townRow.id, name: townRow.name, x: townRow.x, y: townRow.y, state },
     awayPop: away, marches, supportHere, mySupport, unseenReports: unseen.c, battles, vassals,
-    chat: { world: lastWorld.last || 0, team: lastTeam.last || 0 },
+    chat: {
+      world: lastWorld.last || 0, team: lastTeam.last || 0, newWorld: counts.nw || 0, newTeam: counts.nt || 0,
+      lastWorld: preview(counts.pw), lastTeam: preview(counts.pt),
+    },
   });
 });
 

@@ -175,6 +175,13 @@ Daarom:
 - `public/js/dom.js` — `setHTML()` werkt panelen bij zonder ze te vervangen. Gebruik dit (geen `innerHTML`) voor alles
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.
+- **Ongelezen chat**: de browser stuurt bij elke peiling mee wat hij al zag (`/state?cw=&ct=`, ook de vroege fetch in
+  `index.html`); `/state` geeft in dezelfde D1-vraag als de rapporten `chat.newWorld/newTeam` (berichten van anderen, max. 9)
+  en het laatste bericht per kanaal (`lastWorld/lastTeam` = naam, tekst, `me`). `main.js`: `chatState` (gezien bijhouden in
+  localStorage `rvs-chat-seen`; eerste keer op een toestel telt oude geschiedenis niet), `renderChatBadges`: getal op de
+  Team-knop (pulseert), knop `#chatPill` bovenaan op de kaart ('3 nieuwe berichten', tik = `openChat`), '(3)' in de titel
+  van het tabblad, getal per kanaal in de chat, en een melding (`toast(..., 'chatmsg', 'chat', 'openChat:team')`) met wie
+  wat schreef. Let op: geef een toast nooit de klasse `chat` (dat is het chatvenster).
 - **Clan verplaatsen** (`functions/lib/relocate.js`): `relocateTeam` zet alle steden van een clan op een willekeurige plek op
   bebouwbaar land, zo ver mogelijk van de andere steden (clanleden naast elkaar via `findSpot`), past de lijnen van lopende
   legers aan (`marches.from_x/to_x`) en stuurt de spelers een bericht. Beheer: knop 'Clan verplaatsen' (`/admin/relocate`).

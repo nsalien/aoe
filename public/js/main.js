@@ -165,9 +165,10 @@ let authWorld = null;
 let battle = null;
 
 // ---------- meldingen ----------
-function toast(msg, type = '', ic = null) {
+function toast(msg, type = '', ic = null, action = null) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
+  if (action) { const [a, arg] = action.split(':'); el.dataset.action = a; if (arg) el.dataset.chan = arg; el.classList.add('tap'); }
   const name = ic || (type === 'err' ? 'bell' : type === 'ok' ? 'star' : 'scroll');
   el.innerHTML = `${UI.icon(name)}<span>${UI.esc(msg)}</span>`;
   const box = $('#toasts');
@@ -337,9 +338,8 @@ function applyState(data, first = false) {
   app.seenReports = data.unseenReports;
   const br = $('#badgeReports');
   br.hidden = !data.unseenReports; br.textContent = data.unseenReports;
-  // chat
-  const chatNew = ['team', 'world'].some((c) => (data.chat[c] || 0) > (app.chat.seen[c] || 0));
-  $('#badgeChat').hidden = !chatNew;
+  // chat: ongelezen berichten (team en iedereen) duidelijk tonen, met een melding bij een nieuw bericht
+  chatState(data.chat, first);
   handleBattles(data, first);
   // inkomende aanvallen
   for (const m of data.marches) {
@@ -481,7 +481,7 @@ function announceLog(terr) {
 async function poll() {
   if (document.hidden || !app.data || fieldQueue.length) return;
   try {
-    const data = await get('/state');
+    const data = await get(statePath());
     applyState(data);
     if (app.view === 'world' && Date.now() - app.mapAt > 40000) loadMap();
   } catch (e) {
@@ -490,7 +490,7 @@ async function poll() {
 }
 
 async function refresh() {
-  try { applyState(await get('/state')); } catch (e) { toast(e.message, 'err'); }
+  try { applyState(await get(statePath())); } catch (e) { toast(e.message, 'err'); }
 }
 
 // quiet: op de achtergrond (na het opstarten), zodat de wereldkaart klaar is als je ze opent
@@ -1199,7 +1199,10 @@ async function openModal(type, arg) {
     try {
       app.team = (await get('/team')).members;
       body.innerHTML = UI.teamHtml(app, app.team, app.chat.chan);
+      renderChatBadges();
       loadChat();
+      // meteen naar de chat scrollen als je via 'nieuwe berichten' kwam
+      const ch = body.querySelector('.chat'); if (ch && (app.chat.unread || {})[app.chat.chan]) ch.scrollIntoView({ block: 'start' });
       chatTimer = setInterval(loadChat, 8000);
     } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
@@ -1240,9 +1243,68 @@ async function loadChat() {
       app.chat.seen[chan] = messages[messages.length - 1].id;
       store.set('rvs-chat-seen', app.chat.seen);
     }
-    const chatNew = ['team', 'world'].some((c) => (app.data.chat[c] || 0) > (app.chat.seen[c] || 0));
-    $('#badgeChat').hidden = !chatNew;
+    if (app.chat.unread) app.chat.unread[chan] = 0;
+    renderChatBadges();
   } catch { /* stil */ }
+}
+
+// /state vraagt meteen hoeveel chatberichten nieuwer zijn dan wat deze browser al zag
+function statePath() {
+  const s = app.chat.seen || {};
+  return `/state?cw=${s.world || 0}&ct=${s.team || 0}`;
+}
+
+// Ongelezen chat. chat = { world, team: laatste id per kanaal, newWorld/newTeam: zoveel nieuwer van anderen (max. 9),
+// lastWorld/lastTeam: laatste bericht { name, text, me } }.
+function chatState(chat, first) {
+  if (!chat) return;
+  const seen = app.chat.seen;
+  // eerste keer op dit toestel: oude berichten tellen niet als nieuw
+  if (seen.world == null && seen.team == null) { seen.world = chat.world || 0; seen.team = chat.team || 0; store.set('rvs-chat-seen', seen); }
+  const open = app.modal === 'team';
+  const prev = app.chat.last || {};
+  const unread = { world: 0, team: 0 };
+  for (const [c, n, last] of [['world', chat.newWorld, chat.lastWorld], ['team', chat.newTeam, chat.lastTeam]]) {
+    const id = chat[c] || 0;
+    if (id <= (seen[c] || 0)) continue;
+    if (!n || (open && app.chat.chan === c)) { seen[c] = id; store.set('rvs-chat-seen', seen); continue; } // enkel eigen berichten, of je leest mee
+    unread[c] = n;
+    // een nieuw bericht sinds de vorige peiling: kort tonen wie wat schreef (tik = naar de chat)
+    if (!first && prev[c] != null && id > prev[c] && last && !last.me) {
+      toast(`${c === 'team' ? 'Teamchat' : 'Iedereen'} · ${last.name}: ${last.text}`, 'chatmsg', 'chat', `openChat:${c}`);
+    }
+  }
+  app.chat.last = { world: chat.world || 0, team: chat.team || 0 };
+  app.chat.unread = unread;
+  renderChatBadges();
+}
+
+function renderChatBadges() {
+  const u = app.chat.unread || { world: 0, team: 0 };
+  const total = (u.world || 0) + (u.team || 0);
+  const txt = total >= 9 ? '9+' : String(total);
+  const b = $('#badgeChat');
+  b.hidden = !total; b.textContent = txt;
+  b.classList.toggle('pulse', total > 0);
+  const pill = $('#chatPill');
+  if (pill) {
+    pill.hidden = !total;
+    if (total) {
+      const where = u.team && u.world ? '' : u.team ? ' in de teamchat' : ' van iedereen';
+      setHTML(pill, `${UI.icon('chat')}<span>${txt} ${total === 1 ? 'nieuw bericht' : 'nieuwe berichten'}<span class="where">${where}</span></span>`);
+      pill.dataset.chan = u.team ? 'team' : 'world';
+    }
+  }
+  // ook in de titel van het tabblad (zie je in een ander tabblad of op de taakbalk)
+  const base = document.title.replace(/^\(\d\+?\) /, '');
+  document.title = total ? `(${txt}) ${base}` : base;
+  // aantallen op de tabbladen in de chat
+  for (const t of document.querySelectorAll('.chat .tab[data-chan]')) {
+    const n = u[t.dataset.chan] || 0;
+    let bd = t.querySelector('.bdg');
+    if (n && !bd) { bd = document.createElement('b'); bd.className = 'bdg'; t.appendChild(bd); }
+    if (bd) { if (n) bd.textContent = n >= 9 ? '9+' : String(n); else bd.remove(); }
+  }
 }
 
 // ---------- gebeurtenissen ----------
@@ -1478,6 +1540,12 @@ const actions = {
     app.data.unseenReports = 0; app.seenReports = 0;
     $('#badgeReports').hidden = true;
     openModal('reports');
+  },
+  // naar de chat (knop 'nieuwe berichten' of een melding): het kanaal met ongelezen berichten
+  openChat(el) {
+    const u = app.chat.unread || {};
+    app.chat.chan = (el && el.dataset.chan) || (u.team ? 'team' : u.world ? 'world' : app.chat.chan);
+    openModal('team');
   },
   chatTab(el) {
     app.chat.chan = el.dataset.chan;
