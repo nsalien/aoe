@@ -164,8 +164,14 @@ Daarom:
   oude versie uit `art.js`/`figures.js`. **Elk niveau ziet er anders (en beter) uit**, met dezelfde opbouw voor alle gebouwen:
   1 hout en riet, klein; 2 groter, pannen, stenen voet; 3 steen, leien, een extra bouwsel (kraan, schachttoren, put, erker…);
   4 een zichtbare aanbouw of tweede gebouw (aan de rechter- of voorkant, niet achteraan: daar zie je het niet) en vaandels
-  (`dressHigh`); 5 een toren/koepel, goud (`goldVane`), lantaarns. Ook `roof()` volgt `o.level` voor de daken van de volkeren
-  (pagode, plat, kantelen, koepel, Grieks). Controleer nieuwe modellen met een overzicht van alle niveaus en het verschil per
+  (`dressHigh`); 5 een toren/koepel, goud (`goldVane`), lantaarns. **Per volk** veranderen ook materiaal en versiering:
+  `CIV_WALL` in `models3d.js` geeft per volk en niveau het muurmateriaal (bv. Grieks leem → gewit → pilasters → marmer met
+  fries → goud; Egypte leemsteen → pleister → zandsteen met hoeklijsten → beschilderd → kalksteen en goud; Babylon riet →
+  leemsteen → gebakken steen met lisenen → blauwe tegelband met rozetten → geglazuurde voet; Perzië leemsteen → pleister →
+  tegelplint → tegelbanden → marmer; Yamato hout → papieren wanden → wit boven donker hout → stenen voet → goud). `walls()`
+  past dat toe op elke oproep zonder eigen materiaal (`st.L` = niveau, `st.civ`, gezet in `build()`); `wallDetails()` tekent
+  de versiering enkel op grote blokken. `roof()` volgt het niveau (`o.level`, anders `st.L`): riet → pannen → leien/glazuur,
+  vanaf 4 nokkam, acroteria, dubbele dakrand (pagode), getrapte kantelen, tegelband op de koepel; op 5 goud (vergulde koepel). Controleer nieuwe modellen met een overzicht van alle niveaus en het verschil per
   stap (render alle niveaus, meet het % gewijzigde pixels: < ±15% is te weinig). Die meting telt ook 'enkel groter' mee:
   bekijk de overzichten zelf en zorg voor nieuwe onderdelen per niveau (vb. wachttoren: houten post op palen → stenen voet
   met houten wachtkamer → steen, traptorentje, wachthuisje → mezekouwen, hoektorentjes → open bovenverdieping met vuurbaken,
