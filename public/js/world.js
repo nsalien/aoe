@@ -3,7 +3,7 @@ import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
 import { generateTerrain } from '../shared/worldgen.js';
-import { bakeWorld, WTW, WTH } from './worldmap.js';
+import { bakeWorldGen, WTW, WTH } from './worldmap.js';
 
 export { WTW, WTH };
 const { toWorld } = isoFns(WTW, WTH);
@@ -48,6 +48,8 @@ export class WorldView {
     this.clouds = new FX.Clouds({ x0: l.x - 300, x1: r.x, y0: -100, y1: b.y - 100 }, FX.LOW_POWER ? 6 : 11);
     this.dustT = 0;
     this.bakedKey = null;
+    this.job = null; // een voorbereiding voor een andere kaart stoppen
+    this.bakeInfo = null;
   }
 
   // hoogte van het landschap op een punt (tegelcoördinaten)
@@ -55,14 +57,15 @@ export class WorldView {
     return this.bakeInfo ? this.bakeInfo.hAt(gx, gy) : 0;
   }
 
-  setData(data, myTownId, myTeamId) {
+  // background: de kaart op de achtergrond in stukjes voorbereiden (niet meteen alles: dan hapert het spel even)
+  setData(data, myTownId, myTeamId, background = false) {
     this.towns = data.towns;
     this.camps = data.camps;
     this.teams = new Map(data.teams.map((t) => [t.id, t]));
     this.myTownId = myTownId;
     this.myTeamId = myTeamId;
     const key = [...data.towns.map((t) => `${t.x},${t.y}`), ...data.camps.map((c) => `${c.x},${c.y}`)].join('|');
-    if (key !== this.bakedKey) { this.bakedKey = key; this.bake(); }
+    if (key !== this.bakedKey) { this.bakedKey = key; if (background) this.bakeLater(); else this.bake(); }
     if (this.selected) {
       const s = this.selected;
       const list = s.kind === 'town' ? this.towns : this.camps;
@@ -73,12 +76,39 @@ export class WorldView {
 
   setMarches(marches) { this.marches = marches || []; }
 
-  bake() {
+  bakeGen() {
     const small = window.innerWidth < 800;
-    const res = bakeWorld({
+    return bakeWorldGen({
       seed: this.seed, size: this.size, tiles: this.terrain.tiles, towns: this.towns, camps: this.camps,
       scale: small ? 1 : 1.5, R: small ? 6 : FX.LOW_POWER ? 7 : 9,
     });
+  }
+
+  // nu meteen (en een voorbereiding die nog bezig is meteen afmaken)
+  bake() {
+    const job = this.job || { gen: this.bakeGen() };
+    this.job = null;
+    for (;;) { const r = job.gen.next(); if (r.done) { this.applyBake(r.value); return; } }
+  }
+
+  // op de achtergrond: telkens ±6 ms, met telkens wat tijd ertussen voor het spel zelf
+  bakeLater() {
+    const job = { gen: this.bakeGen() };
+    this.job = job;
+    const idle = (f) => setTimeout(f, 16);
+    const step = () => {
+      if (this.job !== job) return; // vervangen of al afgemaakt
+      const t0 = performance.now();
+      while (performance.now() - t0 < 6) {
+        const r = job.gen.next();
+        if (r.done) { this.job = null; this.applyBake(r.value); return; }
+      }
+      idle(step);
+    };
+    idle(step);
+  }
+
+  applyBake(res) {
     this.bakeInfo = res;
     this.shore = res.shore;
     const nWaves = FX.LOW_POWER ? 260 : 520;
@@ -122,6 +152,7 @@ export class WorldView {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#245a8e';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.job) this.bake(); // de kaart wordt getoond: de voorbereiding nu afmaken
     if (!this.bakeInfo) return;
     dt = Math.min(dt, 100);
     if (Math.floor(t / 1000) !== this.lightSecond) { this.lightSecond = Math.floor(t / 1000); this.light = FX.daylight(); }
