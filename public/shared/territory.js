@@ -66,7 +66,8 @@ export function territory(seed) {
       const y = T_MIN + 2 + rnd() * (T_W - 4);
       const r = ringOf(Math.floor(x), Math.floor(y));
       if (r < rMin || r > rMax || road(x, y) || lake(Math.floor(x), Math.floor(y))) continue;
-      if (taken.some((p) => Math.hypot(p.x - x, p.y - y) < Math.max(p.r, space))) continue;
+      // eerst een goedkope test met het vierkant eromheen (hypot >= |dx|): zelfde uitkomst, veel sneller
+      if (taken.some((p) => { const r = Math.max(p.r, space); return Math.abs(p.x - x) < r && Math.abs(p.y - y) < r && Math.hypot(p.x - x, p.y - y) < r; })) continue;
       const pos = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
       taken.push({ ...pos, r: space });
       return pos;
@@ -89,19 +90,25 @@ export function territory(seed) {
   const clearOf = [...deposits.map((d) => ({ x: d.x, y: d.y, r: d.kind === 'wood' ? 1.6 : 1.5 })),
     ...boars.map((b) => ({ x: b.x, y: b.y, r: 1.2 })), ...(camp ? [{ x: camp.x, y: camp.y, r: 2.8 }] : [])];
   const trees = [];
+  // Snelheid (server: ±10 ms CPU per verzoek): Math.hypot is traag, dus eerst een test met het vierkant eromheen
+  // (hypot(dx, dy) >= max(|dx|, |dy|)). De uitkomst is exact dezelfde als vroeger.
+  const nearList = Object.values(near);
+  const within = (dx, dy, r) => dx < r && dx > -r && dy < r && dy > -r && Math.hypot(dx, dy) < r;
   for (let j = T_MIN; j < T_MAX; j++) {
     for (let i = T_MIN; i < T_MAX; i++) {
       const idx = tileIndex(i, j);
       const cx = i + 0.5; const cy = j + 0.5;
       const ring = ringOf(i, j);
-      if (Math.hypot(cx - pond.x, (cy - pond.y) / 0.8) < pond.r) { tiles[idx] = TILE.WATER; continue; }
+      const pdx = cx - pond.x; const pdy = (cy - pond.y) / 0.8;
+      const nearPond = within(pdx, pdy, pond.r + 0.9); // binnen de vijver of zijn oever
+      if (nearPond && Math.hypot(pdx, pdy) < pond.r) { tiles[idx] = TILE.WATER; continue; }
       if (lake(i, j)) { tiles[idx] = TILE.WATER; continue; }
       if (lake(i + 1, j) || lake(i - 1, j) || lake(i, j + 1) || lake(i, j - 1)) { tiles[idx] = TILE.SAND; continue; }
       if (ring === 0 || road(cx, cy)) continue;
-      if (Math.hypot(cx - pond.x, (cy - pond.y) / 0.8) < pond.r + 0.9) continue;
-      if (Math.hypot(cx - pasture.x, cy - pasture.y) < 2.6) continue;
-      if (Object.values(near).some((p) => Math.hypot(cx - p.x, cy - p.y) < 2)) continue;
-      if (clearOf.some((p) => Math.hypot(cx - p.x, cy - p.y) < p.r)) continue;
+      if (nearPond) continue;
+      if (within(cx - pasture.x, cy - pasture.y, 2.6)) continue;
+      if (nearList.some((p) => within(cx - p.x, cy - p.y, 2))) continue;
+      if (clearOf.some((p) => within(cx - p.x, cy - p.y, p.r))) continue;
       const n = forestN[idx];
       let p;
       if (ring <= 8) p = Math.min(0.9, 0.2 + ring * 0.12) * (0.55 + 0.45 * n * 1.4);

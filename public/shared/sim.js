@@ -1766,6 +1766,14 @@ export function townScore(s) {
   return Math.round(pts);
 }
 
+// Lichte versie van advance() voor overzichten van veel steden (wereldkaart, ranglijst): enkel de bouwwerken die al klaar
+// zijn, toepassen. Geen productie, training of gebeurtenissen in het gebied (dat kost veel rekentijd per stad).
+export function settleBuilds(s, t) {
+  const done = (s.builds || []).filter((j) => j.end <= t).sort((a, b) => a.end - b.end);
+  for (const j of done) finishBuild(s, j);
+  return s;
+}
+
 export function publicSummary(s) {
   return {
     age: age(s),

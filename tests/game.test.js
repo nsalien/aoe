@@ -2091,3 +2091,66 @@ test('clan verplaatsen: willekeurige plek op land, ver van de andere steden, cla
   assert.equal(res.ok, true);
   assert.equal(res.moved.length, 1);
 });
+
+// ---------- snelheid op de server (gratis plan: ±10 ms CPU, 50 D1-vragen per verzoek) ----------
+import { settleBuilds } from '../public/shared/sim.js';
+import { CRON_STALE } from '../functions/lib/routes.js';
+
+test('het gebied rond een stad blijft exact hetzelfde (bomen, water, bronnen), ook na het sneller maken', () => {
+  const sig = (seed) => { const t = territory(seed); let h = 0; for (const v of t.tiles) h = (Math.imul(h, 31) + v) | 0; for (const tr of t.trees) h = (Math.imul(h, 31) + tr.idx * 7 + tr.v) | 0; return h + ':' + t.trees.length + ':' + t.deposits.map((d) => d.x + ',' + d.y).join(';'); };
+  assert.deepEqual([1, 5, 17, 1234].map(sig), GOLDEN_TERR);
+});
+
+test('wereldkaart en ranglijst: afgewerkte bouwwerken tellen mee zonder de hele stad bij te rekenen', () => {
+  const s = newTownState(0, 'greek');
+  s.buildings.push({ id: 9, type: 'house', x: 1, y: 1, level: 1 });
+  s.builds = [{ bid: 9, to: 2, start: 0, end: 1000 }, { bid: 1, to: 2, start: 0, end: 5000 }];
+  settleBuilds(s, 2000);
+  assert.equal(s.buildings.find((b) => b.id === 9).level, 2);
+  assert.equal(s.buildings[0].level, 1, 'het tijdperk is nog niet klaar');
+  assert.equal(s.builds.length, 1);
+  settleBuilds(s, 6000);
+  assert.equal(s.buildings[0].level, 2);
+});
+
+test('zolang de cron-worker draait, verwerkt een gewoon verzoek enkel de eigen legers; de cron-worker de rest', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  await call('POST', '/admin/reset', { peaceHours: 0, seasonDays: 28, teamSize: 1, seed: 3 });
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
+  await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greek' });
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  const one = (q, ...v) => db.raw.prepare(q).get(...v);
+  sql('UPDATE world SET start_at = ?', now - 86400000);
+  const anna = one("SELECT p.id, p.team_id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Anna'");
+  const bert = one("SELECT p.id, p.team_id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Bert'");
+  const camp = one('SELECT id, x, y FROM camps LIMIT 1');
+  for (const j of ONE_OFF) sql('INSERT OR REPLACE INTO config (k, v) VALUES (?, ?)', `once:${j.key}`, 'al gedaan'); // eenmalige opdrachten niet hier
+  const back = (p, n) => { for (let k = 0; k < n; k++) sql(`INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, to_x, to_y, units, res, depart_at, arrive_at, status)
+    VALUES (?, ?, 'attack', ?, 0, 0, 'camp', ?, ?, ?, '{"spear":3}', '{"food":10}', ?, ?, 'back')`, p.id, p.team_id, p.tid, camp.id, camp.x, camp.y, now - 7200000, now - 600000 - k); };
+  back(anna, 3); back(bert, 5);
+  const left = (p) => one("SELECT COUNT(*) AS c FROM marches WHERE player_id = ? AND status = 'back'", p.id).c;
+  // de cron-worker draait: Anna's verzoek verwerkt hooguit 2 van haar eigen legers, niets van Bert
+  sql('UPDATE world SET cron_at = ?', now - 30000);
+  await call('GET', '/state', null, a.cookie);
+  assert.equal(left(anna), 1);
+  assert.equal(left(bert), 5);
+  // de cron-worker zelf: hooguit 3 legers per minuut, ook die van wie niet online is
+  const ct = await cronTick(db, Date.now());
+  assert.equal(left(anna) + left(bert), 3, JSON.stringify(ct));
+  assert.ok(one('SELECT cron_at FROM world').cron_at >= now, 'de cron-worker meldt dat hij draait');
+  // draait de cron-worker niet meer, dan verwerkt een gewoon verzoek alles zoals vroeger
+  sql('UPDATE world SET cron_at = ?', now - CRON_STALE - 60000);
+  await call('GET', '/state', null, a.cookie);
+  assert.equal(left(anna) + left(bert), 0);
+});
+
+// vingerafdruk van het gebied rond enkele steden, berekend met de code van vóór de versnelling (25/11)
+const GOLDEN_TERR = ["460196450:676:22,-7.4;-3.9,-12.8;7.4,-9.2;26.2,-1.1;-12.6,12.8;-11.9,-4.2;26.7,13.2;18.8,-12.8;8.7,25.3","153139303:565:21.9,-4.3;13.4,20.1;22.5,21.3;-8.6,11.9;-5,22.2;8.8,19.9;-9.3,17.5;-9,-12.1;-11.4,-7.6","-1797553060:701:-5.7,20.1;13.7,22.7;-9.5,-8.4;0.6,22;25.7,10.3;-3.1,-14.9;-7.8,12.3;-2.7,-7.9;18.6,-14.2","-1563183414:642:-12.7,16.6;10.3,24.6;-2.8,-10.6;-8.2,26.7;15.4,-11.1;9.7,-6.2;-8.8,-6;-12.5,-1.1;-10.4,21.1"];
