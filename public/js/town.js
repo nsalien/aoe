@@ -2321,6 +2321,11 @@ export class TownView {
     const o = this.groundOrigin;
     const bounds = { x0: o.x, y0: o.y, x1: o.x + this.ground.W, y1: o.y + this.ground.H };
     const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
+    // tijdens het slepen of knijpen: hooguit één nieuw stuk per 3 beelden (een stuk kost op een gsm al snel 50 ms);
+    // na het loslaten komen de rest snel bij
+    const moving = this.cam.dragging || this.cam.pinch;
+    this.hdTick = (this.hdTick || 0) + 1;
+    const maxNew = moving ? (this.hdTick % 3 === 0 ? 1 : 0) : 2;
     this.hdPending = this.hdg.draw(ctx, vis, need, bounds, L.key, (g, R, S) => {
       this.paintGround(g, R, S);
       this.paintTreeShadows(g, R, L.len, L.alpha);
@@ -2332,7 +2337,7 @@ export class TownView {
       g.globalCompositeOperation = 'overlay';
       for (const [pat, a] of GH.hdPatterns(g, 'grain', S)) { g.globalAlpha = a; g.fillStyle = pat; g.fillRect(R.x0, R.y0, R.x1 - R.x0, R.y1 - R.y0); }
       g.restore();
-    });
+    }, 8, maxNew);
   }
 
   // ligt er in beeld ergens mist? (anders hoeft die laag niet getekend te worden)
