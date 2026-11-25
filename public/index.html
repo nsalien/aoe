@@ -14,10 +14,42 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Rijken">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <!-- meteen beginnen: de spelgegevens ophalen en alle scripts tegelijk laden (niet één na één) -->
+  <script>(function () { var o = { credentials: "same-origin" }; try { window.__boot = { info: fetch("/api/info", o), state: fetch("/api/state", o) }; } catch (e) { /* oude browser */ } })();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="modulepreload" href="/js/main.js">
+  <link rel="modulepreload" href="/js/api.js">
+  <link rel="modulepreload" href="/js/sprite3d.js">
+  <link rel="modulepreload" href="/js/town.js">
+  <link rel="modulepreload" href="/js/world.js">
+  <link rel="modulepreload" href="/js/ui.js">
+  <link rel="modulepreload" href="/js/fx.js">
+  <link rel="modulepreload" href="/js/dom.js">
+  <link rel="modulepreload" href="/js/battleview.js">
+  <link rel="modulepreload" href="/shared/sim.js">
+  <link rel="modulepreload" href="/shared/rules.js">
+  <link rel="modulepreload" href="/js/models3d.js">
+  <link rel="modulepreload" href="/js/propmodels.js">
+  <link rel="modulepreload" href="/js/art.js">
+  <link rel="modulepreload" href="/js/iso.js">
+  <link rel="modulepreload" href="/js/troops.js">
+  <link rel="modulepreload" href="/shared/territory.js">
+  <link rel="modulepreload" href="/js/nature.js">
+  <link rel="modulepreload" href="/js/figures.js">
+  <link rel="modulepreload" href="/shared/worldgen.js">
+  <link rel="modulepreload" href="/js/towndress.js">
+  <link rel="modulepreload" href="/js/groundhd.js">
+  <link rel="modulepreload" href="/shared/skirmish.js">
+  <link rel="modulepreload" href="/js/worldmap.js">
+  <link rel="modulepreload" href="/shared/fieldbattle.js">
+  <link rel="modulepreload" href="/shared/battle.js">
+  <link rel="modulepreload" href="/js/icons.js">
+  <link rel="modulepreload" href="/js/siegeview.js">
+  <link rel="modulepreload" href="/js/render3d.js">
+  <link rel="modulepreload" href="/js/figmodels.js">
 </head>
 <body>
   <div id="splash" class="splash"><div class="splash-inner"><div class="splash-crest" data-icon="castle"></div><div class="splash-title">Rijken van de Vallei</div><div class="splash-bar"><i></i></div></div></div>

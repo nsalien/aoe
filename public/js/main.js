@@ -1,5 +1,5 @@
 // Hoofdprogramma: aanmelden, spelstatus, tekenlus en alle knoppen.
-import { get, post } from './api.js';
+import { get, post, early } from './api.js';
 import { TownView } from './town.js';
 import { WorldView } from './world.js';
 import * as UI from './ui.js';
@@ -155,8 +155,11 @@ function toast(msg, type = '', ic = null) {
 
 // ---------- opstarten ----------
 async function boot() {
+  // /state loopt al (index.html); de 3D-beelden van vorige keer worden ondertussen uit de cache gehaald
+  const stateP = early('state', '/state');
+  stateP.catch(() => {});
   try {
-    app.info = await get('/info');
+    app.info = await early('info', '/info');
   } catch (e) {
     showAuth(`Kan de server niet bereiken: ${e.message}`);
     return;
@@ -166,7 +169,7 @@ async function boot() {
     return;
   }
   try {
-    const data = await get('/state');
+    const data = await stateP;
     startGame(data);
   } catch (e) {
     if (e.status === 401) showAuth();
