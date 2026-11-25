@@ -1,5 +1,5 @@
 // Gevechtsberekening (gedeeld zodat de browser een simulator kan tonen).
-import { UNITS, COMBAT, RES, TECHS } from './rules.js';
+import { UNITS, COMBAT, RES, TECHS, carryMult } from './rules.js';
 
 const TYPES = ['inf', 'cav', 'rng'];
 
@@ -143,10 +143,11 @@ export function resolveScouting(attScouts, defScouts) {
   return { success: false, left: 0 };
 }
 
-export function carryCapacity(units) {
+// age = tijdperk van de aanvaller: hoe later, hoe meer buit je troepen meedragen (WAR.carry); zonder age het ruwe getal
+export function carryCapacity(units, age = 0) {
   let c = 0;
   for (const k of Object.keys(units || {})) if (UNITS[k]) c += (UNITS[k].carry || 0) * (units[k] || 0);
-  return c;
+  return age ? Math.round(c * carryMult(age)) : c;
 }
 
 // Verdeel de draagcapaciteit zo eerlijk mogelijk over de beschikbare grondstoffen.

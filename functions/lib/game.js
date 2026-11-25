@@ -10,7 +10,7 @@ import {
 } from '../../public/shared/battle.js';
 import { createBattle, stepTo, queueOrder, battleOutcome, FB, FORMS } from '../../public/shared/fieldbattle.js';
 import {
-  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS,
+  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS, WAR, bountyOf,
 } from '../../public/shared/rules.js';
 
 export class ConflictError extends Error {}
@@ -251,11 +251,14 @@ async function participants(db, m) {
     'SELECT p.id, p.name, p.team_id, t.name AS town, t.state FROM players p JOIN towns t ON t.id = ? WHERE p.id = ?',
   ).bind(m.from_town, m.player_id).first();
   const as = attacker ? JSON.parse(attacker.state) : null;
-  return { attacker, smithy: as ? bLevel(as, 'smithy') : 0, tech: (as && as.tech) || null, score: as ? townScore(as) : 0 };
+  return { attacker, smithy: as ? bLevel(as, 'smithy') : 0, tech: (as && as.tech) || null, score: as ? townScore(as) : 0, age: as ? bLevel(as, 'tc') || 1 : 1 };
 }
 
+const sumRes = (o) => RES.reduce((a, r) => a + (o[r] || 0), 0);
+const plusRes = (a, b) => { const o = {}; for (const r of RES) o[r] = (a[r] || 0) + (b[r] || 0); return o; };
+
 async function attackTown(db, world, m, t, override = null) {
-  const { attacker, smithy, tech, score } = await participants(db, m);
+  const { attacker, smithy, tech, score, age: attAge } = await participants(db, m);
   const lc = m.units.noble ? await lordCount(db, m.player_id) : 0;
   const def = await db.prepare(
     'SELECT t.id, t.name, t.player_id, p.name AS pname FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?',
@@ -284,22 +287,31 @@ async function attackTown(db, world, m, t, override = null) {
     let loot = { food: 0, wood: 0, stone: 0, gold: 0 };
     let wallDamage = 0;
     let monumentDamage = 0;
+    let bounty;
     if (b.attWins) {
       const prot = protectAmount(s);
       const avail = {};
       for (const r of RES) avail[r] = Math.max(0, s.res[r] - prot);
-      loot = computeLoot(avail, carryCapacity(b.attLeft));
+      loot = computeLoot(avail, carryCapacity(b.attLeft, attAge));
       for (const r of RES) s.res[r] -= loot[r];
       wallDamage = damageBuilding(s, 'wall', b.wallDamage);
       monumentDamage = damageBuilding(s, 'monument', b.monumentDamage);
+      // krijgsbuit: de wapens en uitrusting van alle gesneuvelde verdedigers (ook de versterking)
+      const dead = {};
+      for (const g of b.groupsLost) for (const k of Object.keys(g.units)) dead[k] = (dead[k] || 0) + g.units[k];
+      bounty = bountyOf(dead);
+    } else {
+      // de verdediger houdt het slagveld: krijgsbuit van de gesneuvelde aanvallers, meteen in zijn opslag
+      bounty = bountyOf(b.attLost);
+      addResources(s, bounty);
     }
     // edelmannen die de slag overleefden, verlagen de trouw
     const noble = b.attWins && attacker ? applyNobles(s, t, b.attLeft.noble || 0,
       { playerId: m.player_id, name: attacker.name, townId: m.from_town, town: attacker.town, score }, lc) : null;
-    return { b, loot, wallDamage, monumentDamage, groups, noble };
+    return { b, loot, wallDamage, monumentDamage, groups, noble, bounty };
   });
 
-  const { b, loot, wallDamage, monumentDamage, groups, noble } = out;
+  const { b, loot, wallDamage, monumentDamage, groups, noble, bounty } = out;
   if (noble && noble.conquered) await addVassal(db, def.id, def.player_id, defTown.state, t);
   // een gewonnen aanval op een heer bevrijdt zijn vazallen uit het team van de aanvaller
   const freed = b.attWins && attacker ? await liberateByAttack(db, world, def.player_id, attacker.team_id, t) : [];
@@ -309,19 +321,20 @@ async function attackTown(db, world, m, t, override = null) {
     if (countUnits(left) <= 0) await db.prepare('DELETE FROM support WHERE id = ?').bind(groups[i].key).run();
     else await db.prepare('UPDATE support SET units = ? WHERE id = ?').bind(JSON.stringify(left), groups[i].key).run();
   }
-  await sendBack(db, m, b.attLeft, loot, t);
+  // wie wint, brengt de krijgsbuit mee naar huis (bovenop wat zijn troepen dragen)
+  await sendBack(db, m, b.attLeft, b.attWins ? plusRes(loot, bounty) : loot, t);
 
-  // punten: waarde van gesneuvelde vijanden / 50
+  // punten: waarde van gesneuvelde vijanden (WAR.killPts) + buit (WAR.lootPts)
   const defLostValue = b.groupsLost.reduce((a, g) => a + unitValue(g.units), 0);
-  await addKillPts(db, m.player_id, defLostValue / 50);
+  await addKillPts(db, m.player_id, defLostValue / WAR.killPts + sumRes(loot) / WAR.lootPts);
   const attLostValue = unitValue(b.attLost);
   const groupValues = groups.map((g) => unitValue(g.units));
   const totalGroupValue = groupValues.reduce((a, v) => a + v, 0);
   const defOwners = [def.player_id, ...supRows.map((r) => r.player_id)];
   if (totalGroupValue > 0) {
-    for (let i = 0; i < groups.length; i++) await addKillPts(db, defOwners[i], (attLostValue / 50) * (groupValues[i] / totalGroupValue));
+    for (let i = 0; i < groups.length; i++) await addKillPts(db, defOwners[i], (attLostValue / WAR.killPts) * (groupValues[i] / totalGroupValue));
   } else {
-    await addKillPts(db, def.player_id, attLostValue / 50);
+    await addKillPts(db, def.player_id, attLostValue / WAR.killPts);
   }
 
   const defUnits = {};
@@ -334,7 +347,7 @@ async function attackTown(db, world, m, t, override = null) {
     type: 'battle', attWins: b.attWins, A: b.A, D: b.D,
     attacker: { name: attacker ? attacker.name : '?', town: attacker ? attacker.town : '?' },
     defender: { name: def.pname, town: def.name },
-    attUnits: m.units, attLost: b.attLost, defUnits, defLost, loot, wallDamage, monumentDamage,
+    attUnits: m.units, attLost: b.attLost, defUnits, defLost, loot, bounty, wallDamage, monumentDamage,
     supporters: supRows.map((r) => r.pname), noble, freed: freed.length,
   };
   data.live = !!(override && override.live);
@@ -349,7 +362,7 @@ async function attackTown(db, world, m, t, override = null) {
     notified.add(r.player_id);
     await addReport(db, r.player_id, t, 'defense', `Je troepen vochten mee in ${def.name}`, data);
   }
-  return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost, loot };
+  return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost, loot, bounty };
 }
 
 function freshCamp(level) {
@@ -365,7 +378,7 @@ async function loadCamp(db, id, t) {
 }
 
 async function attackCamp(db, world, m, t, override = null) {
-  const { attacker, smithy } = await participants(db, m);
+  const { attacker, smithy, age: attAge } = await participants(db, m);
   for (let i = 0; i < 4; i++) {
     const c = await loadCamp(db, m.target_id, t);
     if (!c) { await sendBack(db, m, m.units, {}, t); return; }
@@ -373,25 +386,26 @@ async function attackCamp(db, world, m, t, override = null) {
     const b = override ? override.build(groups, null, smithy, campBaseDef(c.level)) : resolveBattle({ attUnits: m.units, attSmithy: smithy, groups, baseDef: campBaseDef(c.level) });
     let loot = { food: 0, wood: 0, stone: 0, gold: 0 };
     c.state.units = b.groupsLeft[0].units;
+    const bounty = b.attWins ? bountyOf(b.groupsLost[0].units) : null;
     if (b.attWins) {
-      loot = computeLoot(c.state.res, carryCapacity(b.attLeft));
+      loot = computeLoot(c.state.res, carryCapacity(b.attLeft, attAge));
       for (const r of RES) c.state.res[r] -= loot[r];
     }
     if (!c.state.refresh_at) c.state.refresh_at = t + Math.round(CAMP.respawnHours * 3600000 / world.speed);
     const r = await db.prepare('UPDATE camps SET state = ?, version = version + 1 WHERE id = ? AND version = ?')
       .bind(JSON.stringify(c.state), c.id, c.version).run();
     if (!r.meta.changes) continue;
-    await sendBack(db, m, b.attLeft, loot, t);
-    await addKillPts(db, m.player_id, unitValue(b.groupsLost[0].units) / 100);
+    await sendBack(db, m, b.attLeft, bounty ? plusRes(loot, bounty) : loot, t);
+    await addKillPts(db, m.player_id, unitValue(b.groupsLost[0].units) / WAR.campKillPts);
     const name = `Roverskamp (niveau ${c.level})`;
     await addReport(db, m.player_id, t, 'attack', b.attWins ? `${name} verslagen` : `Nederlaag bij ${name}`, {
       type: 'battle', camp: true, attWins: b.attWins, A: b.A, D: b.D,
       attacker: { name: attacker ? attacker.name : '?', town: attacker ? attacker.town : '?' },
       defender: { name: 'Rovers', town: name },
-      attUnits: m.units, attLost: b.attLost, defUnits: groups[0].units, defLost: b.groupsLost[0].units, loot,
+      attUnits: m.units, attLost: b.attLost, defUnits: groups[0].units, defLost: b.groupsLost[0].units, loot, bounty,
       wallDamage: 0, monumentDamage: 0, supporters: [], live: !!(override && override.live),
     });
-    return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost: b.groupsLost[0].units, loot };
+    return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost: b.groupsLost[0].units, loot, bounty };
   }
   return null;
 }
@@ -677,7 +691,7 @@ async function autoBattle(db, world, b, now) {
   let r = null;
   if (m) r = b.target_kind === 'town' ? await attackTown(db, world, m, now) : await attackCamp(db, world, m, now);
   b.status = 'done';
-  b.result = { auto: true, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {} };
+  b.result = { auto: true, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, bounty: r ? r.bounty || null : null };
   b.state = null;
   await saveBattle(db, b, now);
 }
@@ -734,7 +748,7 @@ async function finishBattle(db, world, b, now, abandoned = false) {
     r = b.target_kind === 'town' ? await attackTown(db, world, m, now, override) : await attackCamp(db, world, m, now, override);
   }
   b.status = 'done';
-  b.result = { auto: abandoned, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, retreat: o.retreat };
+  b.result = { auto: abandoned, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, bounty: r ? r.bounty || null : null, retreat: o.retreat };
   await saveBattle(db, b, now);
 }
 

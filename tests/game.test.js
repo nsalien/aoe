@@ -1867,3 +1867,75 @@ test('meldingen: bouwer vrij als een bouwwerk klaar is (saveTown houdt het tijds
   for (const f of files.slice(i8)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
   assert.deepEqual(raw.prepare('SELECT build_at FROM towns ORDER BY id').all().map((r) => r.build_at), [3, null, null]);
 });
+
+// ---------- oorlog moet lonen ----------
+import { WAR, carryMult, bountyOf, unitValue as uValue, RES } from '../public/shared/rules.js';
+import { subtractUnits } from '../public/shared/battle.js';
+
+test('oorlog loont: buit groeit met je tijdperk, krijgsbuit voor wie de slag wint (ook de verdediger), punten voor buit', async () => {
+  assert.equal(carryCapacity({ sword: 10 }), 500, 'zonder tijdperk het ruwe draagvermogen');
+  assert.equal(carryCapacity({ sword: 10 }, 1), 500 * WAR.carry[1]);
+  assert.equal(carryCapacity({ sword: 10 }, 5), 500 * WAR.carry[5]);
+  for (let a = 2; a <= MAX_AGE; a++) assert.ok(carryMult(a) > carryMult(a - 1), 'elk tijdperk meer');
+  assert.deepEqual(bountyOf({ spear: 10 }), { food: 120, wood: 75, stone: 0, gold: 0 }, '30% van 10 x (40 voedsel + 25 hout)');
+  assert.deepEqual(bountyOf({ barbarian: 5 }), { food: 0, wood: 0, stone: 0, gold: 0 }, 'wilde dieren hebben geen uitrusting');
+  // een soldaat die plundert, brengt per plaats in je bevolking minstens zoveel op als een dorpeling (aanval van 4 uur heen en terug)
+  for (let a = 1; a <= MAX_AGE; a++) {
+    const vill = GATHER_RATE.food * (1 + 0.1 * (a - 1));
+    const unit = a >= 3 ? 'knight' : a >= 2 ? 'sword' : 'spear';
+    const perPop = carryCapacity({ [unit]: 1 }, a) / 4 / U2[unit].pop;
+    assert.ok(perPop >= vill, `tijdperk ${a}: ${unit} ${perPop.toFixed(1)}/u tegen dorpeling ${vill.toFixed(1)}/u`);
+  }
+
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 1, seed: 7 });
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'egypt' });
+  await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greek' });
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  const one = (q, ...v) => db.raw.prepare(q).get(...v);
+  sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
+  sql('UPDATE players SET created_at = ?', now - 2 * 86400000);
+  const anna = one("SELECT p.id, p.team_id, t.id AS tid, t.x, t.y FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Anna'");
+  const bert = one("SELECT p.id, p.team_id, t.id AS tid, t.x, t.y FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Bert'");
+  // Anna en Bert in het IJzertijdperk; Bert heeft een volle opslag en een handvol speerdragers
+  sql("UPDATE towns SET state = json_set(state, '$.buildings[0].level', 3)");
+  sql(`UPDATE towns SET state = json_set(state, '$.res', json('{"food":8000,"wood":8000,"stone":8000,"gold":8000}'), '$.units', json('{"spear":10}')) WHERE id = ?`, bert.tid);
+  const march = (units, id) => sql(`INSERT INTO marches (id, player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, target_team, to_x, to_y, units, depart_at, arrive_at, status)
+    VALUES (?, ?, ?, 'attack', ?, ?, ?, 'town', ?, ?, ?, ?, ?, ?, ?, 'out')`, id, anna.id, anna.team_id, anna.tid, anna.x, anna.y, bert.tid, bert.team_id, bert.x, bert.y, JSON.stringify(units), now - 3600000, now - 600000);
+
+  // 1) Anna wint: buit x3 (IJzer) + krijgsbuit van de gesneuvelde verdedigers, punten voor doden en buit
+  march({ sword: 100 }, 1);
+  await call('GET', '/state', null, a.cookie);
+  const m = one('SELECT * FROM marches WHERE id = 1');
+  assert.equal(m.status, 'back');
+  const rep = JSON.parse(one("SELECT data FROM reports WHERE player_id = ? AND kind = 'attack' ORDER BY id DESC", anna.id).data);
+  assert.equal(rep.attWins, true);
+  const left = subtractUnits({ sword: 100 }, rep.attLost);
+  const lootSum = RES.reduce((s, r) => s + rep.loot[r], 0);
+  assert.ok(Math.abs(lootSum - carryCapacity(left, 3)) <= 4, `buit ${lootSum} = 3 x draagvermogen ${carryCapacity(left)}`);
+  assert.deepEqual(rep.bounty, bountyOf(rep.defLost));
+  assert.ok(rep.bounty.food > 0);
+  const back = JSON.parse(m.res);
+  for (const r of RES) assert.equal(back[r], rep.loot[r] + rep.bounty[r], 'krijgsbuit gaat mee naar huis');
+  const pts = one('SELECT kill_pts FROM players WHERE id = ?', anna.id).kill_pts;
+  assert.equal(pts, Math.round(uValue(rep.defLost) / WAR.killPts + lootSum / WAR.lootPts));
+
+  // 2) Bert houdt stand: hij krijgt de krijgsbuit van de gesneuvelde aanvallers meteen in zijn opslag
+  sql(`UPDATE towns SET state = json_set(state, '$.units', json('{"spear":80}'), '$.res', json('{"food":500,"wood":500,"stone":500,"gold":500}')) WHERE id = ?`, bert.tid);
+  march({ spear: 10 }, 2);
+  await call('GET', '/state', null, a.cookie);
+  const rep2 = JSON.parse(one("SELECT data FROM reports WHERE player_id = ? AND kind = 'defense' ORDER BY id DESC", bert.id).data);
+  assert.equal(rep2.attWins, false);
+  assert.deepEqual(rep2.bounty, bountyOf(rep2.attLost));
+  assert.ok(rep2.bounty.food >= 100);
+  const bs = JSON.parse(one('SELECT state FROM towns WHERE id = ?', bert.tid).state);
+  assert.ok(bs.res.food >= 500 + rep2.bounty.food && bs.res.wood >= 500 + rep2.bounty.wood, JSON.stringify(bs.res));
+});

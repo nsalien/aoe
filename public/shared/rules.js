@@ -331,7 +331,7 @@ export const FIELD = {
 // De wildernis: everzwijnen, een barbarenkamp en wilde bronnen.
 export const WILD = {
   boar: { name: 'Everzwijn', loot: { food: 200 }, respawnHours: 10 },
-  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 160, wood: 160, stone: 90, gold: 90 } },
+  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 320, wood: 320, stone: 180, gold: 180 } },
   raid: { firstHours: 30, minHours: 20, maxHours: 40, warnMs: 90000, carry: 25 },
   deposits: {
     gold: { name: 'Goudader', res: 'gold', amount: 500 },
@@ -488,6 +488,30 @@ export function costValue(cost) {
   return v;
 }
 
+// ---------- oorlog moet lonen ----------
+// Een dorpeling brengt ±16-30 per uur op. Een soldaat die plundert, moet per plaats in je bevolking minstens even veel
+// opleveren, anders loont aanvallen niet. Daarom:
+//   carry   troepen dragen meer naarmate je tijdperk stijgt (karren en lastdieren): draagvermogen x dit, per tijdperk
+//           van de aanvaller (1 = Vuursteen ... 5 = Kroon)
+//   bounty  krijgsbuit: wie de slag wint, raapt wapens en uitrusting op = dit deel van wat de gesneuvelde vijanden kostten
+//           (aanvaller: gaat mee naar huis, bovenop wat hij draagt; verdediger: meteen in zijn opslag)
+//   killPts gevechtspunten: 1 punt per zoveel (kostprijs) gedode vijanden; campKillPts idem bij roverskampen
+//   lootPts 1 punt per zoveel grondstoffen die je bij een speler buitmaakt
+export const WAR = { carry: [1, 2, 2.5, 3, 3.5, 4], bounty: 0.3, killPts: 25, campKillPts: 50, lootPts: 250 };
+export const carryMult = (age) => WAR.carry[Math.max(1, Math.min(WAR.carry.length - 1, Math.floor(age) || 1))];
+
+// krijgsbuit: frac van de kosten van deze (gesneuvelde) troepen, per grondstof
+export function bountyOf(units, frac = WAR.bounty) {
+  const out = { food: 0, wood: 0, stone: 0, gold: 0 };
+  for (const k of Object.keys(units || {})) {
+    const c = UNITS[k] && UNITS[k].cost;
+    if (!c || !(units[k] > 0)) continue;
+    for (const r of RES) if (c[r]) out[r] += c[r] * units[k] * frac;
+  }
+  for (const r of RES) out[r] = Math.floor(out[r]);
+  return out;
+}
+
 export function unitValue(units) {
   let v = 0;
   for (const k of Object.keys(units || {})) if (UNITS[k]) v += costValue(UNITS[k].cost) * (units[k] || 0);
@@ -505,7 +529,7 @@ export function campUnits(level) {
 }
 
 export function campLoot(level) {
-  const v = Math.round(350 * Math.pow(level, 1.6));
+  const v = Math.round(500 * Math.pow(level, 1.6));
   return { food: v, wood: v, stone: v, gold: v };
 }
 

@@ -68,6 +68,14 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
   Niet als er nog getraind wordt. Werkers boven de nieuwe plaatsen worden vrij.
 - **Vondsten**: af en toe een schaap/eik/rotsblokken/goud rond je stad; een dorpeling oogst ze (`BONUS`).
 
+**Oorlog moet lonen** (gevraagd: "aanvallen loont niet: 120 dorpelingen brengen veel meer op dan plunderen"; `WAR` in
+`rules.js`): troepen dragen meer naarmate het tijdperk van de aanvaller stijgt (`carryMult`: ×2 Vuursteen … ×4 Kroon), wie
+de slag wint krijgt **krijgsbuit** = 30% van de kosten van de gesneuvelde vijanden (`bountyOf`; aanvaller: mee naar huis
+bovenop de buit; verdediger die standhoudt: meteen in zijn opslag; ook bij roverskampen), gevechtspunten ×2 (1 per 25
+waarde, kampen 1 per 50) + 1 punt per 250 geplunderde grondstoffen. Roverskampen (wereldkaart) ×1,4 en het barbarenkamp
+×2 buit. Regel: per plaats in de bevolking brengt een plunderende soldaat (4 u heen en terug) minstens zoveel op als een
+dorpeling (test). De verborgen voorraad (opslagplaats) blijft het tegengif.
+
 **Troepen** (hp tussen haakjes): dorpeling (25), speerdrager (45), zwaardvechter (60), boogschutter (35), verkenner (45),
 ruiter (75), ridder (120), stormram (150). Elk volk heeft 2 elite-eenheden (kasteel, IJzertijdperk):
 - Egyptenaren: strijdwagen, kamelenruiter · Grieken: hopliet, peltast · Yamato: samoerai, yabusame

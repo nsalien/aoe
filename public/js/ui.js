@@ -4,7 +4,7 @@ import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
-  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge,
+  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
@@ -1015,7 +1015,8 @@ export function worldPanelHtml(app, sel) {
       ${targetMarchesHtml(app, 'camp', c.id)}
       ${c.plundered ? `<div class="card"><b>Verlaten.</b> De rovers keren terug over ${timer(c.refreshAt)}.</div>` : ''}
       <div class="card"><h3>Geschatte bezetting (vol kamp)</h3><div class="unitgrid">${Object.keys(u).map((k) => `<div class="ucell"><img src="${unitThumb(k, '#333333')}" alt=""><b>${u[k]}</b>${UNITS[k].name}</div>`).join('')}</div>
-      <p class="small muted" style="margin:8px 0 2px">Buit (vol kamp):</p>${costHtml(loot)}</div>
+      <p class="small muted" style="margin:8px 0 2px">Buit (vol kamp):</p>${costHtml(loot)}
+      <p class="small muted" style="margin:8px 0 2px">Plus krijgsbuit als je alle rovers verslaat (${Math.round(WAR.bounty * 100)}% van hun uitrusting):</p>${costHtml(bountyOf(u))}</div>
       <div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
       <button class="btn" data-action="send" data-kind="scout" ${app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
   }
@@ -1228,7 +1229,8 @@ export function sendSummaryHtml(app, live, target, kind, units, res) {
   let html = `<span>${icon('clock')} Reistijd <b>${fmtDuration(ms)}</b></span><span>${icon('clock')} Aankomst <b>${arrive.toLocaleString('nl-BE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</b></span>`;
   if (kind === 'attack') {
     const p = attackPower(units, bLevel(live, 'smithy'));
-    html += `<span>${icon('swords')} Aanvalskracht <b>${fmt(p.total)}</b></span><span>${icon('cart')} Draagvermogen <b>${fmt(carryCapacity(units))}</b></span>`;
+    const cm = carryMult(age(live));
+    html += `<span>${icon('swords')} Aanvalskracht <b>${fmt(p.total)}</b></span><span title="Je troepen dragen ×${String(cm).replace('.', ',')} door je tijdperk (karren en lastdieren)">${icon('cart')} Draagvermogen <b>${fmt(carryCapacity(units, age(live)))}</b></span>`;
   }
   if (kind === 'trade') html += `<span>Totaal <b>${fmt(Object.values(res).reduce((a, b) => a + b, 0))}</b></span>`;
   if ((kind === 'attack' || kind === 'scout') && target.kind === 'town') {
@@ -1252,6 +1254,8 @@ export function reportsHtml(list, activeId, detail) {
     </div><div>${detail ? reportDetailHtml(detail) : '<p class="empty">Kies een rapport.</p>'}</div></div>`;
 }
 
+const bountySum = (b) => (b ? RES.reduce((a, r) => a + (b[r] || 0), 0) : 0);
+
 function unitTable(rows, teamColor) {
   return `<table class="bt"><tr><th>Eenheid</th><th>Aantal</th><th>Verloren</th></tr>${rows.map(([k, n, l]) => `<tr><td><img src="${unitThumb(k, teamColor)}" alt="">${UNITS[k].name}</td><td>${fmt(n)}</td><td class="${l ? 'lost' : ''}">${l ? fmt(l) : '0'}</td></tr>`).join('')}</table>`;
 }
@@ -1271,6 +1275,7 @@ export function reportDetailHtml(r) {
       ${defRows.length ? unitTable(defRows, '#3f7fd9') : '<p class="empty">Geen troepen aanwezig.</p>'}
       <p class="small">Verdedigingskracht: <b>${fmt(d.D)}</b>${d.supporters && d.supporters.length ? ` · met steun van ${d.supporters.map(esc).join(', ')}` : ''}</p>
       ${d.attWins ? `<h3>Buit</h3>${costHtml(d.loot)}` : ''}
+      ${bountySum(d.bounty) ? `<h3>Krijgsbuit</h3><p class="small muted">${d.attWins ? 'De aanvaller' : 'De verdediger'} hield het slagveld en raapte de wapens en uitrusting van de gesneuvelde ${d.attWins ? 'verdedigers' : 'aanvallers'} op (${Math.round(WAR.bounty * 100)}% van hun waarde).</p>${costHtml(d.bounty)}` : ''}
       ${d.wallDamage ? `<p class="req">De muur werd ${d.wallDamage} niveau(s) beschadigd.</p>` : ''}
       ${d.monumentDamage ? `<p class="req">Het monument werd beschadigd!</p>` : ''}
       ${d.noble ? `<h3>${icon('crown')} Trouw van ${esc(d.defender.town)}</h3>${d.noble.blocked ? `<p class="small">${esc(d.noble.blocked)}</p>`
@@ -1419,6 +1424,9 @@ export function helpHtml(w, peaceEnd) {
     <h3>3. Oorlog</h3>
     <p>Na je vrede mag je op eender welk moment vijandelijke steden aanvallen en plunderen, en zij jou. Wie later begint, krijgt ook ${pt} vrede:
     zo'n stad toont op de kaart hoelang nog. Stuur eerst <b>verkenners</b>. Rammen beschadigen muren en monumenten. Een opslagplaats verbergt een deel van je grondstoffen.</p>
+    <p><b>Aanvallen loont</b>: je troepen dragen meer buit naarmate je tijdperk stijgt (×${String(WAR.carry[1]).replace('.', ',')} in de Vuursteen tot ×${String(WAR.carry[MAX_AGE]).replace('.', ',')} in de Kroon: karren en lastdieren).
+    Wie de slag wint, raapt de wapens en uitrusting van de gesneuvelde vijanden op: <b>krijgsbuit</b> = ${Math.round(WAR.bounty * 100)}% van hun waarde, bovenop de gewone buit.
+    Ook een verdediger die standhoudt, krijgt die krijgsbuit. Verslagen vijanden en geplunderde grondstoffen leveren gevechtspunten op.</p>
     <h3>4. Bondgenoten</h3>
     <p>Je wordt automatisch aan een bondgenoot gekoppeld. Stuur elkaar <b>versterking</b> (die verdedigt mee) en <b>karavanen</b> met grondstoffen via de markt. Overleg in de teamchat!</p>
     <h3>Veldslagen: zelf besturen of automatisch</h3>
