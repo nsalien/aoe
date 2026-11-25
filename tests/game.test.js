@@ -1762,3 +1762,108 @@ test('tabblad Bouwadvies: wat nog verbeterd kan worden, gebundeld per soort en n
   assert.match(h, /data-action="adviceGo" data-type="house" data-level="1"/);
   assert.doesNotMatch(h, /NaN|undefined/);
 });
+
+// ---------- meldingen per soort: aanval op je stad, bouwer vrij, je leger komt aan ----------
+import { notifyBuilds } from '../functions/lib/push.js';
+import { saveTown, loadTown, nextBuildAt } from '../functions/lib/game.js';
+
+test('meldingen: elke soort apart aan/uit per toestel; aanval op je stad meteen bij vertrek', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const later = [];
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env, waitUntil: (p) => later.push(p) });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  const settle = async () => { while (later.length) await later.shift(); };
+  await call('POST', '/admin/reset', { teamSize: 1, seed: 7, bots: 0 });
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'egypt' });
+  const b = await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greek' });
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
+  sql('UPDATE players SET created_at = ?', now - 2 * 86400000);
+  sql("UPDATE towns SET state = json_set(state, '$.units.spear', 20)");
+  await settle();
+  // Bert heeft twee toestellen: op het tweede zet hij 'aanval op je stad' uit
+  const [p1, k1] = await fakeDevice(); const [p2, k2] = await fakeDevice();
+  const ep1 = 'https://fcm.googleapis.com/fcm/send/bert-gsm'; const ep2 = 'https://fcm.googleapis.com/fcm/send/bert-pc';
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { sent.push(String(url)); return new Response(null, { status: 201 }); };
+  try {
+    let r = await call('POST', '/push/subscribe', { endpoint: ep1, keys: { p256dh: p1, auth: k1 } }, b.cookie);
+    assert.deepEqual(r.data.prefs, { attack: true, build: true, march: true }, 'standaard alles aan');
+    await call('POST', '/push/subscribe', { endpoint: ep2, keys: { p256dh: p2, auth: k2 } }, b.cookie);
+    r = await call('POST', '/push/prefs', { endpoint: ep2, attack: false }, b.cookie);
+    assert.deepEqual(r.data.prefs, { attack: false, build: true, march: true });
+    assert.equal((await call('POST', '/push/prefs', { endpoint: ep2, attack: true }, a.cookie)).status, 400, 'niet van een ander');
+    await settle(); sent.length = 0;
+    // Anna valt Bert aan: Bert krijgt meteen een melding, enkel op het toestel waar het aan staat
+    const bert = db.raw.prepare("SELECT t.id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = 'Bert'").get().id;
+    r = await call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: bert, units: { spear: 5 } }, a.cookie);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    await settle();
+    assert.deepEqual(sent, [ep1]);
+    // een karavaan of versterking geeft geen aanvalsmelding (hier: een kamp aanvallen)
+    sent.length = 0;
+    const camp = db.raw.prepare('SELECT id FROM camps LIMIT 1').get().id;
+    r = await call('POST', '/march', { kind: 'attack', targetKind: 'camp', targetId: camp, units: { spear: 5 } }, a.cookie);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    await settle();
+    assert.deepEqual(sent, []);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('meldingen: bouwer vrij als een bouwwerk klaar is (saveTown houdt het tijdstip bij), nooit dubbel', async () => {
+  const db = await memoryD1();
+  const ins = (q, ...a) => db.raw.prepare(q).run(...a);
+  ins("INSERT INTO players (id, name, pass_hash, salt, team_id, created_at) VALUES (1, 'Bert', 'x', 'x', 1, 0), (2, 'Robot', 'x', 'x', 2, 0)");
+  const s = newTownState(0, 'greek');
+  const house = { id: 50, type: 'house', x: 0, y: 0, level: 2 };
+  const farm = { id: 51, type: 'farm', x: 3, y: 0, level: 0 };
+  s.buildings.push(house, farm);
+  const T = 5_000_000;
+  s.builds = [{ bid: 50, to: 3, start: 0, end: T }, { bid: 51, to: 1, start: 0, end: T + 600000 }];
+  const bot = newTownState(0, 'egypt'); bot.bot = { tier: 'sterk' }; bot.builds = [{ bid: 1, to: 2, start: 0, end: T }];
+  ins("INSERT INTO towns (id, player_id, name, x, y, state) VALUES (10, 1, 'Duivenhemel', 0, 0, '{}'), (20, 2, 'Botstad', 5, 5, '{}')");
+  for (const [id, st] of [[10, s], [20, bot]]) { const t = await loadTown(db, id); t.state = st; await saveTown(db, t); }
+  const at = (id) => db.raw.prepare('SELECT build_at FROM towns WHERE id = ?').get(id).build_at;
+  assert.equal(at(10), T, 'het eerstvolgende einde');
+  assert.equal(at(20), null, 'niet voor computerspelers');
+  assert.equal(nextBuildAt({ builds: [] }), null);
+  ins("INSERT INTO push_subs (player_id, endpoint, p256dh, auth, created_at, n_build) VALUES (1, 'https://fcm.googleapis.com/fcm/send/aan', ?, ?, 0, 1), (1, 'https://fcm.googleapis.com/fcm/send/uit', ?, ?, 0, 0)",
+    ...(await fakeDevice()), ...(await fakeDevice()));
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { sent.push(String(url).split('/').pop()); return new Response(null, { status: 201 }); };
+  try {
+    assert.equal(await notifyBuilds(db, T - 1000), 0, 'nog niet klaar');
+    assert.equal(await notifyBuilds(db, T + 30000), 1, 'het huis is klaar');
+    assert.deepEqual(sent, ['aan'], 'enkel waar bouwer vrij aan staat');
+    assert.equal(at(10), T + 600000, 'nu wachten op de boerderij');
+    assert.equal(await notifyBuilds(db, T + 60000), 0, 'niet dubbel');
+    assert.equal(await notifyBuilds(db, T + 700000), 1, 'de boerderij');
+    assert.equal(at(10), null, 'niets meer in aanbouw');
+    // een afgebroken bouw (niet meer in de stad) geeft geen melding, maar build_at schuift wel op
+    const t = await loadTown(db, 10);
+    t.state.builds = [{ bid: 999, to: 2, start: 0, end: T + 800000 }];
+    await saveTown(db, t);
+    sent.length = 0;
+    assert.equal(await notifyBuilds(db, T + 900000), 0);
+    assert.equal(at(10), null);
+  } finally { globalThis.fetch = realFetch; }
+  // de migratie vult build_at in voor steden die al iets bouwen (geen computerspelers)
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(':memory:');
+  const dir = new URL('../migrations/', import.meta.url);
+  const files = readdirSync(dir).filter((n) => n.endsWith('.sql')).sort();
+  const i8 = files.findIndex((f) => f.startsWith('0008'));
+  for (const f of files.slice(0, i8)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  raw.prepare("INSERT INTO towns (id, player_id, name, x, y, state) VALUES (1, 1, 'a', 0, 0, ?), (2, 2, 'b', 1, 1, ?), (3, 3, 'c', 2, 2, '{}')")
+    .run(JSON.stringify({ builds: [{ end: 7 }, { end: 3 }] }), JSON.stringify({ bot: {}, builds: [{ end: 3 }] }));
+  for (const f of files.slice(i8)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  assert.deepEqual(raw.prepare('SELECT build_at FROM towns ORDER BY id').all().map((r) => r.build_at), [3, null, null]);
+});

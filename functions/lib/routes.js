@@ -1,5 +1,5 @@
 import { json, readJson, int, wrapDb, GameError } from './http.js';
-import { vapidKeys, validPushEndpoint, notifyDue, notifyPlayer } from './push.js';
+import { vapidKeys, validPushEndpoint, notifyAll, notifyAttack, notifyPlayer } from './push.js';
 import { botTick, ensureBots, BOT_MAX } from './bots.js';
 import { relation, payRansom, vassalShare } from './vassal.js';
 import {
@@ -35,7 +35,9 @@ export async function handle(context) {
     const db = wrapDb(env.DB);
     const r = routes.find((x) => x.method === request.method && x.path === path);
     if (!r) return json({ error: 'Niet gevonden.' }, 404);
-    const ctx = { request, env, db, url, now };
+    // later(p): werk na het antwoord (meldingen e.d.), met een eigen database-teller
+    const later = (fn) => { const p = fn(wrapDb(env.DB)).catch((e) => console.error('later', e && e.message)); if (context.waitUntil) context.waitUntil(p); return p; };
+    const ctx = { request, env, db, url, now, later };
     if (r.admin) {
       const key = request.headers.get('x-admin-key') || '';
       if (!env.ADMIN_KEY) throw new GameError('ADMIN_KEY is niet ingesteld op de server.', 500);
@@ -53,8 +55,8 @@ export async function handle(context) {
     }
     if (ctx.world && r.process !== false) {
       await processDue(db, ctx.world, now);
-      // meldingen 'leger komt bijna aan' (de cron-worker doet dit elke minuut; dit is een vangnet)
-      if (context.waitUntil) context.waitUntil(notifyDue(wrapDb(env.DB), now, 2).catch((e) => console.error('notify', e && e.message)));
+      // meldingen 'leger komt bijna aan' en 'bouwer vrij' (de cron-worker doet dit elke minuut; dit is een vangnet)
+      if (context.waitUntil) context.waitUntil(notifyAll(wrapDb(env.DB), now, 2).catch((e) => console.error('notify', e && e.message)));
     }
     if (r.active) {
       const phase = phaseOf(ctx.world, now);
@@ -507,11 +509,13 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
       }
     }
   });
-  await db.prepare(
+  const ins = await db.prepare(
     `INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, target_team, to_x, to_y,
        units, res, depart_at, arrive_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'out')`,
   ).bind(player.id, player.team_id, kind, home.id, home.x, home.y, tkind, target.id, targetTeam, target.x, target.y,
     JSON.stringify(units), JSON.stringify(res), now, now + dur).run();
+  // de verdediger krijgt meteen een melding op zijn gsm (als hij die aan heeft)
+  if (kind === 'attack' && tkind === 'town' && ins.meta && ins.meta.last_row_id) ctx.later((d) => notifyAttack(d, ins.meta.last_row_id, now));
   return json({ ok: true, arriveAt: now + dur });
 });
 
@@ -553,7 +557,26 @@ route('POST', '/push/subscribe', { auth: true, process: false }, async (ctx) => 
   // hooguit 4 toestellen per speler
   await db.prepare('DELETE FROM push_subs WHERE player_id = ? AND id NOT IN (SELECT id FROM push_subs WHERE player_id = ? ORDER BY id DESC LIMIT 4)')
     .bind(player.id, player.id).run();
-  return json({ ok: true });
+  return json({ ok: true, prefs: await pushPrefs(db, player.id, ep) });
+});
+
+// welke meldingen staan aan op dit toestel (per inschrijving)
+async function pushPrefs(db, playerId, endpoint) {
+  const r = await db.prepare('SELECT n_attack, n_build, n_march FROM push_subs WHERE endpoint = ? AND player_id = ?').bind(endpoint, playerId).first();
+  return r ? { attack: !!r.n_attack, build: !!r.n_build, march: !!r.n_march } : null;
+}
+
+// meldingen apart aan/uit zetten op dit toestel
+route('POST', '/push/prefs', { auth: true, process: false }, async (ctx) => {
+  const { db, player } = ctx;
+  const body = await readJson(ctx.request);
+  const ep = String(body.endpoint || '');
+  const cur = await pushPrefs(db, player.id, ep);
+  if (!cur) throw new GameError('Meldingen staan niet aan op dit toestel.');
+  const v = (k) => (typeof body[k] === 'boolean' ? body[k] : cur[k]) ? 1 : 0;
+  await db.prepare('UPDATE push_subs SET n_attack = ?, n_build = ?, n_march = ? WHERE endpoint = ? AND player_id = ?')
+    .bind(v('attack'), v('build'), v('march'), ep, player.id).run();
+  return json({ ok: true, prefs: await pushPrefs(db, player.id, ep) });
 });
 
 route('POST', '/push/unsubscribe', { auth: true, process: false }, async (ctx) => {
@@ -565,7 +588,7 @@ route('POST', '/push/unsubscribe', { auth: true, process: false }, async (ctx) =
 // proefmelding naar je eigen toestellen
 route('POST', '/push/test', { auth: true, process: false }, async ({ db, player }) => {
   const sent = await notifyPlayer(db, await vapidKeys(db), player.id, {
-    title: 'Meldingen staan aan', body: 'Je krijgt een melding ±2 minuten voor je leger aankomt.', tag: 'test', url: '/',
+    title: 'Meldingen staan aan', body: 'Je krijgt een melding bij een aanval op je stad, als een bouwer vrij is en als je leger bijna aankomt. Kies in het spel welke.', tag: 'test', url: '/',
   }, 300);
   return json({ ok: true, sent });
 });

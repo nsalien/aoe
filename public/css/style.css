@@ -838,6 +838,29 @@ body.in-battle #toasts { top: 74px; }
 .push-card .actions { margin-top: 8px; }
 .push-card .actions .btn[disabled] { opacity: 0.85; display: inline-flex; align-items: center; gap: 6px; }
 .push-msg { display: flex; gap: 6px; align-items: flex-start; margin: 0 0 6px; padding: 6px 8px; border-radius: 8px; font-size: 13px; font-weight: 600; line-height: 1.35; }
+/* meldingen apart aan/uit: één rij per soort met een schakelaar */
+.push-prefs { display: grid; gap: 6px; margin: 8px 0 2px; }
+.push-pref {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 7px 9px; border: 1px solid rgba(139, 106, 58, 0.35); border-radius: 10px; background: rgba(255, 252, 240, 0.55);
+  color: var(--ink); font: inherit; cursor: pointer;
+}
+.push-pref:hover { background: rgba(255, 252, 240, 0.85); }
+.push-pref .pp-ic .ic { width: 22px; height: 22px; }
+.push-pref:not(.on) .pp-ic { filter: grayscale(1); opacity: 0.55; }
+.push-pref .pp-tx { display: grid; line-height: 1.25; }
+.push-pref .pp-tx b { font-size: 13px; }
+.push-pref .pp-tx span { font-size: 11px; color: var(--muted); }
+.push-pref .tgl {
+  position: relative; width: 40px; height: 23px; border-radius: 999px; background: #c8b48c; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: background 0.15s;
+}
+.push-pref .tgl::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%;
+  background: #fffaf0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: transform 0.15s;
+}
+.push-pref.on .tgl { background: #4c9f45; }
+.push-pref.on .tgl::after { transform: translateX(17px); }
 .push-msg .ic { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
 .push-msg.ok { background: rgba(70, 140, 50, 0.16); color: #2f6a1e; border: 1px solid rgba(70, 140, 50, 0.4); }
 .push-msg.err { background: rgba(190, 60, 40, 0.12); color: #8a2216; border: 1px solid rgba(190, 60, 40, 0.35); }
