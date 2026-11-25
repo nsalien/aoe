@@ -346,6 +346,13 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     **Verplaatsen** bovenaan in het gebouwpaneel; dan tikken op de nieuwe plek of het gebouw verslepen, en 'Zet hier'
     (met een muis: klikken zet het neer). Balk bovenaan met 'Zet hier' / 'Stoppen'. Lang indrukken = enkel het leger.
 
+39. **Elk gebouwniveau ziet er anders en beter uit** (gevraagd: "nooit hetzelfde, bv. houthakker 2 → 3; elk tijdperk aparte
+    visuals"). Alle niveaus gerenderd en per stap gemeten: goudmijn en werkplaats waren op elk niveau identiek, markt na 2,
+    steengroeve, boerderij 3-5, smidse, houthakker, opslag, stal, kazerne amper. Nieuwe modellen met één opbouw (riet → pannen
+    → leien + extra bouwsel → aanbouw + vaandels → toren/goud) en zichtbare extra's per niveau; ook de daken van de volkeren
+    volgen het niveau, en de eigen stadscentra van de volkeren hebben extra's op niveau 4 en 5. Nu minstens ±15% verschil per
+    stap bij alle gebouwen en volkeren (meestal 25-70%). `VERSION` 7: de browser rendert de gebouwen één keer opnieuw.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
