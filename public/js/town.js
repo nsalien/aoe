@@ -3638,6 +3638,24 @@ export class TownView {
     this.cam.x = c.x; this.cam.y = c.y - 30;
   }
 
+  // de stadsmuur heeft geen eigen plaats: naar het midden van de muren (of het stadscentrum als er nog geen zijn)
+  centerOnWalls() {
+    const s = this.state;
+    const tiles = [...(s.walls || []), ...(s.gates || [])];
+    if (!tiles.length) { this.centerOn(s.buildings.find((b) => b.type === 'tc')); return; }
+    // een poort als die er is (die ziet men het best), anders het muurstuk dat het dichtst bij het midden ligt
+    let gx = 0; let gy = 0;
+    for (const n of tiles) { const { i, j } = tileOf(n); gx += i; gy += j; }
+    gx /= tiles.length; gy /= tiles.length;
+    let best = null; let bd = Infinity;
+    for (const n of (s.gates || []).length ? s.gates : tiles) {
+      const { i, j } = tileOf(n);
+      const d = (i - gx) ** 2 + (j - gy) ** 2;
+      if (d < bd) { bd = d; best = [i, j]; }
+    }
+    this.centerOnPos(best[0] + 0.5, best[1] + 0.5);
+  }
+
   centerOnPos(gx, gy) {
     const c = toWorld(gx, gy);
     this.cam.x = c.x; this.cam.y = c.y - 20;

@@ -118,7 +118,11 @@
       <div id="placeHint" class="place-hint" hidden></div>
       <div id="buildwrap" class="buildwrap">
         <div class="bb-row">
-          <button id="bbToggle" class="bb-toggle" data-action="toggleBuildbar" aria-expanded="true"></button>
+          <div class="bb-tabs" role="tablist">
+            <button id="bbToggle" class="bb-toggle" data-action="bbTab" data-tab="build" role="tab"></button>
+            <button id="bbArmy" class="bb-toggle" data-action="bbTab" data-tab="army" role="tab"></button>
+            <button id="bbAdvice" class="bb-toggle" data-action="bbTab" data-tab="advice" role="tab"></button>
+          </div>
           <div id="selActions" class="sel-actions" hidden></div>
         </div>
         <div id="buildbar" class="buildbar"></div>
