@@ -216,6 +216,12 @@ Daarom:
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.
 - `public/js/ui.js` — HTML-sjablonen (`gainsHtml` = wat een niveau hoger oplevert: rekent de stad uit met het gebouw +1 niveau;
   nieuwe effecten van gebouwen daar ook tonen); `icons.js` — SVG-iconen (gebruik deze, geen emoji); `main.js` — spelverloop in de browser.
+- **Tabbladen onderaan de stad** (`#buildwrap`): Bouwen, Mijn leger, Bouwadvies (`app.bbTab`, onthouden; tijdens bouwen/muren
+  altijd Bouwen: `bbTabNow`). Zelfde strook (`#buildbar`), ander inhoud: `buildBarHtml`, `armyBarHtml` (`armySummary`: per soort
+  thuis / in je gebied / onderweg of bij een bondgenoot / in opleiding) en `adviceBarHtml` (bouwers + `upgradeAdvice`: wat in dit
+  tijdperk nog verbeterd kan worden, per soort en niveau gebundeld, wat nu kan eerst; `adviceReady` = getal op het tabblad).
+  Tik op een voorstel of lopende bouw = `adviceGo` → `focusBuilding` (camera erheen, gebouw kiezen, paneel open; een gebundelde
+  kaart toont bij elke tik het volgende gebouw). Smalle gsm: korte namen (Leger, Advies); met troepen gekozen enkel iconen.
 
 ## Snelheid (laden en tekenen) — hou dit zo
 
