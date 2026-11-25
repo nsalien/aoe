@@ -860,8 +860,14 @@ function openPanelMobile(open) {
 
 // ---------- tekenlus ----------
 let lastT = performance.now();
+let modalEl = null;
 function frame(t) {
+  // achter een open venster (vervaagd) is 60 beelden per seconde verspilling: 5 per seconde volstaat
+  if (!modalEl) modalEl = $('#modal');
+  const behind = !!(modalEl && !modalEl.hidden);
+  if (behind && t - lastT < 200) { requestAnimationFrame(frame); return; }
   const dt = t - lastT; lastT = t;
+  if (town) town.throttled = behind; // dan zegt de beeldsnelheid niets over het toestel
   if (battle && battle.open) {
     // het slagveld tekent zichzelf; de stad hoeft dan niet mee te tekenen
   } else if (!$('#game').hidden && app.data) {
