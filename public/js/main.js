@@ -173,7 +173,7 @@ function toast(msg, type = '', ic = null) {
   const box = $('#toasts');
   while (box.children.length >= 4) box.firstElementChild.remove();
   $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), type === 'err' ? 4500 : 3200);
+  setTimeout(() => el.remove(), type === 'err' ? 4500 : Math.max(3200, Math.min(7000, String(msg).length * 45)));
 }
 
 // ---------- opstarten ----------
@@ -279,6 +279,7 @@ function startGame(data) {
       const r = await act('/walls', { tiles, remove }, remove ? 'Muur afgebroken' : `${tiles.length} muurstukken geplaatst`);
       if (r && !remove && UI.isEnclosed(app.live)) toast('Je stad is volledig ommuurd!', 'ok', 'castle');
     };
+    town.onSite = (p, villagers) => toast(UI.siteText(app.live, p, villagers), '', 'star');
     town.onHarvested = (node) => toast(`Je dorpeling bracht ${node.amount} ${RES_NAMES[node.res].toLowerCase()} mee!`, 'ok', 'star');
     town.onCelebrate = (b) => {
       celebrateQueue.push(b);
@@ -470,7 +471,7 @@ function computeLive(force) {
 }
 
 // nieuwe gebeurtenissen in je gebied (everzwijn gevangen, overval, ...) als melding tonen
-const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star' };
+const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star', site: 'star', relic: 'crown', 'den-lost': 'swords' };
 function announceLog(terr) {
   if (app.lastLid == null || terr.lid < app.lastLid) { app.lastLid = terr.lid; return; }
   if (terr.lid === app.lastLid) return;

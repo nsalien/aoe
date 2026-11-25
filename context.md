@@ -444,6 +444,12 @@ minuut een bot aan de beurt als niemand online is.
     Nu: hooguit ±60 beelden/s (`FX.Pacer`), Android altijd licht, ondoorzichtige canvassen, resolutie sneller omlaag op
     een aanraakscherm. Nog niet getest op een echt Android-toestel: vraag de gebruiker of het beter is.
 
+51. **Meer te beleven in de mist** (gemeld: "niet genoeg te beleven in de fog of war van het dorp zelf"): 9 ontdekkingen per
+    stad, op vaste plekken in de mist (uit het stadsnummer): 3 verborgen schatten, 2 oude ruïnes met een relikwie (+30 goud/u
+    voorgoed), 2 uitkijkheuvels (onthullen een cirkel van 9 tegels), verdwaalde reizigers (+3 dorpelingen) en een rovershol
+    (3 + 2 x tijdperk rovers, enkel soldaten, grote buit). Gouden teken erboven (bij het hol het aantal rovers), eigen 3D-modellen,
+    aantikken = uitleg, kaart 'Ontdekkingen in je gebied' in het stadsoverzicht, uitleg in de hulp. Elke plek één keer.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog

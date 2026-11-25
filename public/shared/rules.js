@@ -341,6 +341,29 @@ export const WILD = {
   },
 };
 
+// Ontdekkingen in de wildernis rond je stad (één keer per stad; territory.js legt ze vast uit het stadsnummer,
+// s.terr.sites = welke al gedaan zijn). Stuur er een groep heen: ring = tussen welke ringen rond je bouwvierkant ze liggen.
+//   chest      schat: grondstoffen (reward = één van de drie, x (1 + 0,5 per tijdperk boven het eerste))
+//   ruin       relikwie: voorgoed relicGold goud per uur (bij snelheid 1)
+//   lookout    van de heuvel zie je 'reveal' tegels ver
+//   travelers  'people' dorpelingen komen bij je wonen (zit je bevolking vol: 'food' voedsel per persoon)
+//   den        rovershol: enkel soldaten, tegen 3 + 2 x tijdperk rovers; daarna een grote buit
+export const SITES = {
+  chest: { name: 'Verborgen schat', ring: [7, 16], reward: [{ gold: 220, stone: 90 }, { food: 220, wood: 220 }, { wood: 160, stone: 160, gold: 80 }],
+    desc: 'Een oude kist, half begraven tussen de wortels. Stuur een groep om ze open te maken.' },
+  ruin: { name: 'Oude ruïne', ring: [9, 16], relicGold: 30,
+    desc: 'Tussen de brokstukken glanst een relikwie. Haal het op!' },
+  lookout: { name: 'Uitkijkheuvel', ring: [8, 14], reveal: 9,
+    desc: 'Vanop deze heuvel zie je ver over de wildernis. Stuur er iemand naartoe.' },
+  travelers: { name: 'Verdwaalde reizigers', ring: [7, 13], people: 3, food: 80,
+    desc: 'Een familie die de weg kwijt is. Haal ze op: ze komen in je dorp wonen.' },
+  den: { name: 'Rovershol', ring: [11, 16], fight: true, reward: { food: 350, wood: 350, stone: 250, gold: 300 },
+    desc: 'Rovers verstoppen hun buit in deze grot. Enkel soldaten kunnen ze verjagen.' },
+};
+// volgorde waarin ze geplaatst worden (vaste volgorde: zelfde plekken in browser en server)
+export const SITE_ORDER = ['chest', 'ruin', 'lookout', 'chest', 'travelers', 'den', 'ruin', 'chest', 'lookout'];
+export const denSize = (age) => 3 + 2 * age;
+
 // Vondsten: kleine extraatjes die af en toe rond je stad opduiken en die een dorpeling kan oogsten.
 export const BONUS = {
   kinds: {
