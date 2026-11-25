@@ -116,8 +116,8 @@ registratie; oude spelers kregen een vast willekeurig volk.
      uitgerekend (`resolveBattle`). Er wordt dus **niet gewacht** tot de aanvaller online komt.
   3b. Daarom: **melding op je gsm** ±2 minuten voor aankomst (aanvaller en verdediger; cron-worker elke minuut), ±1 min
      vooraf stil bijgewerkt met de resterende tijd. De gebruiker wil de melding echt op de gsm (meldingenbalk/vergrendelscherm,
-     ook met het spel dicht), niet enkel in het spel. Zonder het tokenrecht 'Workers Scripts · Edit' draait de cron-worker
-     niet en gaan meldingen enkel uit als iemand het spel open heeft. Daarnaast in het
+     ook met het spel dicht), niet enkel in het spel. De cron-worker draait sinds 25/11 (het token heeft nu 'Workers Scripts ·
+     Edit'); zonder dat recht gaan meldingen enkel uit als iemand het spel open heeft. Daarnaast in het
      spel een **aftelbalk** vanaf 120 s waar je al kiest. Vooraf 'zelf besturen' + verdediger offline → de slag begint meteen;
      vooraf 'automatisch' + verdediger offline → meteen uitgerekend.
   4. Live slag = **belegering in de echte stad** van de verdediger (of een open plek met tenten bij een roverskamp):
@@ -418,9 +418,9 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     is gekomen, en voor een binnenkomende aanval; beiden apart aan/uit"). Per toestel drie schakelaars in 'Meldingen op je gsm'
     (stadsoverzicht en wereldkaart): aanval op je stad (meteen bij vertrek + ±2 min vooraf), een bouwer is vrij, je leger komt
     bijna aan. Getest met de echte routes (twee toestellen, één met aanval uit) en in de browser (pc en gsm).
-    **Let op**: de cron-worker draait nog altijd niet (het Cloudflare-token mist 'Account · Workers Scripts · Edit'; zie het
-    deploylog). Tot dat recht er is, gaan 'bouwer vrij' en de ±2 min-melding pas uit als iemand (of een bot via een verzoek)
-    het spel gebruikt; de melding bij het vertrek van een aanval gaat wel altijd meteen.
+    De gebruiker gaf het Cloudflare-token daarna het recht 'Account · Workers Scripts · Edit': sinds 25/11 staat de cron-worker
+    `rijken-van-de-vallei-meldingen` online (elke minuut; deploylog: "✔ meldingen worden elke minuut verstuurd"). Zonder dat
+    recht zouden 'bouwer vrij' en de ±2 min-melding pas uitgaan bij het eerstvolgende verzoek van eender wie.
 
 ## 8. Bekende beperkingen en ideeën
 
