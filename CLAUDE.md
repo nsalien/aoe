@@ -68,6 +68,10 @@ Daarom:
   een gezamenlijk tempo (`pace`) zodat iedereen samen aankomt.
   Selecteren in de stad (`town.js`): 1 klik = 1 troep (`unit`), dubbelklik = alle van die soort (`kind`), ingedrukt houden
   = het hele leger (`army`, via `Camera.onLongPress` in `iso.js`).
+  Gebouwen kiezen gaat op de pixels van het getekende beeld (`buildingsAt` → `hitsBuilding`; slagschaduw telt niet), het
+  voorste eerst. Staat het gekozen (of net gekozen: `lastPick`, 8 s) gebouw op de getikte plek, dan kiest een nieuwe tik het
+  gebouw erachter. Het paneel toont dan 'Ook op deze plek' (`pickStack` → `alsoHereHtml`, actie `pickBuilding`; nodig op een
+  gsm, waar het paneel de kaart bedekt). Een gekozen gebouw achter een ander gebouw tekent `drawSelXray` doorschijnend bovenop.
 - Muren en poorten: `s.walls` en `s.gates` (tegelnummers). `wallSet()` = muren + poorten (een dichte poort sluit de stad).
   `insideSet()` = de binnenkant van een volledig ommuurde stad. Een poort is **2 tegels breed** (twee aangrenzende tegels in
   `s.gates`; `gateList()` groepeert ze, `gateSpan()` kiest bij een tik de 2 tegels) en staat in een recht stuk muur.
@@ -162,7 +166,10 @@ Daarom:
   4 een zichtbare aanbouw of tweede gebouw (aan de rechter- of voorkant, niet achteraan: daar zie je het niet) en vaandels
   (`dressHigh`); 5 een toren/koepel, goud (`goldVane`), lantaarns. Ook `roof()` volgt `o.level` voor de daken van de volkeren
   (pagode, plat, kantelen, koepel, Grieks). Controleer nieuwe modellen met een overzicht van alle niveaus en het verschil per
-  stap (render alle niveaus, meet het % gewijzigde pixels: < ±15% is te weinig). Verhoog `VERSION` in `sprite3d.js`.
+  stap (render alle niveaus, meet het % gewijzigde pixels: < ±15% is te weinig). Die meting telt ook 'enkel groter' mee:
+  bekijk de overzichten zelf en zorg voor nieuwe onderdelen per niveau (vb. wachttoren: houten post op palen → stenen voet
+  met houten wachtkamer → steen, traptorentje, wachthuisje → mezekouwen, hoektorentjes → open bovenverdieping met vuurbaken,
+  anker `glow`). Verhoog `VERSION` in `sprite3d.js`.
   De boerderij is ook 3D (akker met ruggen, graan, hek; de wieken van het molentje
   tekent `drawOverlay3d` via het anker `blades`). Kameel/strijdwagen/olifant en rammen zijn nog getekend.
   **Alles scherp bij inzoomen**: gebouwen (`S3.get(..., need)`), muren/torens (`S3.getWall(..., need)`), figuren, spullen en
