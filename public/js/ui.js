@@ -4,14 +4,14 @@ import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
-  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf,
+  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf, SITES, denSize,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
-  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
+  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig, siteDone, siteLoot,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -431,12 +431,30 @@ export function townOverviewHtml(app, live) {
     <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd>
     ${live.terr ? `<dt>Barbarenkamp</dt><dd>${campText(live, app.now())}</dd>` : ''}</dl>
     <div class="actions"><button class="btn" data-action="selectWall">Stadsmuur bekijken</button></div></div>`;
+  if (live.terr) html += sitesCardHtml(app, live);
   // meldingen op je gsm (aanval op je stad, bouwer vrij, ...): ook hier, niet enkel bij de wereldkaart
   html += pushCardHtml(app);
   return html;
 }
 
 // wat weet je over het barbarenkamp?
+// ontdekkingen in je gebied: hoeveel gevonden, wat nog te halen valt, relikwieën
+function sitesCardHtml(app, live) {
+  const all = territory(live.terr.seed).sites || [];
+  if (!all.length) return '';
+  const seen = exploredNow(live, app.now());
+  const found = all.filter((p) => exHas(seen, Math.floor(p.x), Math.floor(p.y)));
+  const done = all.filter((p) => siteDone(live, p.id)).length;
+  const open = found.filter((p) => !siteDone(live, p.id));
+  const rel = live.relics || 0;
+  return `<div class="card"><h3>${icon('map')} Ontdekkingen in je gebied <span class="right">${done}/${all.length}</span></h3>
+    <p class="small muted" style="margin:0 0 6px">Verken de mist rond je stad: daar liggen schatten, oude ruïnes met relikwieën, uitkijkheuvels,
+    verdwaalde reizigers en een rovershol. Kies een groep en tik erop.</p>
+    <dl class="kv"><dt>Gevonden</dt><dd>${found.length} van ${all.length}${found.length < all.length ? ' · de rest ligt nog in de mist' : ''}</dd>
+    ${open.length ? `<dt>Nog te halen</dt><dd>${open.map((p) => esc(SITES[p.kind].name)).join(', ')}</dd>` : ''}
+    <dt>Relikwieën</dt><dd>${rel ? `${rel} · +${fmt(rel * SITES.ruin.relicGold)} goud per uur` : 'nog geen'}</dd></dl></div>`;
+}
+
 function campText(live, now) {
   const c = territory(live.terr.seed).camp;
   if (!c) return 'geen';
@@ -454,6 +472,7 @@ export function groupStatus(live, g, now) {
     if (o === 'boar') return `op jacht naar een everzwijn${eta}`;
     if (o === 'camp') return `trekt naar het barbarenkamp${eta}`;
     if (o === 'chop') return `op weg om een boom te kappen${eta}`;
+    if (o === 'site') { const p = (territory(live.terr.seed).sites || []).find((x) => x.id === g.order.id); return `op weg naar ${p ? SITES[p.kind].name.toLowerCase() : 'een ontdekking'}${eta}`; }
     if (o === 'gather') { const d = depositById(live, g.order.id); return `op weg naar ${d ? WILD.deposits[d.kind].name.toLowerCase() : 'een bron'}${eta}`; }
     return `onderweg${eta}`;
   }
@@ -1254,6 +1273,20 @@ export function reportsHtml(list, activeId, detail) {
     </div><div>${detail ? reportDetailHtml(detail) : '<p class="empty">Kies een rapport.</p>'}</div></div>`;
 }
 
+// uitleg bij een ontdekking in je gebied (aangetikt); villagers = er zijn dorpelingen gekozen (null = niets gekozen)
+export function siteText(live, p, villagers = null) {
+  const def = SITES[p.kind];
+  if (siteDone(live, p.id)) return `${def.name}: hier is niets meer te halen.`;
+  const res = (o) => RES.filter((r) => o[r]).map((r) => `${fmt(o[r])} ${RES_NAMES[r].toLowerCase()}`).join(', ');
+  const what = p.kind === 'chest' || p.kind === 'den' ? ` Buit: ${res(siteLoot(live, p))}.`
+    : p.kind === 'ruin' ? ` Elk relikwie levert voorgoed ${def.relicGold} goud per uur op.` : p.kind === 'travelers' ? ` +${def.people} dorpelingen.` : '';
+  if (def.fight) {
+    const n = denSize(age(live));
+    return villagers ? `${def.name}: ${n} rovers. Dorpelingen vechten niet: stuur soldaten.` : `${def.name}: ${n} rovers.${what} Kies soldaten en tik op het hol.`;
+  }
+  return `${def.name}: ${def.desc}${what}${villagers === null ? ' Kies een groep (dorpelingen of soldaten) en tik erop.' : ''}`;
+}
+
 const bountySum = (b) => (b ? RES.reduce((a, r) => a + (b[r] || 0), 0) : 0);
 
 function unitTable(rows, teamColor) {
@@ -1413,7 +1446,10 @@ export function helpHtml(w, peaceEnd) {
     <li><b>Bronnen</b>: in de wildernis liggen goudaders, rotswanden, oude eikenbossen en bessenstruiken. Stuur er een dorpeling heen om ze leeg te halen.</li>
     <li><b>Everzwijnen</b>: stuur een paar soldaten (twee à drie speerdragers volstaan) en tik op het beest voor extra voedsel.</li>
     <li><b>Barbarenkamp</b>: ergens in je gebied woont een bende barbaren die af en toe je stad overvalt en grondstoffen steelt.
-    Vind hun kamp en val het aan met een paar soldaten (ongeveer evenveel als er barbaren zijn): dat levert buit op en de overvallen stoppen een tijd. Muren en torens helpen ook tegen overvallen.</li></ul>
+    Vind hun kamp en val het aan met een paar soldaten (ongeveer evenveel als er barbaren zijn): dat levert buit op en de overvallen stoppen een tijd. Muren en torens helpen ook tegen overvallen.</li>
+    <li><b>Ontdekkingen</b> (gouden teken erboven): <b>verborgen schatten</b> (grondstoffen), <b>oude ruïnes</b> met een relikwie
+    (+${SITES.ruin.relicGold} goud per uur, voorgoed), <b>uitkijkheuvels</b> (je ziet ineens een groot stuk van de wildernis), <b>verdwaalde reizigers</b>
+    (ze komen bij je wonen) en een <b>rovershol</b> (enkel soldaten; het getal = zoveel rovers, daarna een grote buit). Elke plek één keer; kies een groep en tik erop.</li></ul>
     <h3>Vondsten</h3>
     <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
     (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,

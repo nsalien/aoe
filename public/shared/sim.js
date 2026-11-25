@@ -5,7 +5,7 @@ import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
   LAND, landCost, WALL_TILE, GATE, DEMOLISH, TECHS, TECH_IDS, LOYALTY,
-  levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
+  levelCost, levelTime, levelAge, unitTime, costValue, unitValue, SITES, denSize,
 } from './rules.js';
 import {
   territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, T_W, TILE, exDecode, exEncode, revealCircle, revealSegment,
@@ -95,6 +95,8 @@ export function rates(s, speed = 1) {
   const bo = boost(s);
   const out = {};
   for (const r of RES) out[r] = s.villagers[r] * GATHER_RATE[r] * mult * (1 + bo[r]);
+  // relikwieën uit oude ruïnes in je gebied: elk levert voorgoed goud op
+  if (s.relics) out.gold += s.relics * SITES.ruin.relicGold * speed;
   return out;
 }
 
@@ -404,6 +406,7 @@ export function clearedSet(s) {
 // grond die je niet kan kopen: rond het barbarendorp en op wilde bronnen
 function reservedTile(terr, i, j) {
   if (terr.camp && Math.hypot(i + 0.5 - terr.camp.x, j + 0.5 - terr.camp.y) < FIELD.aggro + 0.6) return true;
+  if ((terr.sites || []).some((p) => Math.hypot(i + 0.5 - p.x, j + 0.5 - p.y) < 1.3)) return true;
   return terr.deposits.some((d) => Math.floor(d.x) === i && Math.floor(d.y) === j);
 }
 
@@ -818,6 +821,44 @@ const resText = (res) => Object.entries(res).filter(([, v]) => v > 0).map(([k, v
 export function depositById(s, id) {
   return territory(s.terr.seed).deposits.find((d) => d.id === id) || null;
 }
+// ---------- ontdekkingen in je gebied (SITES) ----------
+export function siteById(s, id) {
+  return (territory(s.terr.seed).sites || []).find((p) => p.id === id) || null;
+}
+export const siteDone = (s, id) => !!(s.terr && s.terr.sites && s.terr.sites[id]);
+// wat een schat of rovershol nu oplevert (tijdperk telt mee)
+export function siteLoot(s, p) {
+  const def = SITES[p.kind];
+  const base = p.kind === 'chest' ? def.reward[p.id % def.reward.length] : def.reward;
+  return base ? scaleRes(base, ageMult(s)) : null;
+}
+
+function claimSite(s, g, p, t) {
+  if (!s.terr.sites) s.terr.sites = {};
+  s.terr.sites[p.id] = 1;
+  const def = SITES[p.kind];
+  if (p.kind === 'chest' || p.kind === 'den') {
+    const loot = siteLoot(s, p);
+    addRes(s, loot);
+    pushLog(s, t, 'site', p.kind === 'den' ? `De rovers zijn verjaagd! In hun hol lag: ${resText(loot)}.` : `Schat gevonden: ${resText(loot)}.`);
+  } else if (p.kind === 'ruin') {
+    s.relics = (s.relics || 0) + 1;
+    pushLog(s, t, 'relic', `Relikwie gevonden in de oude ruïne! Het levert voortaan ${def.relicGold} goud per uur op (nu ${s.relics} relikwie${s.relics > 1 ? 'ën' : ''}).`);
+  } else if (p.kind === 'lookout') {
+    withEx(s, (b) => revealCircle(b, p.x, p.y, def.reveal));
+    pushLog(s, t, 'site', 'Vanop de uitkijkheuvel zie je ver over de wildernis.');
+  } else if (p.kind === 'travelers') {
+    const room = Math.max(0, popCap(s) - homePop(s));
+    const n = Math.min(def.people, room);
+    for (let k = 0; k < n; k++) placeVillager(s); // meteen aan het werk (of vrij als er geen werkplek is)
+    const food = (def.people - n) * def.food;
+    if (food) addRes(s, { food });
+    pushLog(s, t, 'site', n ? `${n} reiziger${n > 1 ? 's' : ''} kom${n > 1 ? 'en' : 't'} in je dorp wonen${food ? ` (de anderen lieten ${food} voedsel achter: je huizen zitten vol)` : ''}.`
+      : `Je huizen zitten vol: de reizigers trekken verder en laten ${food} voedsel achter.`);
+  }
+  // dorpelingen gaan daarna weer aan het werk; soldaten blijven staan
+  if (g && isVillagerGroup(g)) goHome(s, g, t);
+}
 export function depLeft(s, d) {
   const v = s.terr.dep[d.id];
   return v === undefined ? WILD.deposits[d.kind].amount : v;
@@ -1113,6 +1154,12 @@ function fieldArrive(s, g, t, speed) {
     return;
   }
   if (o.type === 'boar' && boarAlive(s, o.id, t)) { engage(s, g, { type: 'boar', id: o.id }, t); return; }
+  if (o.type === 'site') {
+    const p = siteById(s, o.id);
+    if (!p || siteDone(s, p.id)) { if (isVillagerGroup(g)) goHome(s, g, t); return; }
+    if (SITES[p.kind].fight) engage(s, g, { type: 'den', id: p.id }, t); else claimSite(s, g, p, t);
+    return;
+  }
   if (o.type === 'camp' && campAlive(s, t)) engage(s, g, { type: 'camp', id: 0 }, t);
 }
 
@@ -1165,7 +1212,8 @@ function ambush(s, g, t) {
   engage(s, g, { type: 'camp', id: 0 }, t);
 }
 
-const foeSide = (s, foe) => (foe.type === 'boar' ? combatants({ boar: 1 }) : combatants({ barbarian: Math.max(1, campSize(s)) }));
+const foeSide = (s, foe) => (foe.type === 'boar' ? combatants({ boar: 1 }) : foe.type === 'den' ? combatants({ barbarian: denSize(age(s)) })
+  : combatants({ barbarian: Math.max(1, campSize(s)) }));
 
 // gevecht beginnen, of aansluiten bij een lopend gevecht tegen dezelfde vijand
 function engage(s, g, foe, t) {
@@ -1254,6 +1302,12 @@ function finishFight(s, f, t, speed) {
     } else {
       pushLog(s, t, 'boar-lost', 'Een everzwijn heeft je groep verslagen. Stuur een sterkere groep!');
     }
+    return;
+  }
+  if (f.foe.type === 'den') {
+    const p = siteById(s, f.foe.id);
+    if (won && p && !siteDone(s, p.id)) claimSite(s, null, p, t);
+    else if (!won) pushLog(s, t, 'den-lost', `De rovers in hun hol waren te sterk${killed ? ` (${killed} rovers gesneuveld)` : ''}. Kom terug met meer soldaten!`);
     return;
   }
   const c = s.terr.camp;
@@ -1423,6 +1477,13 @@ export function doFieldOrder(s, id, to, target, now, pace = null) {
     if (!campAlive(s, now)) throw new GameError('Het kamp ligt in puin.');
     dest = { x: terr.camp.x - 0.8, y: terr.camp.y + 0.8 };
     g.order = { type: 'camp' };
+  } else if (tt === 'site') {
+    const p = (terr.sites || []).find((x) => x.id === Number(target.id));
+    if (!p || !known(p.x, p.y)) throw new GameError('Die plek heb je nog niet ontdekt.');
+    if (siteDone(s, p.id)) throw new GameError(`${SITES[p.kind].name}: daar is niets meer te halen.`);
+    if (SITES[p.kind].fight) checkCanFight(g);
+    dest = { x: p.x - 0.5, y: p.y + 0.6 };
+    g.order = { type: 'site', id: p.id };
   } else if (tt === 'dep') {
     const d = terr.deposits.find((x) => x.id === Number(target.id));
     if (!d || !known(d.x, d.y)) throw new GameError('Die bron heb je nog niet ontdekt.');

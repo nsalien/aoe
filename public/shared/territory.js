@@ -1,7 +1,7 @@
 // Het eigen gebied rond een stad: bosrand, wildernis, vijver, wilde bronnen, everzwijnen en een barbarenkamp.
 // Volledig bepaald door een zaadgetal (het stadsnummer), zodat server en browser exact hetzelfde zien.
 // Coördinaten zijn dezelfde tegels als de stad: het basisbouwvierkant is [0, TOWN_GRID).
-import { TOWN_GRID } from './rules.js';
+import { TOWN_GRID, SITES, SITE_ORDER } from './rules.js';
 import { hash2, fbm, mulberry32 } from './worldgen.js';
 
 export const T_R = 17; // zoveel tegels wildernis rond het basisvierkant
@@ -60,12 +60,18 @@ export function territory(seed) {
     }
   }
   const lake = (i, j) => inTerr(i, j) && lakeArr[tileIndex(i, j)] === 1;
-  function place(rMin, rMax, space) {
+  // dry = ook niet naast een meer (geen strand)
+  function place(rMin, rMax, space, dry = false) {
     for (let k = 0; k < 400; k++) {
       const x = T_MIN + 2 + rnd() * (T_W - 4);
       const y = T_MIN + 2 + rnd() * (T_W - 4);
       const r = ringOf(Math.floor(x), Math.floor(y));
       if (r < rMin || r > rMax || road(x, y) || lake(Math.floor(x), Math.floor(y))) continue;
+      if (dry) {
+        let wet = false;
+        for (let dj = -2; dj <= 2 && !wet; dj++) for (let di = -2; di <= 2; di++) if (lake(Math.floor(x) + di, Math.floor(y) + dj)) { wet = true; break; }
+        if (wet) continue;
+      }
       if (taken.some((p) => Math.hypot(p.x - x, p.y - y) < Math.max(p.r, space))) continue;
       const pos = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
       taken.push({ ...pos, r: space });
@@ -84,10 +90,18 @@ export function territory(seed) {
     const p = place(8, 16, 3);
     if (p) boars.push({ id: k + 1, ...p });
   }
+  // ontdekkingen (SITES): als laatste geplaatst, zodat kamp, bronnen en everzwijnen op hun oude plek blijven
+  const sites = [];
+  for (const kind of SITE_ORDER) {
+    const [r0, r1] = SITES[kind].ring;
+    const p = place(r0, r1, 3.2, true);
+    if (p) sites.push({ id: sites.length + 1, kind, ...p });
+  }
 
   // tegels: water, zand, bos, gras
   const clearOf = [...deposits.map((d) => ({ x: d.x, y: d.y, r: d.kind === 'wood' ? 1.6 : 1.5 })),
-    ...boars.map((b) => ({ x: b.x, y: b.y, r: 1.2 })), ...(camp ? [{ x: camp.x, y: camp.y, r: 2.8 }] : [])];
+    ...boars.map((b) => ({ x: b.x, y: b.y, r: 1.2 })), ...(camp ? [{ x: camp.x, y: camp.y, r: 2.8 }] : []),
+    ...sites.map((p) => ({ x: p.x, y: p.y, r: p.kind === 'den' ? 1.9 : 1.5 }))];
   const trees = [];
   for (let j = T_MIN; j < T_MAX; j++) {
     for (let i = T_MIN; i < T_MAX; i++) {
@@ -114,7 +128,7 @@ export function territory(seed) {
       }
     }
   }
-  t = { seed, tiles, trees, pond, near, pasture, camp, deposits, boars };
+  t = { seed, tiles, trees, pond, near, pasture, camp, deposits, boars, sites };
   cache.set(seed, t);
   return t;
 }
