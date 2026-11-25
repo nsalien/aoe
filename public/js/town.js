@@ -3412,7 +3412,7 @@ export class TownView {
     if (a.flag) A.flag(ctx, c.x + a.flag[0], c.y + a.flag[1], b.type === 'tower' ? 14 : 17, this.team, t + b.id * 300);
     if (a.smoke && (b.type !== 'house' || b.level >= 2 || b.id % 2 === 0)) A.smoke(ctx, c.x + a.smoke[0], c.y + a.smoke[1], t, b.id);
     if (a.glow) {
-      if (b.type === 'smithy') {
+      if (b.type === 'smithy' || b.type === 'tower') { // vuur van de smidse of het vuurbaken op de toren
         const fl = 0.35 + Math.sin(t * 0.02) * 0.1 + Math.sin(t * 0.047) * 0.08;
         FX.drawGlow(ctx, c.x + a.glow[0], c.y + a.glow[1], 12, FX.FIRE, fl + 0.2);
       } else {
