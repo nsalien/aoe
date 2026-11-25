@@ -212,7 +212,7 @@ export class TownView {
     this.walkers = [];
     this.sheep = [];
     this.ducks = [];
-    this.trees = Array.from({ length: NAT.TREE_COUNT }, (_, k) => NAT.treeSprite(k));
+    this.treeSprites = []; // getekende (2D) bomen: pas gemaakt als de 3D-boom (nog) niet klaar is, zie treeSpr()
     this.particles = new FX.Particles();
     this.birds = new FX.Birds(wb);
     this.clouds = new FX.Clouds({ x0: wb.x0 - 200, x1: wb.x1, y0: wb.y0 - 100, y1: wb.y1 - 200 }, FX.LOW_POWER ? 4 : 7);
@@ -663,14 +663,17 @@ export class TownView {
         }
       });
       // fijne korrel in het gras (anders oogt de grond te glad)
+      // per kleur één pad (duizenden korreltjes: één fill i.p.v. duizenden; ze overlappen amper)
       ['rgba(25,55,12,0.16)', 'rgba(255,255,205,0.10)', 'rgba(70,100,25,0.14)'].forEach((col, c) => {
         g.fillStyle = col;
         const L = grains[c];
+        g.beginPath();
         for (let k = 0; k < L.length; k += 2) {
           const x = L[k]; const y = L[k + 1];
           if (x < R.x0 - 3 || x > R.x1 + 3 || y < R.y0 - 3 || y > R.y1 + 3) continue;
-          if (S) ell(x + 0.9, y + 0.45, 0.95, 0.5); else g.fillRect(x, y, 1.8, 0.9);
+          if (S) { g.moveTo(x + 1.85, y + 0.45); g.ellipse(x + 0.9, y + 0.45, 0.95, 0.5, 0, 0, Math.PI * 2); } else g.rect(x, y, 1.8, 0.9);
         }
+        g.fill();
       });
       // grote, zachte kleurvlekken voor een natuurlijke look
       for (let k = 0; k < 140; k++) {
@@ -1285,8 +1288,7 @@ export class TownView {
       this.drawSheep(ctx, sh, t);
       top = 24;
     } else if (n.kind === 'tree') {
-      const spr = this.trees[1];
-      if (!A.prop3d(ctx, 'tree', 1, p.x - 3, p.y, 1.1)) ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1);
+      if (!A.prop3d(ctx, 'tree', 1, p.x - 3, p.y, 1.1)) { const spr = this.treeSpr(1); ctx.drawImage(spr.cv, p.x - 3 - spr.ax * 1.1, p.y - spr.ay * 1.1, spr.w * 1.1, spr.h * 1.1); }
       // stapeltje brandhout
       if (!A.prop3d(ctx, 'woodpile', 0, p.x + 10, p.y + 3, 1.1)) for (let i = 0; i < 3; i++) {
         const lx = p.x + 10; const ly = p.y + 3 - i * 3.2;
@@ -2323,9 +2325,12 @@ export class TownView {
     const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
     // tijdens het slepen of knijpen: hooguit één nieuw stuk per 3 beelden (een stuk kost op een gsm al snel 50 ms);
     // na het loslaten komen de rest snel bij
+    // net na het opstarten (eerste 1,2 s) nog geen: dan is er al genoeg te doen en de gebakken grond staat er al;
+    // zolang er 3D-beelden laden ook maar af en toe één
     const moving = this.cam.dragging || this.cam.pinch;
     this.hdTick = (this.hdTick || 0) + 1;
-    const maxNew = moving ? (this.hdTick % 3 === 0 ? 1 : 0) : 2;
+    if (!this.hdFrom) this.hdFrom = performance.now() + 1200;
+    const maxNew = performance.now() < this.hdFrom ? 0 : moving || S3.busy() ? (this.hdTick % 3 === 0 ? 1 : 0) : 2;
     this.hdPending = this.hdg.draw(ctx, vis, need, bounds, L.key, (g, R, S) => {
       this.paintGround(g, R, S);
       this.paintTreeShadows(g, R, L.len, L.alpha);
@@ -2678,14 +2683,18 @@ export class TownView {
     ctx.globalAlpha = 1;
   }
 
+  treeSpr(k) {
+    return this.treeSprites[k] || (this.treeSprites[k] = NAT.treeSprite(k));
+  }
+
   drawTree(ctx, tr, t, shake) {
     const p = toWorld(tr.gx, tr.gy);
-    const spr = this.trees[tr.kind ?? tr.v];
     let sway = Math.sin(t * 0.0012 + tr.gx) * 0.6;
     if (shake) sway += Math.sin(t * 0.05) * 1.6;
     // 3D-boom (zelfde stijl als de gebouwen); de schaduw zit al in de grondlaag
     const d3 = S3.getProp('tree', tr.kind ?? tr.v, this.treeNeed);
     if (d3) { ctx.drawImage(d3.cv, p.x - d3.ax + sway, p.y - d3.ay, d3.w, d3.h); return; }
+    const spr = this.treeSpr(tr.kind ?? tr.v);
     ctx.drawImage(this.treeMip ? spr.small : spr.cv, p.x - spr.ax + sway, p.y - spr.ay, spr.w, spr.h);
   }
 
