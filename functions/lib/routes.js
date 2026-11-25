@@ -1,6 +1,7 @@
 import { json, readJson, int, wrapDb, GameError } from './http.js';
 import { vapidKeys, validPushEndpoint, notifyAll, notifyAttack, notifyPlayer } from './push.js';
 import { botTick, ensureBots, BOT_MAX } from './bots.js';
+import { relocateTeam } from './relocate.js';
 import { relation, payRansom, vassalShare } from './vassal.js';
 import {
   hashPassword, newSalt, safeEqual, createSession, sessionCookie, clearCookie, getSessionPlayer,
@@ -742,6 +743,16 @@ route('GET', '/admin/status', { admin: true }, async ({ db, now }) => {
   ).all()).results;
   const marches = await db.prepare('SELECT COUNT(*) AS c FROM marches').first();
   return json({ world: w && { ...w, ...worldInfo(w, now), join_code: w.join_code }, players, marches: marches.c, now });
+});
+
+// een clan naar een andere (willekeurige, verre) plek op de wereldkaart verplaatsen
+route('POST', '/admin/relocate', { admin: true }, async ({ db, request, now }) => {
+  const body = await readJson(request);
+  const name = String(body.team || '').trim();
+  if (!name) throw new GameError('Geef de naam van de clan.');
+  const r = await relocateTeam(db, await getWorld(db), /^\d+$/.test(name) ? Number(name) : name, now);
+  if (!r) throw new GameError('Die clan (of een plek ervoor) werd niet gevonden.');
+  return json({ ok: true, ...r });
 });
 
 route('POST', '/admin/message', { admin: true }, async ({ db, request, now }) => {

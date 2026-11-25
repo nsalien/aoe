@@ -2038,3 +2038,56 @@ test('oude ontdekkingen (weer weggehaald) worden opgeruimd: geen relikwie-goud, 
   advance(s, s.t + 3600000, 1); // loopt gewoon verder zonder fouten
   assert.equal(territory(5).sites, undefined, 'geen ontdekkingen meer in het gebied');
 });
+
+// ---------- een clan verplaatsen (beheer en eenmalige opdracht) ----------
+import { relocateTeam, runOneOff, ONE_OFF } from '../functions/lib/relocate.js';
+import { generateTerrain as genTerrain, isBuildable as buildableTile } from '../public/shared/worldgen.js';
+
+test('clan verplaatsen: willekeurige plek op land, ver van de andere steden, clanleden naast elkaar, legers volgen, één keer', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body) => (await handle({ request: new Request(`http://x/api${path}`, { method, headers: { 'content-type': 'application/json', 'x-admin-key': 'k' }, body: body && JSON.stringify(body) }), env })).json();
+  await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 2, seed: 4242 });
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  const all = (q, ...v) => db.raw.prepare(q).all(...v);
+  // 5 spelers dicht bij elkaar, waarvan 2 van de Rozenwacht
+  sql('DELETE FROM teams'); sql('DELETE FROM towns'); sql('DELETE FROM players'); sql('DELETE FROM marches');
+  sql("INSERT INTO teams (id, slot, name, color) VALUES (1, 0, 'Huis van de Eik', '#d64545'), (2, 1, 'Wolvenclan', '#3f7fd9'), (6, 5, 'Rozenwacht', '#e07a2a')");
+  const pos = [[1, 20, 20], [1, 23, 21], [2, 21, 24], [6, 25, 23], [6, 22, 27]];
+  pos.forEach(([team, x, y], i) => {
+    sql("INSERT INTO players (id, name, pass_hash, salt, team_id, created_at) VALUES (?, ?, 'x', 'x', ?, 0)", i + 1, `Speler ${i + 1}`, team);
+    sql('INSERT INTO towns (id, player_id, name, x, y, state) VALUES (?, ?, ?, ?, ?, ?)', i + 1, i + 1, `Stad ${i + 1}`, x, y, '{}');
+  });
+  // een aanval op de Rozenwacht en een leger van de Rozenwacht onderweg
+  sql("INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, to_x, to_y, units, depart_at, arrive_at, status) VALUES (1, 1, 'attack', 1, 20, 20, 'town', 4, 25, 23, '{}', 0, 9e12, 'out')");
+  sql("INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, to_x, to_y, units, depart_at, arrive_at, status) VALUES (5, 6, 'attack', 5, 22, 27, 'camp', 1, 30, 30, '{}', 0, 9e12, 'out')");
+  const world = await getWorld(db);
+  const now = Date.now();
+  const jobs = [{ key: 'test-rozenwacht', team: 'Rozenwacht' }];
+  const done = await runOneOff(db, world, now, jobs);
+  assert.equal(done.length, 1);
+  const r = done[0].r;
+  assert.equal(r.team, 'Rozenwacht');
+  assert.equal(r.moved.length, 2);
+  const terrain = genTerrain(world.seed, world.size);
+  const towns = all('SELECT id, x, y FROM towns ORDER BY id');
+  const [a, b] = [towns[3], towns[4]];
+  for (const t of [a, b]) assert.ok(buildableTile(terrain.tiles[t.y * world.size + t.x]), 'op bebouwbaar land');
+  const d = Math.hypot(a.x - b.x, a.y - b.y);
+  assert.ok(d >= 4 && d <= 8, `clanleden naast elkaar (${d.toFixed(1)} tegels)`);
+  for (const o of towns.slice(0, 3)) for (const t of [a, b]) assert.ok(Math.hypot(o.x - t.x, o.y - t.y) >= 12, 'ver van de andere steden');
+  assert.deepEqual(towns.slice(0, 3).map((t) => [t.x, t.y]), [[20, 20], [23, 21], [21, 24]], 'de anderen blijven staan');
+  const m = all('SELECT from_x, from_y, to_x, to_y FROM marches ORDER BY id');
+  assert.deepEqual([m[0].to_x, m[0].to_y], [a.x, a.y], 'een aanval op de Rozenwacht gaat naar de nieuwe plek');
+  assert.deepEqual([m[1].from_x, m[1].from_y], [b.x, b.y], 'een leger van de Rozenwacht vertrekt van de nieuwe plek');
+  assert.equal(all("SELECT COUNT(*) AS c FROM reports WHERE kind = 'info' AND player_id IN (4, 5)")[0].c, 2, 'de spelers krijgen een bericht');
+  // nooit twee keer
+  assert.equal((await runOneOff(db, world, now + 60000, jobs)).length, 0);
+  assert.deepEqual(all('SELECT x, y FROM towns WHERE id = 4').map((t) => [t.x, t.y])[0], [a.x, a.y]);
+  // de echte opdracht stopt na zijn datum; ook via beheer kan het
+  assert.equal(ONE_OFF[0].team, 'Rozenwacht');
+  assert.equal((await runOneOff(db, world, ONE_OFF[0].until + 1)).length, 0);
+  const res = await call('POST', '/admin/relocate', { team: 'Wolvenclan' });
+  assert.equal(res.ok, true);
+  assert.equal(res.moved.length, 1);
+});

@@ -449,6 +449,10 @@ minuut een bot aan de beurt als niemand online is.
     "niet oké" en liet alles terug weghalen. Niet opnieuw toevoegen zonder het eerst te vragen. `ensureTerritory` ruimt de restjes
     op (`s.relics`, `s.terr.sites`, gevechten tegen 'den', tochten met opdracht 'site').
 
+52. **Rozenwacht verplaatst** (gevraagd: "verplaats de 2 spelers van de Rozenwacht naar een andere random plek; nu zitten 5
+    spelers veel te dicht bijeen"). Eenmalige opdracht `move-rozenwacht-1` in `ONE_OFF` (`relocate.js`, tot 27/11), uitgevoerd door
+    de cron-worker binnen de minuut na de publicatie. Daarnaast een knop 'Clan verplaatsen' in `/admin.html`.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
