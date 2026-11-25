@@ -402,6 +402,13 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     - Wereldkaart wordt op de achtergrond gebakken: openen 0,4 s i.p.v. 1,3 s op pc.
     Gsm stilstaan 8 → 14 beelden/s, pannen 12 → 17,5 (4x vertraagd, zonder GPU). Alles pixel voor pixel nagekeken.
 
+46. **Tabbladen Mijn leger en Bouwadvies** naast 'Bouwen' (gevraagd: "knop 'mijn leger' die toont hoeveel troepen je hebt en
+    van welke types, en 'bouwadvies' met de gebouwen die nog geüpgraded kunnen worden; erop klikken brengt je naar dat gebouw;
+    daar zie je ook of je bouwers bezig zijn en waaraan"). Zelfde strook als het bouwmenu: Mijn leger = totaal + een kaart per
+    soort (thuis, in je gebied, onderweg/elders, +n in opleiding); Bouwadvies = bouwers (bezig/vrij, elke lopende bouw met
+    aftelling) en de gebouwen die je in dit tijdperk nog kan verbeteren (groen omrand = kan nu; ×n = zoveel gelijke gebouwen,
+    elke tik toont het volgende). Getest op pc, gsm (390 en 360 breed, ook met troepen gekozen) en liggend.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
