@@ -2350,15 +2350,29 @@ export class TownView {
   }
 
   // Als het tekenen te traag gaat, tekenen we op een iets lagere resolutie zodat alles vlot blijft bewegen.
+  // Tijdens het laden (3D-beelden, scherpe grondstukken) zegt de beeldsnelheid niets over het toestel: dan niet meten.
+  // Traag = minder dan ±40 beelden/s én het tekenen zelf kost veel (een gsm in energiebesparing geeft er sowieso maar 30:
+  // dat is geen reden om wazig te tekenen). Gaat het weer vlot, dan gaat de resolutie stap per stap terug omhoog; een
+  // stap die te traag bleek, proberen we pas na een minuut opnieuw.
   adaptQuality(dt) {
     if (!(dt > 0) || dt > 250) return;
+    if (this.throttled || S3.busy() || this.hdPending > 0) return; // deze beelden niet meetellen (maar ook niet opnieuw beginnen)
     this.frameAvg = this.frameAvg ? this.frameAvg * 0.94 + dt * 0.06 : dt;
+    const w = this.workMs || 0;
+    this.workAvg = this.workAvg ? this.workAvg * 0.94 + w * 0.06 : w;
     this.frameN++;
-    if (this.frameN < 120) return;
+    this.measMs = (this.measMs || 0) + dt;
+    if (this.frameN < 30 || this.measMs < 2500) return;
     const cam = this.cam;
-    if (this.frameAvg > 25 && cam.quality > 0.55) {
-      cam.quality = Math.max(0.55, cam.quality - 0.15);
-      this.frameN = 0;
+    const now = performance.now();
+    const reset = () => { this.frameN = 0; this.measMs = 0; this.frameAvg = 0; this.workAvg = 0; };
+    if (this.frameAvg > 25 && (this.workAvg > 8 || this.frameAvg > 40) && cam.quality > 0.55) {
+      this.qFail = { q: cam.quality, at: now };
+      cam.quality = Math.max(0.55, Math.round((cam.quality - 0.15) * 100) / 100);
+      reset();
+    } else if (cam.quality < 1 && this.measMs > 6000 && this.frameAvg < 18.5 && this.workAvg < 6) {
+      const up = Math.min(1, Math.round((cam.quality + 0.15) * 100) / 100);
+      if (!this.qFail || this.qFail.q > up + 0.01 || now - this.qFail.at > 60000) { cam.quality = up; reset(); }
     }
   }
 
@@ -2400,6 +2414,12 @@ export class TownView {
   // ---------- tekenen ----------
 
   draw(t, dt, now) {
+    const w0 = performance.now();
+    this.drawFrame(t, dt, now);
+    this.workMs = performance.now() - w0;
+  }
+
+  drawFrame(t, dt, now) {
     const ctx = this.ctx;
     const cam = this.cam;
     cam.resize();
