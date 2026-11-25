@@ -12,7 +12,7 @@ let ready = 0;
 const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4);
 // eenmaal gerenderde gebouwen bewaren in de browser (Cache Storage), zodat dat maar één keer gebeurt.
 // Verhoog VERSION als de modellen of de renderer veranderen.
-const VERSION = 6;
+const VERSION = 7;
 const STORE = 'rvs-3d-v' + VERSION;
 const hasStore = typeof caches !== 'undefined' && typeof window !== 'undefined' && window.isSecureContext;
 const urlOf = (key) => `/__3d/${VERSION}/${SCALE}/${encodeURIComponent(key)}`;
