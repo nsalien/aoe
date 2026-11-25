@@ -469,6 +469,11 @@ minuut een bot aan de beurt als niemand online is.
     - `/state` 22 → 12 vragen, 3,9 → 0,7 ms. De browser probeert bij een foutpagina zelf opnieuw.
     Gratis limieten (geschat voor ±8 spelers): ruim onder 100k verzoeken/dag, 5M gelezen en 100k geschreven rijen per dag.
 
+54. **Ongelezen chat duidelijk zichtbaar** (gevraagd: "als er een ongelezen chatbericht is, team of globaal, zorg dat het
+    duidelijk zichtbaar is"). Rood getal op de Team-knop dat pulseert, een rode knop 'n nieuwe berichten' bovenaan op de kaart
+    (opent meteen de chat op het juiste kanaal), '(n)' in de titel van het tabblad, een getal per kanaal en een melding met
+    wie wat schreef (tik = naar de chat). Geen extra verzoeken: zit in de gewone peiling van 20 s. Getest op pc, gsm en liggend.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog

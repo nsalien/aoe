@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-title" content="Rijken">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <!-- meteen beginnen: de spelgegevens ophalen en alle scripts tegelijk laden (niet één na één) -->
-  <script>(function () { var o = { credentials: "same-origin" }; try { window.__boot = { info: fetch("/api/info", o), state: fetch("/api/state", o) }; } catch (e) { /* oude browser */ } })();</script>
+  <script>(function () { var o = { credentials: "same-origin" }; var q = ""; try { var c = JSON.parse(localStorage.getItem("rvs-chat-seen")) || {}; q = "?cw=" + (c.world || 0) + "&ct=" + (c.team || 0); } catch (e) { /* privé-venster */ } try { window.__boot = { info: fetch("/api/info", o), state: fetch("/api/state" + q, o) }; } catch (e) { /* oude browser */ } })();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -99,7 +99,7 @@
       <button class="navbtn active" data-action="view" data-view="town" title="Mijn stad"><span class="ni" data-icon="castle"></span><span>Stad</span></button>
       <button class="navbtn" data-action="view" data-view="world" title="Wereldkaart"><span class="ni" data-icon="map"></span><span>Wereld</span></button>
       <button class="navbtn" data-action="reports" title="Rapporten"><span class="ni" data-icon="scroll"></span><span>Rapporten</span><b id="badgeReports" class="badge" hidden></b></button>
-      <button class="navbtn" data-action="team" title="Team en chat"><span class="ni" data-icon="team"></span><span>Team</span><b id="badgeChat" class="badge dot" hidden></b></button>
+      <button class="navbtn" data-action="team" title="Team en chat"><span class="ni" data-icon="team"></span><span>Team</span><b id="badgeChat" class="badge" hidden></b></button>
       <button class="navbtn" data-action="leaderboard" title="Ranglijst"><span class="ni" data-icon="trophy"></span><span>Ranglijst</span></button>
       <button class="navbtn" data-action="help" title="Hoe speel je?"><span class="ni" data-icon="book"></span><span>Hulp</span></button>
       <button class="navbtn bottom" data-action="logout" title="Afmelden"><span class="ni" data-icon="door"></span><span>Uit</span></button>
@@ -109,6 +109,7 @@
       <canvas id="worldCanvas" hidden></canvas>
       <div class="vignette" aria-hidden="true"></div>
       <div id="viewTitle" class="view-title"></div>
+      <button id="chatPill" class="chat-pill" data-action="openChat" hidden></button>
       <div class="hud">
         <button class="hudbtn" data-action="zoom" data-dir="1" title="Inzoomen" data-icon="plus"></button>
         <button class="hudbtn" data-action="zoom" data-dir="-1" title="Uitzoomen" data-icon="minus"></button>
