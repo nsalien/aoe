@@ -149,7 +149,7 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
 
 ## 4. Werkwijze en omgeving
 
-- Branch van deze sessies: `ccr-944648cc-j8tmpw` (zie de systeemprompt van je sessie). Push → GitHub-actie test,
+- Branch: die van je eigen sessie (zie de systeemprompt, bv. `ccr-0d5eaa85-zrgdzp`). Push → GitHub-actie test,
   cherry-pickt naar `main` en zet alles online (±1–2 min). Controleer met `curl` dat een nieuw stukje code op de site staat.
 - `git merge --no-edit origin/main` geeft vaak conflicten omdat main uit cherry-picks bestaat. Is de inhoud gelijk
   (`git diff HEAD origin/main` leeg), gebruik dan `git merge -s ours --no-edit origin/main`.
@@ -172,6 +172,15 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
 - Bots testen: zet `world.start_at` (en `players.created_at`/`towns.state.t` van de bots) in het verleden en roep `botTick` vaak op
   (of laat een speler `/api/state` peilen); `players.bot_next = 0` maakt een bot meteen weer aan de beurt.
 - Lokaal spel: `npm run db:init:local` en `npx wrangler pages dev --port 8788`.
+- **Snelheid meten** (scripts in je scratchpad, zoals bij punt 45 in §7): een uitgebouwde stad maak je in Node met
+  `newTownState` + `advance` + `botEconomy` (8 dagen) en zet je met `wrangler d1 execute --file` in de lokale database.
+  Meet koud (nieuw profiel) en warm (herladen), daarna stilstaan/pannen/zoomen via `requestAnimationFrame`-tijden;
+  gsm = `Emulation.setCPUThrottlingRate` 4 + `Network.emulateNetworkConditions` (150 ms). Kost per onderdeel: omwikkel
+  de `draw…`-methodes van `__app.views.town` met een `getImageData(0,0,1,1)` ervoor en erna (dwingt het tekenen af).
+  `town.workMs` = JS-tijd van het laatste beeld. Let op: het hulpvenster opent bij elk nieuw profiel en vertekent de
+  meting (zet `rvs-intro-…` in localStorage); de container heeft 4 kernen (`LOW_POWER` aan) en geen GPU: het vullen
+  van pixels weegt hier veel zwaarder dan op een echte gsm. Vergelijk beelden pixel voor pixel (bv. `ground.cv`,
+  `bakeInfo.cv` als PNG) om zeker te zijn dat een versnelling niets aan het uitzicht verandert.
 - Browsertests met Playwright (scripts in je scratchpad, niet in de repo):
   - `const { chromium } = createRequire(import.meta.url)('playwright')` (ESM-import vindt het niet).
   - Wereld resetten: `POST /api/admin/reset` met header `x-admin-key: verander-mij`; spelers via `/api/register`.
@@ -378,6 +387,20 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     anders uit"). Het model gaf een leeg anker `glow` mee; de werker liep daarop vast en het spel viel terug op 2D. Opgelost
     in het model en in `render-worker.js` (lege ankers overslaan), plus een test die elk model van elk volk en niveau bouwt
     en de ankers nakijkt. Nagekeken in de browser: alle torens 1-5 in 3D.
+
+45. **Snelheid: sneller laden en vlotter bewegen** (gemeld: "door alle visuele aanpassingen werkt het spel slomer, laadt
+    en beweegt het trager; zorg dat het zeer efficiënt en vlot blijft"). Gemeten met een uitgebouwde stad (tijdperk 4,
+    51 gebouwen, 71 soldaten, 90 dorpelingen), pc en gsm (CPU 4x trager, 4G):
+    - Modules laadden in 9 rondreizen na elkaar → nu allemaal tegelijk (`modulepreload`), `/info` + `/state` al vanuit
+      `index.html`.
+    - 3D-beelden: de werker maakt ze af en bewaart ze; bij de start alles van vorige keer in één keer uit de cache.
+      Warm starten: alle 3D klaar na ±4,7 s i.p.v. ±18,6 s op pc; stad zichtbaar na 0,96 s i.p.v. 1,4 s (gsm 4,5 i.p.v. 6,3 s).
+    - De resolutie zakte door het trage laden blijvend naar 55-75% (ook op pc: wazig) → nu enkel bij echte traagheid,
+      en ze gaat terug omhoog.
+    - Bouwbalk en titel zonder `backdrop-filter`; achter een venster 5 beelden/s; grondstukken niet tijdens het slepen.
+    - Miniaturen, 2D-bomen en scherpe grond niet meer bij het opstarten; korrels in één pad.
+    - Wereldkaart wordt op de achtergrond gebakken: openen 0,4 s i.p.v. 1,3 s op pc.
+    Gsm stilstaan 8 → 14 beelden/s, pannen 12 → 17,5 (4x vertraagd, zonder GPU). Alles pixel voor pixel nagekeken.
 
 ## 8. Bekende beperkingen en ideeën
 

@@ -159,8 +159,8 @@ Daarom:
 - **3D-look** (zoals vooraf gerenderde sprites in klassieke RTS-spellen): `render3d.js` is een kleine straalvolger
   (vormen: convexe veelvlakken, cilinders, kegels, ellipsoïden, capsules; procedurele materialen; zon, slagschaduw,
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
-  ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`), bewaart ze
-  in Cache Storage (verhoog `VERSION` als modellen veranderen) en geeft `null` tot ze klaar zijn: dan tekent het spel de
+  ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`, die ze ook
+  afwerkt en bewaart, zie "Snelheid" hieronder), in Cache Storage (verhoog `VERSION` als modellen veranderen; nu 10) en geeft `null` tot ze klaar zijn: dan tekent het spel de
   oude versie uit `art.js`/`figures.js`. **Elk niveau ziet er anders (en beter) uit**, met dezelfde opbouw voor alle gebouwen:
   1 hout en riet, klein; 2 groter, pannen, stenen voet; 3 steen, leien, een extra bouwsel (kraan, schachttoren, put, erker…);
   4 een zichtbare aanbouw of tweede gebouw (aan de rechter- of voorkant, niet achteraan: daar zie je het niet) en vaandels
@@ -216,6 +216,28 @@ Daarom:
   Teken nooit `A.box` met textuur per beeld (duur): cache als afbeelding zoals `drawWallPiece`/`gatePart`.
 - `public/js/ui.js` — HTML-sjablonen (`gainsHtml` = wat een niveau hoger oplevert: rekent de stad uit met het gebouw +1 niveau;
   nieuwe effecten van gebouwen daar ook tonen); `icons.js` — SVG-iconen (gebruik deze, geen emoji); `main.js` — spelverloop in de browser.
+
+## Snelheid (laden en tekenen) — hou dit zo
+
+- **Laden**: `index.html` vraagt alle modules tegelijk (`<link rel="modulepreload">`) en start `/info` + `/state` al vóór de
+  scripts binnen zijn (`window.__boot`, `api.js` `early()`). Nieuwe module (of een die wegvalt)? Pas de lijst in
+  `index.html` aan; een test controleert dat ze klopt met de imports van `main.js`.
+- **3D-beelden** (`sprite3d.js`): de werker maakt het beeld af (rand rond figuren, `ImageBitmap`) en bewaart het zelf in
+  Cache Storage; de hoofdthread kopieert of codeert niets. Welke beelden gebruikt werden, staat in localStorage
+  (`rvs-3d-used-…`); bij de start worden die samen uit de cache gehaald (`S3.preloaded`, `main.js` wacht max. 2,5 s).
+  Een figuur zonder klaar beeld toont een ander beeld van dezelfde figuur. `S3.busy()` = er wordt nog gewoon 3D geladen.
+  Een sprite kan dus een canvas of een `ImageBitmap` zijn: gebruik `.cv` enkel als bron voor `drawImage`.
+- **Beeldkwaliteit** (`adaptQuality` in `town.js`): beelden tijdens het laden (`S3.busy()`, grondstukken, open venster)
+  tellen niet mee; traag = < ±40 beelden/s én veel tekentijd (`workMs`); gaat het vlot, dan gaat de resolutie terug omhoog.
+- **Geen `backdrop-filter`** op iets dat altijd boven de spelkaart ligt (de kaart verandert elk beeld). Achter een open
+  venster tekent de stad 5 keer per seconde.
+- **Werk bij het opstarten uitstellen**: miniaturen (`lazyThumb` in `ui.js`: eerst een leeg plaatje, de tekening volgt op de
+  achtergrond en vervangt alle `<img>` met dat adres), 2D-bomen pas als terugval (`treeSpr`), scherpe grondstukken pas na
+  1,2 s en tijdens slepen hooguit één per 3 beelden (`maxNew`). De wereldkaart wordt 6 s na de start op de achtergrond
+  gebakken (`bakeWorldGen` in `worldmap.js` = generator met `yield`; houd stappen zonder `yield` onder ±50 ms).
+- Duizenden kleine vormen: in één pad (zoals de korrels in het gras), niet elk met een eigen `fill`/`fillRect`.
+- Meten: zie `context.md` › Testen (scripts met Playwright, gsm = CPU 4x trager + 4G). De container heeft 4 kernen: dan
+  staat `FX.LOW_POWER` aan; boots een pc na met `hardwareConcurrency` = 8.
 
 ## Android-app
 
