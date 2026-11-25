@@ -82,6 +82,11 @@ Daarom:
   (`cam.onGrab` → `grabMove`, daarna `cam.onHoldDrag` → `holdDrag`; de kaart schuift mee aan de rand). Met een muis zet een klik
   het meteen neer; op een aanraakscherm bevestig je met 'Zet hier' in de balk (`renderMoveHint`, `dropMove` → `onMove`).
   `main.js` (`moveBuilding`) voert de verplaatsing meteen uit en zet ze terug als de server weigert.
+  Muren en poorten verplaatsen gaat op dezelfde manier: in het muurpaneel (tik op een muurstuk) 'Dit muurstuk', 'Rechte muur'
+  (`wallRun`: het rechte stuk door die tegel, met de poorten erin) of 'Poort verplaatsen'. Regels in `planWallMove`/`doMoveWalls`
+  (route `/walls/move`, tegels + verschuiving dx, dy): enkel op vrije bouwgrond, poorten in hun geheel en daarna nog in een
+  recht stuk muur (`gateFits`); een poort alleen verplaatsen maakt van de oude opening muur; nooit dicht zonder poort.
+  In de stad: `startWallMove` (zelfde `moveB`, met `kind: 'walls'`), `drawWallGhost`, `main.js` `moveWalls`.
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
   (binnen `FIELD.aggro` van het barbarenkamp) en het einde van een gevecht. De browser tekent het verloop met `runFight(f, nu)`.
