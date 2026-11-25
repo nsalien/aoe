@@ -171,7 +171,7 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
 }
 .view-title {
   position: absolute; left: 12px; top: 10px; pointer-events: none; z-index: 2;
-  padding: 6px 12px 7px; border-radius: 10px; background: rgba(30, 22, 12, 0.55); backdrop-filter: blur(3px);
+  padding: 6px 12px 7px; border-radius: 10px; background: rgba(30, 22, 12, 0.62); /* geen backdrop-filter: de kaart eronder verandert elk beeld (duur) */
   font-family: 'Cinzel', serif; font-weight: 700; font-size: 20px; color: #fff8e6;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6), 0 0 12px rgba(0, 0, 0, 0.3);
 }
@@ -225,8 +225,8 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
 .buildbar {
   position: relative; align-self: stretch;
   display: flex; gap: 8px; overflow-x: auto; padding: 8px; scrollbar-width: thin;
-  background: rgba(42, 32, 21, 0.82); border: 1px solid #6e5228; border-radius: 14px; box-shadow: var(--shadow);
-  backdrop-filter: blur(4px);
+  background: rgba(42, 32, 21, 0.88); border: 1px solid #6e5228; border-radius: 14px; box-shadow: var(--shadow);
+  /* bewust geen backdrop-filter: de kaart eronder verandert elk beeld en de vervaging moet dan telkens opnieuw */
 }
 .bcard {
   flex: none; width: 92px; display: grid; justify-items: center; gap: 2px;

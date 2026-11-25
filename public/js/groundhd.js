@@ -206,7 +206,8 @@ export class HDGround {
 
   // vis: zichtbare wereldrechthoek; bounds: waar grond ligt; key: verandert als de grond verandert;
   // paint(g, R, S): tekent de grond (g staat al in wereldcoördinaten op schaal S)
-  draw(ctx, vis, need, bounds, key, paint, budgetMs = 8) {
+  // maxNew: hoeveel nieuwe stukken dit beeld hooguit (tijdens het slepen minder: dan blijft het vloeiend)
+  draw(ctx, vis, need, bounds, key, paint, budgetMs = 8, maxNew = 2) {
     let tier = hdTier(need);
     if (!tier) return 0;
     // blijf op dezelfde resolutie zolang die nog goed genoeg is (geen nieuwe stukken bij elke kleine zoom)
@@ -231,7 +232,7 @@ export class HDGround {
       if (!c || c.key !== key) todo.push([cx, cy, id, c]);
     }
     for (const [cx, cy, id, old] of todo) {
-      if (made >= 2 || (made && performance.now() - t0 > budgetMs)) break;
+      if (made >= maxNew || (made && performance.now() - t0 > budgetMs)) break;
       const n = Math.ceil(CW * S) + 2 * PAD;
       const cv = old ? old.cv : document.createElement('canvas');
       if (cv.width !== n) { cv.width = n; cv.height = n; }
