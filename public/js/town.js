@@ -8,7 +8,7 @@ import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -1771,6 +1771,15 @@ export class TownView {
     if (this.onMoveChange) this.onMoveChange(this.moveB);
   }
 
+  // muurstukken (of een poort) verplaatsen: tiles = de tegels, (ai, aj) = het stuk waarop je tikte (ankerpunt)
+  startWallMove(tiles, ai, aj, label) {
+    if (!tiles || !tiles.length) return;
+    this.setSel(null);
+    this.selected = null;
+    this.moveB = { kind: 'walls', tiles, ai, aj, label, size: 1, x: ai, y: aj, ok: false, same: true, gdx: 0, gdy: 0, sx: null, sy: null, dragging: false };
+    if (this.onMoveChange) this.onMoveChange(this.moveB);
+  }
+
   cancelMove() {
     if (!this.moveB) return;
     this.moveB = null;
@@ -1784,12 +1793,17 @@ export class TownView {
     const w = this.cam.screenToWorld(sx + m.gdx, sy + m.gdy);
     const g = toGrid(w.x, w.y);
     const x = Math.floor(g.gx - m.size / 2 + 0.5); const y = Math.floor(g.gy - m.size / 2 + 0.5);
-    const b = this.state.buildings.find((q) => q.id === m.id);
-    if (!b) { this.cancelMove(); return; }
     const before = `${m.x},${m.y},${m.ok}`;
     m.x = x; m.y = y;
-    m.same = b.x === x && b.y === y;
-    m.ok = !m.same && !checkMove(this.state, m.id, x, y);
+    if (m.kind === 'walls') {
+      m.same = x === m.ai && y === m.aj;
+      m.ok = !m.same && !checkMoveWalls(this.state, m.tiles, x - m.ai, y - m.aj);
+    } else {
+      const b = this.state.buildings.find((q) => q.id === m.id);
+      if (!b) { this.cancelMove(); return; }
+      m.same = b.x === x && b.y === y;
+      m.ok = !m.same && !checkMove(this.state, m.id, x, y);
+    }
     if (before !== `${m.x},${m.y},${m.ok}` && this.onMoveChange) this.onMoveChange(m);
   }
 
@@ -1800,6 +1814,15 @@ export class TownView {
     if (!m || !this.state || this.cam.lastType === 'mouse') return false;
     const w = this.cam.screenToWorld(sx, sy);
     const g = toGrid(w.x, w.y);
+    if (m.kind === 'walls') { // op een van de doorschijnende muurstukken
+      const dx = m.x - m.ai; const dy = m.y - m.aj;
+      const hit = m.tiles.some(([i, j]) => g.gx >= i + dx - 0.2 && g.gx < i + dx + 1.2 && g.gy >= j + dy - 0.2 && g.gy < j + dy + 1.2);
+      if (!hit) return false;
+      const c = toWorld(m.x + 0.5, m.y + 0.5); const sc = this.cam.worldToScreen(c.x, c.y);
+      m.gdx = sc.x - sx; m.gdy = sc.y - sy;
+      m.dragging = true;
+      return true;
+    }
     const c = toWorld(m.x + m.size / 2, m.y + m.size / 2);
     const b = this.state.buildings.find((q) => q.id === m.id);
     const h = b && b.level > 0 ? (SPRITE_H[b.type] || 55) : 30;
@@ -1823,6 +1846,17 @@ export class TownView {
   dropMove() {
     const m = this.moveB;
     if (!m) return;
+    if (m.kind === 'walls') {
+      if (!m.ok) {
+        const why = m.same ? null : checkMoveWalls(this.state, m.tiles, m.x - m.ai, m.y - m.aj);
+        if (this.onNotice) this.onNotice(why || 'Kies eerst een nieuwe plek voor de muur.');
+        return;
+      }
+      this.moveB = null;
+      if (this.onMoveWalls) this.onMoveWalls(m.tiles, m.x - m.ai, m.y - m.aj);
+      if (this.onMoveEnd) this.onMoveEnd();
+      return;
+    }
     if (!m.ok) { if (this.onNotice) this.onNotice(m.same ? 'Kies eerst een nieuwe plek voor het gebouw.' : 'Daar kan het gebouw niet staan: kies vrije bouwgrond.'); return; }
     this.moveB = null;
     if (this.onMove) this.onMove(m.id, m.x, m.y);
@@ -1848,6 +1882,7 @@ export class TownView {
   drawMoveGhost(ctx, t, now) {
     const m = this.moveB;
     if (!m || !this.state) return;
+    if (m.kind === 'walls') { this.drawWallGhost(ctx, m); return; }
     const b = this.state.buildings.find((q) => q.id === m.id);
     if (!b) { this.moveB = null; return; }
     const c = toWorld(m.x + m.size / 2, m.y + m.size / 2);
@@ -1858,6 +1893,33 @@ export class TownView {
     const sel = this.selected; this.selected = null;
     this.drawBuilding(ctx, { ...b, x: m.x, y: m.y }, null, t, now, false);
     this.selected = sel;
+    ctx.restore();
+  }
+
+  // doorschijnende muurstukken op hun nieuwe plek: een blok per tegel (steen of hout volgens het muurniveau), groene of rode voet
+  drawWallGhost(ctx, m) {
+    const dx = m.x - m.ai; const dy = m.y - m.aj;
+    const ok = m.ok || m.same;
+    const wall = this.state.buildings.find((b) => b.type === 'wall');
+    const stone = wall && wall.level >= 3;
+    const gates = new Set(this.state.gates || []);
+    const H = stone ? 20 : 17;
+    const list = m.tiles.map(([i, j]) => ({ i: i + dx, j: j + dy, gate: gates.has(tileIndex(i, j)) })).sort((a, b) => a.i + a.j - (b.i + b.j));
+    for (const q of list) {
+      const c = toWorld(q.i + 0.5, q.j + 0.5);
+      A.diamond(ctx, c.x, c.y, A.TW, A.TH, ok ? 'rgba(80,220,90,0.35)' : 'rgba(230,60,50,0.4)', ok ? '#5fe06a' : '#e64a3c');
+    }
+    ctx.save();
+    ctx.globalAlpha = ok ? 0.8 : 0.5;
+    for (const q of list) {
+      const c = toWorld(q.i + 0.5, q.j + 0.5);
+      const w = A.TW * 0.34; const hh = A.TH * 0.34; const h = q.gate ? H * 0.35 : H;
+      const top = stone ? '#cfc7b6' : '#a87a48'; const left = stone ? '#a39b8a' : '#7f5a33'; const right = stone ? '#8a8373' : '#6b4a2a';
+      ctx.fillStyle = left; ctx.beginPath(); ctx.moveTo(c.x - w, c.y); ctx.lineTo(c.x, c.y + hh); ctx.lineTo(c.x, c.y + hh - h); ctx.lineTo(c.x - w, c.y - h); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = right; ctx.beginPath(); ctx.moveTo(c.x + w, c.y); ctx.lineTo(c.x, c.y + hh); ctx.lineTo(c.x, c.y + hh - h); ctx.lineTo(c.x + w, c.y - h); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = top; ctx.beginPath(); ctx.moveTo(c.x, c.y - hh - h); ctx.lineTo(c.x + w, c.y - h); ctx.lineTo(c.x, c.y + hh - h); ctx.lineTo(c.x - w, c.y - h); ctx.closePath(); ctx.fill();
+      if (q.gate) { ctx.strokeStyle = '#6b4224'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c.x - w * 0.6, c.y - h - 2); ctx.lineTo(c.x + w * 0.6, c.y - h - 2); ctx.stroke(); }
+    }
     ctx.restore();
   }
 

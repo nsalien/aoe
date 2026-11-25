@@ -11,7 +11,7 @@ import {
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
-  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall,
+  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -726,10 +726,15 @@ function wallTileHtml(app, live) {
   if (w.gate) {
     return `<div class="card"><h3>${icon('castle')} Deze poort</h3>
       <p class="small muted" style="margin:0">2 tegels breed. Gaat vanzelf open als je troepen erdoor willen en weer dicht als ze voorbij zijn.</p>
+      <div class="actions move-row"><button class="btn" data-action="moveWall" data-what="gate" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>${icon('move')} Poort verplaatsen</button></div>
       <div class="actions"><button class="btn danger small" data-action="wallTileRemove" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>Poort afbreken</button></div></div>`;
   }
   const err = checkPlaceGate(live, w.i, w.j);
+  const run = wallRun(live, w.i, w.j).length;
   return `<div class="card"><h3>${icon('hammer')} Dit muurstuk</h3>
+    <div class="small muted" style="margin-bottom:4px">Verplaatsen (gratis):</div>
+    <div class="actions move-row" style="margin-top:0"><button class="btn" data-action="moveWall" data-what="one" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>${icon('move')} Dit muurstuk</button>
+      ${run > 1 ? `<button class="btn" data-action="moveWall" data-what="run" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>${icon('move')} Rechte muur (${run})</button>` : ''}</div>
     <div class="small muted">Poort maken (2 tegels breed, met het muurstuk ernaast): ${costHtml(GATE.cost, live.res)}</div>
     ${err && !/grondstoffen/.test(err) ? `<p class="req">${err}</p>` : ''}
     <div class="actions"><button class="btn small" data-action="gateHere" data-i="${w.i}" data-j="${w.j}" ${canAct && !err ? '' : 'disabled'}>Poort van maken</button>
@@ -773,14 +778,14 @@ function buildingInfo(app, live, b) {
     case 'wall': {
       const n = (live.walls || []).length;
       const closed = n && wallEnclosed(live);
-      return `<div class="card"><dl class="kv"><dt>Muurstukken</dt><dd>${n}</dd>
+      return `${wallTileHtml(app, live)}<div class="card"><dl class="kv"><dt>Muurstukken</dt><dd>${n}</dd>
         <dt>Je stad is</dt><dd>${!n ? 'niet ommuurd' : closed ? '<b style="color:#3f8f3c">volledig ommuurd</b>' : '<b style="color:#b2372a">nog open</b>'}</dd>
         <dt>Verdedigingsbonus</dt><dd>${L ? `+${8 * L}% en +${30 * L}${closed ? '' : ' (30% zolang er een gat is)'}` : '—'}</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Plaats muren zelf, tegel per tegel. Een gesloten ring rond je stadscentrum verdedigt volledig.
       Is je stad helemaal ommuurd, dan gaan je troepen enkel via een <b>poort</b> naar binnen en buiten.
       Vanaf niveau 3 worden houten palissades stenen muren; een hoger tijdperk laat sterkere muren toe.</p>
       <div class="actions" style="flex-wrap:wrap"><button class="btn primary" data-action="wallMode" ${L && app.canAct ? '' : 'disabled'}>${icon('hammer')} Muren plaatsen</button>
-        <button class="btn" data-action="gateMode" ${L && app.canAct ? '' : 'disabled'}>Poort maken</button></div></div>${wallTileHtml(app, live)}`;
+        <button class="btn" data-action="gateMode" ${L && app.canAct ? '' : 'disabled'}>Poort maken</button></div></div>`;
     }
     case 'monument': return `<div class="card"><dl class="kv"><dt>Punten van dit monument</dt><dd>${fmt(1500 * L)}+</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Bescherm het goed: vijandelijke rammen kunnen het afbreken.</p></div>`;
