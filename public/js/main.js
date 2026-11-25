@@ -1,5 +1,6 @@
 // Hoofdprogramma: aanmelden, spelstatus, tekenlus en alle knoppen.
 import { get, post, early } from './api.js';
+import * as S3 from './sprite3d.js';
 import { TownView } from './town.js';
 import { WorldView } from './world.js';
 import * as UI from './ui.js';
@@ -169,7 +170,8 @@ async function boot() {
     return;
   }
   try {
-    const data = await stateP;
+    // kort wachten op de 3D-beelden: zo start de stad meteen in 3D (anders eerst alles in 2D, dat kost extra werk)
+    const [data] = await Promise.all([stateP, Promise.race([S3.preloaded, new Promise((r) => setTimeout(r, 2500))])]);
     startGame(data);
   } catch (e) {
     if (e.status === 401) showAuth();
