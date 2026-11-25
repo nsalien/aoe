@@ -1666,3 +1666,21 @@ test('muren en poorten verplaatsen', async () => {
   assert.ok(s.gates.includes(T(6, 1)) && s.gates.includes(T(7, 1)));
   assert.ok(run.every(([i]) => s.walls.includes(T(i, 1)) || s.gates.includes(T(i, 1))));
 });
+
+test('3D-gebouwen: elk model (elk volk, elk niveau) bouwt zonder fouten en met geldige ankerpunten', async () => {
+  const { build } = await import('../public/js/models3d.js');
+  const { BUILDINGS } = await import('../public/shared/rules.js');
+  for (const civ of [null, 'egypt', 'greek', 'yamato', 'babylon', 'persia']) {
+    for (const t of Object.keys(BUILDINGS)) {
+      if (t === 'wall') continue;
+      for (let L = 1; L <= BUILDINGS[t].maxLevel; L++) {
+        const sc = build(t, L, civ, 0);
+        assert.ok(sc.prims.length > 0, `${civ} ${t} ${L}`);
+        // de werker zet elk anker om naar schermpixels: een leeg anker liet het hele model mislukken (2D-terugval)
+        for (const [k, a] of Object.entries(sc.anchors || {})) {
+          assert.ok(Array.isArray(a) && a.length === 3 && a.every(Number.isFinite), `${civ} ${t} ${L}: anker ${k}`);
+        }
+      }
+    }
+  }
+});

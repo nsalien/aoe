@@ -14,7 +14,7 @@ self.onmessage = (e) => {
       r = render(sc, scale, fig || wall ? { ground: false, ao: fig ? 3 : low ? 3 : 5, fill: fig ? 0.5 : 0.16, aa: !!fig || scale > 3 } : { apron: sc.apron, ao: low ? 3 : 5, aa: scale > 3 });
     }
     const anchors = {};
-    for (const k of Object.keys(sc.anchors || {})) { const [x, y, z] = sc.anchors[k]; anchors[k] = [(x - y) * 32, (x + y) * 16 - z * ZPX]; }
+    for (const k of Object.keys(sc.anchors || {})) { const a = sc.anchors[k]; if (!Array.isArray(a)) continue; const [x, y, z] = a; anchors[k] = [(x - y) * 32, (x + y) * 16 - z * ZPX]; }
     self.postMessage({ id, scale, w: r.w, h: r.h, ox: r.ox, oy: r.oy, data: r.data, lights: r.lights, anchors }, [r.data.buffer]);
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err) });
