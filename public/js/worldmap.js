@@ -440,18 +440,30 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
     const tmp = document.createElement('canvas');
     tmp.width = ow; tmp.height = oh;
     const t2 = tmp.getContext('2d');
-    t2.fillStyle = t2.createPattern(tex, 'repeat');
-    t2.fillRect(0, 0, ow, oh);
-    t2.globalCompositeOperation = 'destination-in';
-    t2.drawImage(landCv, 0, 0);
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.34;
-    ctx.drawImage(tmp, 0, 0);
-    ctx.restore();
+    const pat = t2.createPattern(tex, 'repeat');
+    // in stroken (met een clip, zelfde resultaat), met telkens een pauze: één keer over de hele kaart duurt te lang
+    const STRIP = 256;
+    for (let y0 = 0; y0 < oh; y0 += STRIP) {
+      const sh = Math.min(STRIP, oh - y0);
+      t2.save(); t2.beginPath(); t2.rect(0, y0, ow, sh); t2.clip();
+      t2.fillStyle = pat; t2.fillRect(0, y0, ow, sh);
+      t2.globalCompositeOperation = 'destination-in';
+      t2.drawImage(landCv, 0, 0);
+      t2.restore();
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.beginPath(); ctx.rect(0, y0, ow, sh); ctx.clip();
+      ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.34;
+      ctx.drawImage(tmp, 0, 0);
+      ctx.restore();
+      yield;
+    }
   }
+  yield;
   const tg = performance.now();
   const proj = (gx, gy) => { const h = hAt(gx, gy); return [(gx - gy) * halfW, (gx + gy) * halfH - h]; };
+  let fi = 0;
   for (const f of fields) {
+    if ((++fi & 7) === 0) yield;
     if (hidden((f.x0 + f.x1) / 2, (f.y0 + f.y1) / 2, hAt((f.x0 + f.x1) / 2, (f.y0 + f.y1) / 2))) continue;
     const c00 = proj(f.x0, f.y0); const c10 = proj(f.x1, f.y0); const c11 = proj(f.x1, f.y1); const c01 = proj(f.x0, f.y1);
     ctx.beginPath(); ctx.moveTo(...c00); ctx.lineTo(...c10); ctx.lineTo(...c11); ctx.lineTo(...c01); ctx.closePath();
@@ -477,6 +489,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   // wegen: scherp getekend op het reliëf, niet achter heuvels
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const r of roads) {
+    yield;
     const runs = [];
     let cur = null;
     for (const [gx, gy] of r) {
@@ -529,8 +542,11 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
     }
   }
   deco.sort((a, b) => a.gx + a.gy - (b.gx + b.gy));
+  yield;
   const TS = trees();
+  yield;
   const vis = deco.filter((d) => !(d.h > 3 && hidden(d.gx, d.gy, d.h)));
+  yield;
   // eerst alle schaduwen van de bomen in één keer, dan de bomen van achter naar voor
   ctx.fillStyle = 'rgba(12,28,8,0.26)';
   ctx.beginPath();
