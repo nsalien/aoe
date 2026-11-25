@@ -34,6 +34,8 @@ const app = {
   knownHostile: new Set(),
   chat: { chan: 'team', seen: store.get('rvs-chat-seen') || {}, last: {} },
   bbMin: !!store.get('rvs-buildbar-min'),
+  bbTab: ['build', 'army', 'advice'].includes(store.get('rvs-buildbar-tab')) ? store.get('rvs-buildbar-tab') : 'build',
+  adviceIdx: {}, // per soort + niveau: welk gebouw de vorige tik toonde (volgende tik = het volgende)
   now() { return Date.now() + this.offset; },
 };
 window.__app = app; // handig bij het debuggen in de console
@@ -618,7 +620,9 @@ function renderSelHint() {
   const box = $('#selActions');
   const sel = town.sel;
   const g = sel && (sel.type === 'group' || sel.type === 'unit') ? town.selGroup() : null;
-  if (!sel || app.placing || ((sel.type === 'group' || sel.type === 'unit') && !g)) { box.hidden = true; return; }
+  const wrap = $('#buildwrap');
+  if (!sel || app.placing || ((sel.type === 'group' || sel.type === 'unit') && !g)) { box.hidden = true; wrap.classList.remove('has-sel'); return; }
+  wrap.classList.add('has-sel'); // op een smalle gsm: tabbladen enkel als icoon (de knoppen moeten ernaast passen)
   const out = (sel.type === 'group' && !(g.order && g.order.type === 'home' && g.pending)) || sel.type === 'unit'
     || ((sel.type === 'kind' || sel.type === 'army' || sel.type === 'groups') && sel.ids.length);
   box.hidden = false;
@@ -785,7 +789,25 @@ function renderBuildBar(force = false) {
   renderBuildToggle();
   if (!force && isBusy('buildbar')) { pending.buildbar = true; return; }
   pending.buildbar = false;
-  setHTML(bb, UI.buildBarHtml(app.live, app.placing || (app.mode === 'wallremove' ? 'wall' : app.mode), app.data.team.color));
+  const tab = bbTabNow();
+  bb.dataset.tab = tab;
+  if (tab === 'army') setHTML(bb, UI.armyBarHtml(app, app.live));
+  else if (tab === 'advice') setHTML(bb, UI.adviceBarHtml(app, app.live));
+  else setHTML(bb, UI.buildBarHtml(app.live, app.placing || (app.mode === 'wallremove' ? 'wall' : app.mode), app.data.team.color));
+}
+
+// welk tabblad onderaan: tijdens het bouwen of muren plaatsen altijd 'Bouwen'
+const bbTabNow = () => (app.placing || app.mode ? 'build' : app.bbTab);
+
+// naar een gebouw gaan (camera erheen) en het kiezen: het paneel toont dan wat het kost en de knop Verbeteren
+function focusBuilding(b) {
+  if (app.view !== 'town') switchView('town');
+  town.clearSel();
+  if (b.type === 'wall') town.centerOnWalls(); else town.centerOn(b);
+  app.selBuilding = b.id; town.selected = b.id;
+  app.selWall = null; town.selWall = null; app.pickStack = null; town.lastPick = null;
+  renderPanel();
+  openPanelMobile(true);
 }
 
 function renderPanel(force = false) {
@@ -844,16 +866,32 @@ function renderLightBtn() {
 // is het zijpaneel een schuifpaneel? (gsm rechtop of liggend; zie de CSS)
 const sheetPanel = () => window.innerWidth <= 900 || matchMedia('(orientation: landscape) and (max-height: 540px)').matches;
 
-// bouwmenu in- of uitklappen (onthouden per toestel)
+// tabbladen onderaan (Bouwen, Mijn leger, Bouwadvies) en in- of uitklappen (onthouden per toestel)
 function renderBuildToggle() {
   const min = !!app.bbMin && !app.placing && !app.mode;
   const wrap = $('#buildwrap');
   wrap.classList.toggle('min', min);
-  const btn = $('#bbToggle');
-  btn.setAttribute('aria-expanded', String(!min));
-  btn.title = min ? 'Bouwmenu tonen' : 'Bouwmenu inklappen';
-  const html = `${UI.icon('hammer')} Bouwen <i class="chev"></i>`;
-  if (btn.innerHTML !== html) btn.innerHTML = html;
+  const tab = bbTabNow();
+  const live = app.live;
+  const soldiers = live ? UI.armySummary(live, app.data).reduce((a, r) => a + r.total, 0) : 0;
+  const ready = live ? UI.adviceReady(live) : 0;
+  // [id, tabblad, icoon, naam, korte naam (smalle gsm), getal, uitleg]
+  const tabs = [
+    ['bbToggle', 'build', 'hammer', 'Bouwen', 'Bouwen', '', 'Bouwmenu'],
+    ['bbArmy', 'army', 'swords', 'Mijn leger', 'Leger', soldiers ? `<b class="bdg">${UI.fmt(soldiers)}</b>` : '', 'Mijn leger: hoeveel soldaten je hebt en waar ze zijn'],
+    ['bbAdvice', 'advice', 'up', 'Bouwadvies', 'Advies', ready ? `<b class="bdg go">${ready}</b>` : '', 'Bouwadvies: wat je nog kan verbeteren en waar je bouwers mee bezig zijn'],
+  ];
+  for (const [id, t, ic, label, short, badge, title] of tabs) {
+    const btn = $(`#${id}`);
+    if (!btn) continue;
+    const on = t === tab;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', String(on));
+    btn.setAttribute('aria-expanded', String(on && !min));
+    btn.title = on && !min ? `${title} (tik om in te klappen)` : title;
+    const html = `${UI.icon(ic)}<span class="lb long">${label}</span><span class="lb short">${short}</span>${badge}${on ? '<i class="chev"></i>' : ''}`;
+    if (btn.innerHTML !== html) btn.innerHTML = html;
+  }
 }
 
 function openPanelMobile(open) {
@@ -1422,10 +1460,31 @@ const actions = {
       renderArrival();
     } catch (e) { toast(e.message, 'err'); }
   },
-  toggleBuildbar() {
-    app.bbMin = !app.bbMin;
+  // tabblad onderaan: een ander tabblad opent dat; hetzelfde (open) tabblad klapt het menu in
+  bbTab(el) {
+    const t = el.dataset.tab;
+    if (t !== 'build' && (app.placing || app.mode)) setMode(null);
+    if (t === bbTabNow() && !app.bbMin) app.bbMin = true;
+    else { app.bbTab = t; app.bbMin = false; }
     store.set('rvs-buildbar-min', app.bbMin);
-    renderBuildToggle();
+    store.set('rvs-buildbar-tab', app.bbTab);
+    renderBuildBar(true);
+    updateTimers();
+  },
+  // bouwadvies: naar het gebouw (een gebundelde kaart toont bij elke tik het volgende gebouw van die soort)
+  adviceGo(el) {
+    const live = app.live;
+    let b = null;
+    if (el.dataset.id) b = live.buildings.find((x) => x.id === Number(el.dataset.id));
+    else {
+      const key = `${el.dataset.type}|${el.dataset.level}`;
+      const list = live.buildings.filter((x) => x.type === el.dataset.type && x.level === Number(el.dataset.level) && !live.builds.some((j) => j.bid === x.id));
+      if (!list.length) return;
+      const i = ((app.adviceIdx[key] ?? -1) + 1) % list.length;
+      app.adviceIdx[key] = i;
+      b = list[i];
+    }
+    if (b) focusBuilding(b);
   },
   async alertGo(el) {
     switchView('world');

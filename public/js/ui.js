@@ -4,14 +4,14 @@ import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
-  fmtDuration, campUnits, campLoot, unitTime, COMBAT,
+  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
-  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun,
+  isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -246,6 +246,120 @@ export function buildBarHtml(live, placing, team) {
       <img src="${buildingThumb(type, 1, team)}" alt="">
       <span class="bn">${def.name}</span>
       <span class="bc">${RES.filter((r) => cost[r]).map((r) => `<span>${resImg(r, '')}${fmt(cost[r])}</span>`).join('')}</span>
+    </button>`;
+  }).join('');
+}
+
+// ---------- tabbladen onder de stad: mijn leger en bouwadvies ----------
+
+// Hoeveel soldaten van elke soort en waar: thuis, in je gebied (groepen in het veld), onderweg op de wereldkaart of
+// bij een bondgenoot (away), en in opleiding (train, telt niet mee in het totaal). Dorpelingen niet.
+export function armySummary(live, data) {
+  const rows = new Map();
+  const add = (k, where, n) => {
+    if (!(n > 0) || k === 'villager' || !UNITS[k]) return;
+    let r = rows.get(k);
+    if (!r) { r = { k, home: 0, field: 0, away: 0, train: 0, total: 0 }; rows.set(k, r); }
+    r[where] += n;
+    if (where !== 'train') r.total += n;
+  };
+  for (const [k, n] of Object.entries(live.units || {})) add(k, 'home', n);
+  for (const g of live.field || []) for (const [k, n] of Object.entries(g.units || {})) add(k, 'field', n);
+  for (const m of (data && data.marches) || []) if (m.own && m.units) for (const [k, n] of Object.entries(m.units)) add(k, 'away', n);
+  for (const sp of (data && data.mySupport) || []) for (const [k, n] of Object.entries(sp.units || {})) add(k, 'away', n);
+  for (const q of Object.values(live.queues || {})) for (const it of q) add(it.unit, 'train', it.n - it.done);
+  const order = (k) => { const i = ARMY_UNITS.indexOf(k); return i < 0 ? 99 : i; };
+  return [...rows.values()].sort((a, b) => order(a.k) - order(b.k));
+}
+
+const ARMY_WHERE = [['home', 'thuis'], ['field', 'in je gebied'], ['away', 'onderweg of elders'], ['train', 'in opleiding']];
+
+export function armyBarHtml(app, live) {
+  const rows = armySummary(live, app.data);
+  if (!rows.length) return `<div class="bb-note">${icon('swords')} Je hebt nog geen soldaten. Train ze in de kazerne, de schietbaan of de stal.</div>`;
+  const team = app.data.team.color;
+  const sum = (f) => rows.reduce((a, r) => a + r[f], 0);
+  const head = `<div class="bcard static wide army-sum"><span class="bn">${icon('swords')} Mijn leger</span><b class="bnum">${fmt(sum('total'))}</b>
+    <span class="where">${ARMY_WHERE.filter(([f]) => sum(f)).map(([f, l]) => `<span>${fmt(sum(f))} ${l}</span>`).join('')}</span></div>`;
+  return head + rows.map((r) => {
+    const parts = ARMY_WHERE.filter(([f]) => r[f]).map(([f, l]) => `${fmt(r[f])} ${l}`);
+    const short = [r.home && `${fmt(r.home)} thuis`, r.field && `${fmt(r.field)} veld`, r.away && `${fmt(r.away)} weg`].filter(Boolean).join(' · ');
+    return `<div class="bcard static unit" title="${esc(`${UNITS[r.k].name}: ${parts.join(', ')}`)}">
+      ${r.train ? `<span class="cnt">+${fmt(r.train)}</span>` : ''}
+      <img src="${unitThumb(r.k, team)}" alt="">
+      <span class="bn">${UNITS[r.k].name}</span>
+      <b class="bnum">${fmt(r.total)}</b>
+      <span class="where">${short || 'in opleiding'}</span>
+    </div>`;
+  }).join('');
+}
+
+// Welke gebouwen kan je in dit tijdperk nog verbeteren? Gelijke gebouwen (soort + niveau) samen. err = waarom het nu
+// (nog) niet kan (geen bouwer vrij, te weinig grondstoffen, ...) of null. Wat nu kan eerst, dan het stadscentrum,
+// dan wat het minst tekort komt.
+export function upgradeAdvice(live) {
+  const busyIds = new Set(live.builds.map((j) => j.bid));
+  const a = age(live);
+  const groups = new Map();
+  for (const b of live.buildings) {
+    const def = BUILDINGS[b.type];
+    if (!def || busyIds.has(b.id) || b.level >= def.maxLevel) continue;
+    if (b.level < 1 && b.type !== 'wall') continue; // (een nieuw gebouw staat altijd in de bouwlijst)
+    const to = b.level + 1;
+    if (a < levelAge(b.type, to)) continue;
+    const key = `${b.type}|${b.level}`;
+    let g = groups.get(key);
+    if (!g) {
+      const cost = levelCost(b.type, to);
+      if (!cost) continue;
+      let short = 0;
+      for (const r of RES) short += Math.max(0, (cost[r] || 0) - (live.res[r] || 0));
+      g = { type: b.type, level: b.level, to, ids: [], cost, short, err: checkUpgrade(live, b.id) };
+      groups.set(key, g);
+    }
+    g.ids.push(b.id);
+  }
+  const costSum = (c) => RES.reduce((t, r) => t + (c[r] || 0), 0);
+  return [...groups.values()].sort((x, y) => (!!x.err - !!y.err) || ((y.type === 'tc') - (x.type === 'tc')) || (x.short - y.short) || (costSum(x.cost) - costSum(y.cost)));
+}
+
+// hoeveel gebouwen je nu meteen kan verbeteren (voor het bolletje op het tabblad)
+export const adviceReady = (live) => upgradeAdvice(live).reduce((n, g) => n + (g.err ? 0 : g.ids.length), 0);
+
+const upName = (type, to) => (type === 'tc' ? `${AGES[to].short}tijd` : BUILDINGS[type].name);
+
+export function adviceBarHtml(app, live) {
+  const team = app.data.team.color;
+  const builds = [...live.builds].sort((x, y) => x.end - y.end);
+  const max = maxBuilds(live);
+  const free = Math.max(0, max - builds.length);
+  // eerst de bouwers: hoeveel bezig en vrij, dan elke lopende bouw als kaartje (tik = naar het gebouw)
+  let html = `<div class="bcard static wide builders ${free ? 'has-free' : ''}"><span class="bn">${icon('hammer')} Bouwers</span><b class="bnum">${builds.length}/${max}</b>
+    <span class="where"><span>${builds.length ? 'bezig' : 'niemand bezig'}</span>${free ? `<span class="free">${free === 1 ? '1 bouwer' : `${free} bouwers`} vrij</span>` : '<span>allemaal bezig</span>'}</span></div>`;
+  for (const j of builds) {
+    const b = live.buildings.find((x) => x.id === j.bid);
+    if (!b) continue;
+    const name = b.type === 'tc' ? `${AGES[j.to].short}tijd` : BUILDINGS[b.type].name;
+    html += `<button class="bcard job" data-action="adviceGo" data-id="${b.id}" title="${esc(`${name}${b.type === 'tc' ? '' : ` → niveau ${j.to}`}: naar het gebouw`)}">
+      <span class="cnt">${icon('hammer')}</span>
+      <img src="${buildingThumb(b.type, j.to, team)}" alt="">
+      <span class="bn">${name}</span>
+      <span class="lv">${b.type === 'tc' ? 'nieuw tijdperk' : `→ niveau ${j.to}`}</span>
+      <span class="t" data-end="${j.end}">${fmtDuration(j.end - app.now())}</span>${bar(j.start, j.end)}
+    </button>`;
+  }
+  html += '<span class="bb-sep" aria-hidden="true"></span>';
+  const list = upgradeAdvice(live);
+  if (!list.length) return `${html}<div class="bb-note">${icon('star')} Alles staat op het hoogste niveau dat dit tijdperk toelaat.${age(live) < MAX_AGE ? ' Verbeter je stadscentrum voor een nieuw tijdperk.' : ''}</div>`;
+  return html + list.map((g) => {
+    const n = g.ids.length;
+    const title = `${BUILDINGS[g.type].name} van niveau ${g.level} naar ${g.to}${n > 1 ? ` (${n} gebouwen)` : ''}: ${g.err || 'kan nu!'} Tik om er naartoe te gaan.`;
+    return `<button class="bcard adv ${g.err ? 'poor' : 'ready'}" data-action="adviceGo" data-type="${g.type}" data-level="${g.level}" title="${esc(title)}">
+      ${n > 1 ? `<span class="cnt">×${n}</span>` : ''}
+      <img src="${buildingThumb(g.type, g.to, team)}" alt="">
+      <span class="bn">${upName(g.type, g.to)}</span>
+      <span class="lv">${g.type === 'tc' ? 'nieuw tijdperk' : `niveau ${g.level} → ${g.to}`}</span>
+      <span class="bc">${RES.filter((r) => g.cost[r]).map((r) => `<span class="${(live.res[r] || 0) + 1e-6 < g.cost[r] ? 'no' : ''}">${resImg(r, '')}${fmt(g.cost[r])}</span>`).join('')}</span>
     </button>`;
   }).join('');
 }

@@ -241,6 +241,38 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
 .bcard.locked { filter: grayscale(0.8); opacity: 0.55; }
 .bcard.poor .bc { color: var(--red); }
 .bcard.active { outline: 3px solid var(--gold2); }
+/* tabbladen naast 'Bouwen': Mijn leger en Bouwadvies (zelfde strook, ander inhoud) */
+.bb-tabs { display: flex; align-items: flex-end; gap: 4px; margin-left: 14px; min-width: 0; }
+.bb-tabs .bb-toggle { margin-left: 0; white-space: nowrap; }
+.bb-toggle:not(.on) { background: rgba(24, 18, 11, 0.86); color: #d8c39a; }
+.bb-toggle:not(.on):hover { color: var(--gold2); }
+.bb-toggle .bdg { min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--gold); color: #2a1d0e; font-size: 10.5px; line-height: 1.35; text-align: center; font-variant-numeric: tabular-nums; }
+.bb-toggle .bdg.go { background: #4c9f45; color: #fff; }
+.buildwrap.min .bb-tabs { margin-left: 0; gap: 6px; }
+.bb-toggle .lb.short { display: none; }
+@media (max-width: 520px) {
+  .bb-toggle .lb.long { display: none; }
+  .bb-toggle .lb.short { display: inline; }
+  .buildwrap.has-sel .bb-toggle .lb { display: none; }
+}
+.bcard.static { cursor: default; }
+.bcard.static:hover { transform: none; }
+.bcard .bnum { font-size: 19px; line-height: 1.05; font-variant-numeric: tabular-nums; color: #3b2a14; }
+.bcard .where { display: grid; font-size: 10px; line-height: 1.2; color: var(--ink2); text-align: center; }
+.bcard .lv { font-size: 10.5px; line-height: 1.1; color: var(--ink2); font-weight: 600; }
+.bcard .bc .no { color: var(--red); }
+.bcard .cnt .ic { width: 12px; height: 12px; }
+.bcard.wide { width: auto; min-width: 118px; padding: 6px 10px; align-content: center; }
+.bcard.wide .bn { display: inline-flex; align-items: center; gap: 4px; max-width: none; overflow: visible; }
+.bcard.wide .bn .ic { width: 15px; height: 15px; }
+.bcard.builders .free { color: #2f7a2a; font-weight: 700; }
+.bcard.adv.ready { box-shadow: 0 2px 0 rgba(0, 0, 0, 0.2), 0 0 0 2px #5fae52; }
+.bcard.job { background: var(--noise), linear-gradient(#efe4c6, #d6c08e); }
+.bcard.job .t { font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink2); }
+.bcard.job .bar { width: 82%; height: 5px; margin-top: 1px; }
+.bb-sep { flex: none; width: 2px; margin: 6px 2px; border-radius: 2px; background: rgba(242, 201, 90, 0.35); }
+.bb-note { align-self: center; display: flex; align-items: center; gap: 6px; padding: 6px 10px; color: #f3e4c0; font-size: 13px; line-height: 1.35; }
+.bb-note .ic { width: 18px; height: 18px; flex: none; }
 .bcard .cnt { position: absolute; top: 3px; right: 5px; font-size: 10px; color: var(--muted); font-weight: 700; }
 
 /* ---------- zijpaneel ---------- */
@@ -410,6 +442,14 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
   .bcard .bn { font-size: 9.5px; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bcard .bc { font-size: 9px; gap: 1px 3px; }
   .bcard .cnt { font-size: 8.5px; top: 1px; right: 3px; }
+  .bb-tabs { margin-left: 8px; gap: 3px; }
+  .bb-tabs .bb-toggle { gap: 4px; padding: 3px 8px 4px; }
+  .bb-toggle .bdg { font-size: 9.5px; min-width: 15px; padding: 0 4px; }
+  .bcard .bnum { font-size: 15px; }
+  .bcard .where, .bcard .lv, .bcard.job .t { font-size: 8.5px; }
+  .bcard.wide { min-width: 84px; padding: 3px 6px; }
+  .bcard.job .bar { height: 4px; }
+  .bb-note { font-size: 11.5px; padding: 4px 6px; }
   .split { grid-template-columns: 1fr; }
   .rlist { max-height: 30vh; }
   .modal-card { padding: 16px; }
@@ -740,6 +780,12 @@ body.in-battle #toasts { top: 74px; }
   .bcard .bc { font-size: 8.5px; gap: 0 3px; }
   .bcard .bc img { width: 11px; height: 11px; }
   .bcard .cnt { font-size: 8px; top: 1px; right: 3px; }
+  .bb-tabs { margin-left: 6px; }
+  .bb-tabs .bb-toggle { padding: 2px 7px 3px; }
+  .bcard .bnum { font-size: 13px; }
+  .bcard .where, .bcard .lv, .bcard.job .t { font-size: 8px; line-height: 1.1; }
+  .bcard.wide { min-width: 76px; padding: 2px 5px; }
+  .bcard.job .bar { height: 3px; margin-top: 0; }
   .toasts { top: 46px; }
   .modal { padding: 8px; }
   .modal-card { max-height: calc(100vh - 16px); padding: 14px 16px; }

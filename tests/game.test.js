@@ -1701,3 +1701,64 @@ test('laden: index.html heeft een modulepreload voor precies alle modules van ma
   assert.deepEqual(missing, [], `ontbreekt in index.html: ${missing.join(', ')}`);
   assert.deepEqual(extra, [], `niet meer gebruikt: ${extra.join(', ')}`);
 });
+
+test('tabblad Mijn leger: soldaten per soort, thuis, in het veld, onderweg, elders en in opleiding (geen dorpelingen)', async () => {
+  const { armySummary, armyBarHtml } = await import('../public/js/ui.js');
+  const s = newTownState(0, 'greek');
+  s.units = { spear: 5, archer: 2 };
+  s.field = [{ id: 1, units: { spear: 3 } }, { id: 2, units: { villager: 4 } }];
+  s.queues = { barracks: [{ unit: 'spear', n: 4, done: 1 }], tc: [{ unit: 'villager', n: 2, done: 0 }] };
+  const data = {
+    team: { color: '#c0392b' },
+    marches: [{ own: true, units: { archer: 6 } }, { own: false, units: { spear: 50 } }, { own: true, units: null }],
+    mySupport: [{ units: { knight: 2 } }],
+  };
+  const rows = armySummary(s, data);
+  assert.deepEqual(rows.map((r) => r.k), ['spear', 'archer', 'knight'], 'volgorde van ARMY_UNITS, geen dorpelingen');
+  const spear = rows.find((r) => r.k === 'spear');
+  assert.deepEqual([spear.home, spear.field, spear.away, spear.train, spear.total], [5, 3, 0, 3, 8], 'opleiding telt niet mee in het totaal');
+  const archer = rows.find((r) => r.k === 'archer');
+  assert.deepEqual([archer.home, archer.away, archer.total], [2, 6, 8], 'enkel eigen marsen');
+  assert.equal(rows.find((r) => r.k === 'knight').away, 2, 'gestationeerd bij een bondgenoot');
+  const h = armyBarHtml({ data }, s);
+  assert.match(h, />18</, 'totaal 8 + 8 + 2');
+  assert.doesNotMatch(h, /NaN|undefined/);
+  assert.match(armyBarHtml({ data: { team: {}, marches: [] } }, newTownState(0, 'greek')), /nog geen soldaten/);
+});
+
+test('tabblad Bouwadvies: wat nog verbeterd kan worden, gebundeld per soort en niveau, wat nu kan eerst', async () => {
+  const { upgradeAdvice, adviceReady, adviceBarHtml } = await import('../public/js/ui.js');
+  const { BUILDINGS, levelCost } = await import('../public/shared/rules.js');
+  const s = newTownState(0, 'greek');
+  s.buildings.find((b) => b.type === 'tc').level = 2;
+  s.res = { food: 5000, wood: 5000, stone: 5000, gold: 5000 };
+  let id = 100;
+  const add = (type, level) => { const b = { id: id++, type, x: 0, y: 0, level }; s.buildings.push(b); return b; };
+  const h1 = add('house', 1); add('house', 1);
+  add('house', 2); // niveau 2 -> 3 vraagt tijdperk 3 (de stad zit in tijdperk 2): niet in de lijst
+  const farm = add('farm', 1);
+  add('market', BUILDINGS.market.maxLevel); // al op het hoogste niveau
+  s.builds = [{ bid: farm.id, to: 2, start: 0, end: 1000 }]; // wordt al verbeterd
+  let list = upgradeAdvice(s);
+  const key = (g) => `${g.type}${g.level}`;
+  assert.ok(list.some((g) => key(g) === 'house1' && g.ids.length === 2), 'twee huizen niveau 1 samen');
+  assert.ok(!list.some((g) => key(g) === 'house2'), 'vraagt een later tijdperk');
+  assert.ok(list.some((g) => g.type === 'tc'), 'naar het volgende tijdperk');
+  assert.ok(!list.some((g) => g.type === 'farm' || g.type === 'market'), 'in aanbouw of al maximaal');
+  assert.ok(list.some((g) => g.type === 'wall' && g.level === 0), 'de stadsmuur bouwen (niveau 0 -> 1) hoort erbij');
+  assert.deepEqual(list.find((g) => key(g) === 'house1').cost, levelCost('house', 2));
+  assert.ok(list.every((g, i) => i === 0 || !!list[i - 1].err <= !!g.err), 'wat nu kan eerst');
+  const ready = adviceReady(s);
+  assert.ok(ready >= 3, `${ready} gebouwen kunnen nu`);
+  // alle bouwers bezig: niets kan nu, met de reden
+  s.builds.push({ bid: h1.id, to: 2, start: 0, end: 2000 }); // nu 2 van de 2 bouwers bezig
+  list = upgradeAdvice(s);
+  assert.ok(list.every((g) => g.err === 'Al je bouwers zijn bezig.'));
+  assert.equal(adviceReady(s), 0);
+  assert.equal(list.find((g) => key(g) === 'house1').ids.length, 1, 'het huis in aanbouw valt weg');
+  const h = adviceBarHtml({ data: { team: { color: '#c0392b' } }, now: () => 0 }, s);
+  assert.match(h, /Bouwers/); assert.match(h, /2\/2/);
+  assert.match(h, /data-action="adviceGo" data-id="\d+"/, 'lopende bouw: tik = naar het gebouw');
+  assert.match(h, /data-action="adviceGo" data-type="house" data-level="1"/);
+  assert.doesNotMatch(h, /NaN|undefined/);
+});
