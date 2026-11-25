@@ -146,6 +146,15 @@ Daarom:
   elke minuut in de cron-worker `cron/` (eigen `wrangler.toml`, gezet door `deploy.sh`; vraagt 'Workers Scripts: Edit' op het
   token) en als vangnet na gewone verzoeken (`waitUntil`). `public/sw.js` toont de melding. Tijdens de laatste 2 minuten
   toont het spel een aftelbalk waar je vooraf kiest (`/march/mode` → `marches.pref_mode`); `maybeOfferBattle` gebruikt die keuze.
+  **Soorten, elk apart aan/uit per toestel** (`NOTIFY_KINDS`, kolommen `n_attack`/`n_build`/`n_march` in `push_subs`, migratie
+  `0008`; `notifyPlayer(..., kind)` stuurt enkel naar toestellen waar die soort aan staat; route `/push/prefs`, schakelaars in
+  `pushCardHtml` (stadsoverzicht én wereldkaart)): *aanval op je stad* = `notifyAttack` meteen bij het vertrek (na `/march` via
+  `ctx.later`, en in `insertMarch` van de bots) + de verdediger ±2 min vooraf; *bouwer vrij* = `notifyBuilds`: `saveTown` zet
+  `towns.build_at` (`nextBuildAt`: eerstvolgende einde, niet voor bots), de cron/het vangnet zoekt via de index wat klaar is,
+  meldt het en schuift `build_at` op (UPDATE met de oude waarde: nooit dubbel); `sw.js` toont die melding niet als het spel in
+  beeld is; *je leger komt aan* = de aanvaller ±2 min vooraf. `notifyAll` = `notifyDue` + `notifyBuilds` (cron en vangnet).
+  Zonder cron-worker (tokenrecht ontbreekt) gaan 'bouwer vrij' en de ±2 min-meldingen pas uit bij het eerstvolgende verzoek
+  van eender wie; de melding bij het vertrek van een aanval gaat altijd meteen.
 - Volkeren: `CIVS` en de elite-eenheden staan in `rules.js` (eigenschappen zoals `bonus`, `tough`, `defMult`, `walls`, `fear`
   worden in `battle.js` verrekend). Het volk zit in `towns.state.civ`; oude steden krijgen er een in `ensureTerritory()`.
   Bouwstijl per volk: `STYLES` en de kastelen (`TC_CIV`) in `art.js`; elite-figuren in `figures.js` (`uniqueUnit`).

@@ -414,6 +414,14 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     met pijltje (liggend naar rechts) die bovenaan blijft staan bij het scrollen; tikken of naar beneden vegen sluit het paneel
     en laat het gekozen gebouw/stad/kamp los. Getest op gsm, liggend (915 en 844 breed), tablet, wereldkaart; pc ongewijzigd.
 
+48. **Meldingen: bouwer vrij en aanval op je stad, apart aan/uit** (gevraagd: "notifications voor wanneer er een bouwer vrij
+    is gekomen, en voor een binnenkomende aanval; beiden apart aan/uit"). Per toestel drie schakelaars in 'Meldingen op je gsm'
+    (stadsoverzicht en wereldkaart): aanval op je stad (meteen bij vertrek + ±2 min vooraf), een bouwer is vrij, je leger komt
+    bijna aan. Getest met de echte routes (twee toestellen, één met aanval uit) en in de browser (pc en gsm).
+    **Let op**: de cron-worker draait nog altijd niet (het Cloudflare-token mist 'Account · Workers Scripts · Edit'; zie het
+    deploylog). Tot dat recht er is, gaan 'bouwer vrij' en de ±2 min-melding pas uit als iemand (of een bot via een verzoek)
+    het spel gebruikt; de melding bij het vertrek van een aanval gaat wel altijd meteen.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
