@@ -125,14 +125,20 @@ Daarom:
   ommuurd oefendorp of in je eigen stad; `finishBattle` toont enkel de uitslag (geen verliezen, buit of rapport).
 - **Computerspelers (bots)**: gewone spelers met `players.bot = 1` en een eigen stad, in eigen clans (teams met enkel bots;
   `/register` zet een mens nooit in een botclan). Aantal en niveau staan in `world.bots` / `world.bot_level` (beheer).
-  Geen achtergrondtaak (de cron-worker draait niet zonder tokenrecht): na een gewoon verzoek komt telkens één bot aan de beurt
-  (`botTick` in `functions/lib/bots.js`, via `waitUntil`, enkel als het verzoek ≤ 18 query's gebruikte; `players.bot_next` + index).
+  Na een gewoon verzoek komt telkens één bot aan de beurt (`botTick` in `functions/lib/bots.js`, via `waitUntil`, enkel als het
+  verzoek ≤ 18 query's gebruikte; `players.bot_next` + index), en elke minuut één via de cron-worker (`cronTick` in
+  `functions/lib/crontick.js`: eerst de meldingen, een bot enkel als er die minuut niets verstuurd werd, CPU-limiet).
   Een bot haalt gemiste tijd in stappen in (30–90 min, hooguit 3 per beurt) met telkens een beslissing van het brein
   (`functions/lib/botbrain.js`, puur, gebruikt de gewone acties uit `sim.js`: dorpelingen, huizen, werkplekken, tijdperken,
   muurring op ring 1 met 4 poorten, torens, leger). Pas als hij bij is, beslist hij over zijn leger (`military`): versterking naar
   een clanlid dat aangevallen wordt (en terughalen), karavanen naar een clanlid dat spaart, spelers aanvallen na hun vrede als
-  `resolveBattle` voorspelt dat hij wint (gezamenlijk doel per clan in `config` `clan:<team>`, wachttijd per doelwit voor alle bots
-  `prey:<stad>`), anders roverskampen. Zijn geheugen staat in `towns.state.bot`. `ensureBots` maakt/verwijdert bots (± om de 10 min).
+  `resolveBattle` voorspelt dat hij wint (wachttijd per doelwit voor alle bots `prey:<stad>`), anders roverskampen.
+  **Doelwit en golven** (`BOT_WAR`): enkel steden met 0,45–1,5× zijn score (`minRatio`/`soloMax`, liefst rond 1: `near`); samen met
+  de clan tot 1,9× (`waveMax`). Vanaf 0,8× (`waveFrom`), of als hij het alleen niet haalt maar de clan samen wel (`simWaves`: golven
+  na elkaar), start hij een **clanaanval**: `config` `clan:<team>` = `{ t, wave, until, waves: [{ p, at, u }] }`. De andere bots
+  sluiten bij hun volgende beurt aan (stap 4a in `military`, ook voor hun eigen wachttijd) en komen `step` (10 speelminuten) na de
+  vorige golf aan: ze vertrekken meteen en lopen trager (`dur = at - now`). De eerste golf wacht zo lang dat verre clanleden dat
+  halen (`gather`). Aansluiten = `UPDATE config ... WHERE v = <oud>` (nooit dubbel). Een lopende clanaanval wordt niet overschreven. Zijn geheugen staat in `towns.state.bot`. `ensureBots` maakt/verwijdert bots (± om de 10 min).
   **Balans met de echte spelers**: elke bot heeft een sterkte (`bot.tier`: zwak, gemiddeld, sterk; vaste mix `TIER_ORDER`, ook binnen
   een clan) en een doelscore (`botTarget`) t.o.v. de scores van de actieve echte spelers (`humanRef` → `world.bot_ref`, om de 10 min):
   zwak ±70% van de mediaan, gemiddeld de mediaan, sterk minstens de beste speler, maal het niveau (0,8 / 1 / 1,2). Boven zijn doel

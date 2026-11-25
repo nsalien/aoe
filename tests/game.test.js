@@ -1939,3 +1939,76 @@ test('oorlog loont: buit groeit met je tijdperk, krijgsbuit voor wie de slag win
   const bs = JSON.parse(one('SELECT state FROM towns WHERE id = ?', bert.tid).state);
   assert.ok(bs.res.food >= 500 + rep2.bounty.food && bs.res.wood >= 500 + rep2.bounty.wood, JSON.stringify(bs.res));
 });
+
+// ---------- bots: aanvallen in golven, enkel tegen wie ongeveer even sterk is ----------
+import { BOT_WAR } from '../functions/lib/bots.js';
+import { cronTick } from '../functions/lib/crontick.js';
+
+async function botWorld() {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body) => (await handle({ request: new Request(`http://x/api${path}`, { method, headers: { 'content-type': 'application/json', 'x-admin-key': 'k' }, body: body && JSON.stringify(body) }), env })).json();
+  await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 2, bots: 2, botLevel: 2, seed: 11 });
+  await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
+  const sql = (q, ...v) => db.raw.prepare(q).all(...v);
+  const now = Date.now();
+  db.raw.prepare('UPDATE world SET start_at = ?, bot_check = ?').run(now - 4 * 86400000, now);
+  db.raw.prepare('UPDATE players SET created_at = ?').run(now - 3 * 86400000);
+  const bots = sql('SELECT p.id, p.team_id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.bot = 1 ORDER BY p.id');
+  const anna = sql("SELECT p.id, t.id AS tid FROM players p JOIN towns t ON t.player_id = p.id WHERE p.name = 'Anna'")[0];
+  // een stad in het IJzertijdperk (zelfde opbouw voor iedereen)
+  const base = (units) => {
+    const s = newTownState(now, 'greek');
+    s.buildings[0].level = 3;
+    let id = 10;
+    for (const [type, x, y, level] of [['house', 3, 3, 3], ['house', 4, 3, 3], ['farm', 3, 8, 3], ['lumber', 8, 3, 3], ['barracks', 8, 8, 3], ['storage', 3, 4, 2]]) s.buildings.push({ id: id++, type, x, y, level });
+    s.nextId = id; s.units = units; s.villagers = { idle: 0, food: 12, wood: 12, stone: 4, gold: 4 };
+    s.res = { food: 6000, wood: 6000, stone: 3000, gold: 3000 };
+    return s;
+  };
+  const put = (tid, s) => { ensureTerritory(s, tid); db.raw.prepare('UPDATE towns SET state = ? WHERE id = ?').run(JSON.stringify(s), tid); };
+  return { db, sql, now, bots, anna, base, put, world: async () => getWorld(db) };
+}
+
+test('bots: een clan valt samen aan in golven, telkens ±10 minuten na elkaar', async () => {
+  const { db, sql, now, bots, anna, base, put, world } = await botWorld();
+  for (const b of bots) { const s = base({ sword: 45, archer: 20 }); s.bot = { tier: 'gemiddeld', v: 2 }; put(b.tid, s); }
+  const as = base({ spear: 25, archer: 10 });
+  put(anna.tid, as);
+  const ratio = townScore(as) / townScore(JSON.parse(sql('SELECT state FROM towns WHERE id = ?', bots[0].tid)[0].state));
+  assert.ok(ratio >= BOT_WAR.waveFrom && ratio <= BOT_WAR.soloMax, `ongeveer even sterk (${ratio.toFixed(2)})`);
+  const w = await world();
+  const attacks = () => sql("SELECT player_id, depart_at, arrive_at FROM marches WHERE kind = 'attack' AND target_kind = 'town' AND target_id = ? ORDER BY arrive_at", anna.tid);
+  // de cron-worker laat elke minuut een bot aan de beurt (ook als niemand online is)
+  let t = now;
+  db.raw.prepare('UPDATE players SET bot_next = 0 WHERE bot = 1').run();
+  for (let k = 0; k < 40 && attacks().length < 2; k++) { t += 60000; await cronTick(db, t); }
+  const list = attacks();
+  assert.equal(list.length, 2, 'beide bots van de clan vallen aan');
+  assert.notEqual(list[0].player_id, list[1].player_id);
+  const gap = list[1].arrive_at - list[0].arrive_at;
+  const step = BOT_WAR.step * 3600000 / (w.speed || 1);
+  assert.ok(gap >= step - 1000 && gap <= step + 5 * 60000, `${Math.round(gap / 60000)} min tussen de golven`);
+  const clan = JSON.parse(sql('SELECT v FROM config WHERE k = ?', `clan:${bots[0].team_id}`)[0].v);
+  assert.equal(clan.wave, true);
+  assert.equal(clan.waves.length, 2);
+  // daarna valt niemand nog eens aan: elke bot één golf
+  for (let k = 0; k < 15; k++) { t += 60000; await cronTick(db, t); }
+  assert.equal(attacks().length, 2);
+});
+
+test('bots: geen aanval op een speler die meer dan dubbel zo sterk is, ook al zouden ze winnen', async () => {
+  const { db, sql, now, bots, anna, base, put } = await botWorld();
+  for (const b of bots) { const s = base({ sword: 45, archer: 20 }); s.bot = { tier: 'gemiddeld', v: 2 }; put(b.tid, s); }
+  // veel punten (monument, kathedraal), maar geen leger
+  const as = base({});
+  as.buildings[0].level = 5;
+  as.buildings.push({ id: 90, type: 'monument', x: 1, y: 8, level: 2 });
+  put(anna.tid, as);
+  const ratio = townScore(as) / townScore(JSON.parse(sql('SELECT state FROM towns WHERE id = ?', bots[0].tid)[0].state));
+  assert.ok(ratio > BOT_WAR.waveMax, `veel sterker (${ratio.toFixed(2)})`);
+  let t = now;
+  db.raw.prepare('UPDATE players SET bot_next = 0 WHERE bot = 1').run();
+  for (let k = 0; k < 20; k++) { t += 60000; await cronTick(db, t); }
+  assert.equal(sql("SELECT COUNT(*) AS c FROM marches WHERE kind = 'attack' AND target_kind = 'town' AND target_id = ?", anna.tid)[0].c, 0);
+});
