@@ -409,6 +409,11 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     aftelling) en de gebouwen die je in dit tijdperk nog kan verbeteren (groen omrand = kan nu; ×n = zoveel gelijke gebouwen,
     elke tik toont het volgende). Getest op pc, gsm (390 en 360 breed, ook met troepen gekozen) en liggend.
 
+47. **Paneel sluiten op de gsm** (gevraagd met een screenshot: "zorg dat deze menu's gesloten kunnen worden; bovenaan een breed
+    pijltje naar beneden als knop, ter vervanging van de horizontale balk"). Het balkje was enkel versiering. Nu een brede knop
+    met pijltje (liggend naar rechts) die bovenaan blijft staan bij het scrollen; tikken of naar beneden vegen sluit het paneel
+    en laat het gekozen gebouw/stad/kamp los. Getest op gsm, liggend (915 en 844 breed), tablet, wereldkaart; pc ongewijzigd.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
