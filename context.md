@@ -368,6 +368,12 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     erachter; het paneel toont 'Ook op deze plek' met knoppen (handig op een gsm); het gekozen gebouw wordt doorschijnend met
     een gestippelde gouden voet bovenop getekend als er iets voor staat. Een tip verschijnt hooguit 3 keer per toestel.
 
+43. **Per volk: elk niveau ander materiaal en andere details, niet enkel groter** (gevraagd: "ander materiaal, evt. andere
+    structuur, herwerk voor elk volk"). Muren volgen per volk een eigen reeks materialen (`CIV_WALL`: leem/riet → … → marmer,
+    geglazuurde steen, goud) met eigen versiering (pilasters, hoekstenen, ronde hoeklijsten, lisenen, tegelbanden, rozetten,
+    donkere balken); daken krijgen vanaf niveau 4 nokversiering per volk en op 5 goud. Open loodsen van Egypte, Babylon en
+    Perzië kregen een plat dak in plaats van een leien zadeldak. Alle 6 volkeren nagekeken. `VERSION` 9.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
