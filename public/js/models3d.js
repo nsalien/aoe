@@ -881,7 +881,9 @@ function tower(s, st, L) {
   }
   if (L === 3) crate(s, -0.33, 0.3, 0.05);
   if (L <= 4) barrel(s, 0.36, 0.33);
-  return { flag: flag || flagPole(s, 0, 0, top - 0.04, 0.3), glow };
+  const A = { flag: flag || flagPole(s, 0, 0, top - 0.04, 0.3) };
+  if (glow) A.glow = glow; // enkel op niveau 5 (vuurbaken)
+  return A;
 }
 
 // Belegwerkplaats: 1 houten loods met een half afgewerkte ram; 2 stenen voet, pannen en een afgewerkte, overdekte ram;
