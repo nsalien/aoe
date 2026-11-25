@@ -14,7 +14,7 @@ import {
 } from './game.js';
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
-  townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder, doFieldSplit,
+  townScore, totalVillagers, unitsPop, ensureTerritory, settleBuilds, doFieldSend, doFieldOrder, doFieldSplit,
   doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
@@ -24,6 +24,8 @@ import {
 } from '../../public/shared/rules.js';
 
 const routes = [];
+// zo lang mag de laatste beurt van de cron-worker geleden zijn om te zeggen dat hij draait
+export const CRON_STALE = 3 * 60000;
 const route = (method, path, opts, fn) => routes.push({ method, path, ...opts, fn });
 
 export async function handle(context) {
@@ -54,10 +56,19 @@ export async function handle(context) {
         await db.prepare('UPDATE players SET last_seen = ? WHERE id = ?').bind(now, ctx.player.id).run();
       }
     }
+    // Draait de cron-worker (elke minuut, world.cron_at), dan doet die de bots, de meldingen, de vazallen en de meeste
+    // aangekomen legers; een gewoon verzoek verwerkt dan enkel nog hooguit 2 legers van of naar deze speler.
+    // Zo blijft elk verzoek ruim binnen ±10 ms CPU en 50 query's (gratis plan). Zonder cron: alles zoals vroeger.
+    const cronOk = !!(ctx.world && ctx.world.cron_at && now - ctx.world.cron_at < CRON_STALE);
     if (ctx.world && r.process !== false) {
-      await processDue(db, ctx.world, now);
-      // meldingen 'leger komt bijna aan' en 'bouwer vrij' (de cron-worker doet dit elke minuut; dit is een vangnet)
-      if (context.waitUntil) context.waitUntil(notifyAll(wrapDb(env.DB), now, 2).catch((e) => console.error('notify', e && e.message)));
+      if (cronOk) {
+        const town = ctx.player ? await db.prepare('SELECT id FROM towns WHERE player_id = ?').bind(ctx.player.id).first() : null;
+        if (town) await processDue(db, ctx.world, now, 14, { max: 2, light: true, mine: { player: ctx.player.id, town: town.id } });
+      } else {
+        await processDue(db, ctx.world, now);
+        // meldingen 'leger komt bijna aan' en 'bouwer vrij' (vangnet als de cron-worker niet draait)
+        if (context.waitUntil) context.waitUntil(notifyAll(wrapDb(env.DB), now, 2).catch((e) => console.error('notify', e && e.message)));
+      }
     }
     if (r.active) {
       const phase = phaseOf(ctx.world, now);
@@ -65,8 +76,8 @@ export async function handle(context) {
       if (phase === 'ended') throw new GameError('Het seizoen is afgelopen.');
     }
     const res = await r.fn(ctx);
-    // computerspelers: bij gewone verzoeken komt telkens één bot aan de beurt (na het antwoord, binnen de query-limiet)
-    if (ctx.world && r.process !== false && db.ctx.count <= 18) {
+    // computerspelers: zonder cron-worker komt bij gewone verzoeken telkens één bot aan de beurt (na het antwoord)
+    if (!cronOk && ctx.world && r.process !== false && db.ctx.count <= 18) {
       const bt = botTick(db, ctx.world, now).catch((e) => console.error('bot', e && e.stack));
       if (context.waitUntil) context.waitUntil(bt); else await bt;
     }
@@ -181,11 +192,14 @@ route('POST', '/logout', { process: false, noWorld: true }, async ({ request, db
 
 route('GET', '/state', { auth: true }, async (ctx) => {
   const { db, world, player, now } = ctx;
-  const townRow = await db.prepare('SELECT * FROM towns WHERE player_id = ?').bind(player.id).first();
+  // stad en clan in één vraag (elke D1-vraag kost een rondreis)
+  const townRow = await db.prepare(
+    'SELECT t.*, tm.name AS team_name, tm.color AS team_color FROM towns t LEFT JOIN teams tm ON tm.id = ? WHERE t.player_id = ?',
+  ).bind(player.team_id, player.id).first();
   const state = JSON.parse(townRow.state);
   ensureTerritory(state, townRow.id);
   advance(state, gameTime(world, now), world.speed);
-  const team = await db.prepare('SELECT * FROM teams WHERE id = ?').bind(player.team_id).first();
+  const team = townRow.team_name != null ? { id: player.team_id, name: townRow.team_name, color: townRow.team_color } : null;
   const marches = (await db.prepare(
     `SELECT m.*, p.name AS player_name, ft.name AS from_name,
             CASE WHEN m.target_kind = 'town' THEN tt.name ELSE 'Roverskamp' END AS to_name
@@ -211,10 +225,15 @@ route('GET', '/state', { auth: true }, async (ctx) => {
   const mySupport = (await db.prepare(
     'SELECT s.id, s.units, t.name, t.x, t.y FROM support s JOIN towns t ON t.id = s.host_town WHERE s.player_id = ?',
   ).bind(player.id).all()).results.map((r) => ({ id: r.id, host: r.name, x: r.x, y: r.y, units: JSON.parse(r.units) }));
-  const unseen = await db.prepare('SELECT COUNT(*) AS c FROM reports WHERE player_id = ? AND seen = 0').bind(player.id).first();
-  // twee aparte MAX-query's: SQLite leest dan via de index maar één rij per kanaal
-  const lastWorld = await db.prepare('SELECT MAX(id) AS last FROM messages WHERE channel = ?').bind('world').first();
-  const lastTeam = await db.prepare('SELECT MAX(id) AS last FROM messages WHERE channel = ?').bind(`team:${player.team_id}`).first();
+  // ongelezen rapporten en het laatste chatbericht per kanaal in één vraag (elke deelvraag leest via een index)
+  const counts = await db.prepare(
+    `SELECT (SELECT COUNT(*) FROM reports WHERE player_id = ? AND seen = 0) AS unseen,
+            (SELECT MAX(id) FROM messages WHERE channel = 'world') AS lw,
+            (SELECT MAX(id) FROM messages WHERE channel = ?) AS lt`,
+  ).bind(player.id, `team:${player.team_id}`).first();
+  const unseen = { c: counts.unseen };
+  const lastWorld = { last: counts.lw };
+  const lastTeam = { last: counts.lt };
   const battles = await myBattles(db, player.id, now);
   const vassals = (await db.prepare(
     'SELECT v.town_id, v.until, v.next_tribute, t.name, t.x, t.y, p.name AS pname FROM vassals v JOIN towns t ON t.id = v.town_id JOIN players p ON p.id = v.player_id WHERE v.lord_player = ?',
@@ -237,9 +256,8 @@ route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
   const towns = (await db.prepare(
     'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.team_id, p.last_seen, p.created_at, p.bot FROM towns t JOIN players p ON p.id = t.player_id',
   ).all()).results.map((r) => {
-    const s = JSON.parse(r.state);
-    ensureTerritory(s, r.id);
-    advance(s, t, world.speed);
+    // geen volledige advance() per stad (te veel rekentijd): enkel afgewerkte bouwwerken (tijdperk, niveaus, punten)
+    const s = settleBuilds(JSON.parse(r.state), t);
     return {
       id: r.id, name: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, teamId: r.team_id, civ: s.civ,
       online: !r.bot && now - r.last_seen < 5 * 60000, bot: !!r.bot, botTier: r.bot && s.bot ? s.bot.tier || null : null,
@@ -286,9 +304,7 @@ route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
   const teams = (await db.prepare('SELECT id, name, color FROM teams').all()).results;
   const vrows = (await db.prepare('SELECT player_id, lord_player FROM vassals').all()).results;
   const players = rows.map((r) => {
-    const s = JSON.parse(r.state);
-    ensureTerritory(s, r.id);
-    advance(s, t, world.speed);
+    const s = settleBuilds(JSON.parse(r.state), t); // zie /map: geen volledige advance() per stad
     const build = townScore(s);
     return { id: r.pid, name: r.name, town: r.town, teamId: r.team_id, build, kills: r.kill_pts, score: build + r.kill_pts, bot: !!r.bot, botTier: r.bot && s.bot ? s.bot.tier || null : null };
   });

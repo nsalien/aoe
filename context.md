@@ -185,6 +185,10 @@ minuut een bot aan de beurt als niemand online is.
 - Bots testen: zet `world.start_at` (en `players.created_at`/`towns.state.t` van de bots) in het verleden en roep `botTick` vaak op
   (of laat een speler `/api/state` peilen); `players.bot_next = 0` maakt een bot meteen weer aan de beurt.
 - Lokaal spel: `npm run db:init:local` en `npx wrangler pages dev --port 8788`.
+- **Rekentijd op de server meten**: een proefwereld in `node:sqlite` (alle migraties) met echte spelers (`/register` +
+  `botEconomy` om steden uit te bouwen) en bots (`ensureBots` + vaak `botTick`), dan `handle({ request, env, waitUntil })` per
+  route; CPU = `process.cpuUsage()` min de tijd in SQLite. Koud = één verzoek in een vers Node-proces. Reken op ±25 ms voor
+  het eerste verzoek in een koude isolate (JIT); warm moet elk verzoek ruim onder 10 ms blijven.
 - **Snelheid meten** (scripts in je scratchpad, zoals bij punt 45 in §7): een uitgebouwde stad maak je in Node met
   `newTownState` + `advance` + `botEconomy` (8 dagen) en zet je met `wrangler d1 execute --file` in de lokale database.
   Meet koud (nieuw profiel) en warm (herladen), daarna stilstaan/pannen/zoomen via `requestAnimationFrame`-tijden;
@@ -452,6 +456,18 @@ minuut een bot aan de beurt als niemand online is.
 52. **Rozenwacht verplaatst** (gevraagd: "verplaats de 2 spelers van de Rozenwacht naar een andere random plek; nu zitten 5
     spelers veel te dicht bijeen"). Eenmalige opdracht `move-rozenwacht-1` in `ONE_OFF` (`relocate.js`, tot 27/11), uitgevoerd door
     de cron-worker binnen de minuut na de publicatie. Daarnaast een knop 'Clan verplaatsen' in `/admin.html`.
+
+53. **Lag en "Ongeldig antwoord van de server" bij het aanmelden** (gemeld 25/11). Onderzoek met een proefwereld (16 steden,
+    8 bots, 6 dagen bezig) in `node:sqlite` via de echte `handle()`, CPU zonder SQLite-tijd, warm en in een vers proces:
+    - `/map` 13–18 ms CPU warm (koud ±49 ms), `/leaderboard` ±5 ms: ze rekenden elke stad volledig bij (`advance`), en dat
+      bouwt telkens het gebied rond de stad op (`territory()`: 2–3,7 ms per stad, koud 13 ms). Nu `settleBuilds`: 2,8 en 1,4 ms.
+    - `territory()` 2,4x sneller (vooraf-test in plaats van `Math.hypot` per tegel; 600 steden nagekeken: identiek).
+    - Sinds de bots elke minuut spelen, stapelden aangekomen legers zich op tot iemand het spel opende: dat verzoek moest ze
+      allemaal verwerken (tot 45 D1-vragen, ±40 ms koud) → Cloudflare gaf een foutpagina ("Ongeldig antwoord"). Nu verwerkt de
+      cron-worker ze elke minuut; gewone verzoeken enkel hun eigen legers (hooguit 2) en geen bots/meldingen meer (`world.cron_at`,
+      migratie `0009`, ook indexen op `sessions(player_id)` en `players(team_id)`).
+    - `/state` 22 → 12 vragen, 3,9 → 0,7 ms. De browser probeert bij een foutpagina zelf opnieuw.
+    Gratis limieten (geschat voor ±8 spelers): ruim onder 100k verzoeken/dag, 5M gelezen en 100k geschreven rijen per dag.
 
 ## 8. Bekende beperkingen en ideeën
 

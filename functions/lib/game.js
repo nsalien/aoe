@@ -134,19 +134,30 @@ function damageBuilding(s, type, levels) {
 
 // ---------- legers verwerken ----------
 
-export async function processDue(db, world, now, budget = 30) {
+// Aangekomen legers verwerken (en slagen/vazallen). budget = hooguit zoveel D1-query's; opts.max = hooguit zoveel legers
+// (elk leger kost rekentijd: een stad bijrekenen); opts.mine = { player, town }: enkel legers van of naar deze speler
+// (zolang de cron-worker draait, doet die de rest); opts.light = geen vazallen (doet de cron-worker).
+export async function processDue(db, world, now, budget = 30, opts = {}) {
   let processed = 0;
+  const max = opts.max ?? Infinity;
   await processBattles(db, world, now);
-  if (db.ctx.count < 12) await processVassals(db, world, now);
-  for (let loop = 0; loop < 10; loop++) {
-    if (db.ctx.count > budget) break;
-    const due = await db.prepare(
-      `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
-       ORDER BY arrive_at LIMIT 4`,
-    ).bind(now, now).all();
+  const qn = () => (db.ctx ? db.ctx.count : 0);
+  if (!opts.light && qn() < 12) await processVassals(db, world, now);
+  const mine = opts.mine;
+  for (let loop = 0; loop < 10 && processed < max; loop++) {
+    if (qn() > budget) break;
+    const due = await (mine
+      ? db.prepare(
+        `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
+         AND (player_id = ? OR (target_kind = 'town' AND target_id = ?)) ORDER BY arrive_at LIMIT 4`,
+      ).bind(now, now, mine.player, mine.town)
+      : db.prepare(
+        `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
+         ORDER BY arrive_at LIMIT 4`,
+      ).bind(now, now)).all();
     if (!due.results.length) break;
     for (const m of due.results) {
-      if (db.ctx.count > budget) break;
+      if (qn() > budget || processed >= max) break;
       const lock = await db.prepare('UPDATE marches SET lock_until = ? WHERE id = ? AND lock_until < ?')
         .bind(now + 30000, m.id, now).run();
       if (!lock.meta.changes) continue;

@@ -34,7 +34,15 @@ Daarom:
 
 - Workers: 100k verzoeken/dag, ~10 ms CPU per verzoek, **max. 50 D1-query's per verzoek** (de teller zit in `functions/lib/http.js`).
 - D1: 5M gelezen rijen/dag, 100k geschreven rijen/dag. Schrijf enkel bij acties, gebruik indexen, geen tabelscans per peiling.
-- Geen achtergrondtaken: alles wordt "lui" berekend wanneer iemand de site opent (`advance()` in `sim.js`, `processDue()` in `functions/lib/game.js`).
+- Alles wordt "lui" berekend (`advance()` in `sim.js`, `processDue()` in `functions/lib/game.js`). De **cron-worker** (elke minuut,
+  `cronTick` in `functions/lib/crontick.js`) doet het zware werk: aangekomen legers (hooguit 3 per minuut), vazallen, meldingen
+  en de bots. Hij zet `world.cron_at`; zolang dat recent is (`CRON_STALE`), verwerkt een gewoon verzoek enkel nog hooguit 2 legers
+  van of naar die speler (`processDue(..., { max, mine, light })`) en geen bots of meldingen. Zonder cron: alles zoals vroeger.
+- **Rekentijd meten** (zie `context.md` › Testen): een realistische wereld met `node:sqlite` + `handle()`, CPU zonder SQLite-tijd,
+  ook in een vers proces (= koude isolate). Gemeten zware delen: `territory()` (het gebied rond een stad; nu met een snelle
+  vooraf-test in plaats van overal `Math.hypot`, exact dezelfde uitkomst) en `advance()` van veel steden: overzichten van alle
+  steden (`/map`, `/leaderboard`) gebruiken `settleBuilds` in plaats van `advance`. Elke D1-vraag is een rondreis: voeg vragen
+  samen waar het kan (zoals in `/state`).
 - De browser peilt elke 20 s; verhoog dat niet zonder reden.
 
 ## Waar staat wat
@@ -245,6 +253,8 @@ Daarom:
 
 ## Snelheid (laden en tekenen) — hou dit zo
 
+- **Foutpagina's van Cloudflare** (te veel rekentijd/verzoeken, geen JSON): `api.js` probeert GET-verzoeken en het aanmelden
+  vanzelf opnieuw (600 ms, 1,8 s) en toont anders "De server is even overbelast" (geen "Ongeldig antwoord").
 - **Laden**: `index.html` vraagt alle modules tegelijk (`<link rel="modulepreload">`) en start `/info` + `/state` al vóór de
   scripts binnen zijn (`window.__boot`, `api.js` `early()`). Nieuwe module (of een die wegvalt)? Pas de lijst in
   `index.html` aan; een test controleert dat ze klopt met de imports van `main.js`.
