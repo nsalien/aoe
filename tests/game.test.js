@@ -1684,3 +1684,20 @@ test('3D-gebouwen: elk model (elk volk, elk niveau) bouwt zonder fouten en met g
     }
   }
 });
+
+// Laden: index.html laadt alle scripts tegelijk (modulepreload) i.p.v. één na één via de imports.
+// Komt er een module bij of valt er een weg, dan moet die lijst mee veranderen.
+test('laden: index.html heeft een modulepreload voor precies alle modules van main.js', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const root = path.resolve('public');
+  const deps = (f) => [...fs.readFileSync(f, 'utf8').matchAll(/^\s*import\s[^;]*?from\s+['"]([^'"]+)['"]/gms)].map((m) => path.resolve(path.dirname(f), m[1]));
+  const need = new Set(); const q = [path.join(root, 'js/main.js')];
+  while (q.length) { const f = q.shift(); if (need.has(f)) continue; need.add(f); q.push(...deps(f)); }
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const have = new Set([...html.matchAll(/<link rel="modulepreload" href="\/([^"]+)">/g)].map((m) => path.join(root, m[1])));
+  const missing = [...need].filter((f) => !have.has(f)).map((f) => path.relative(root, f));
+  const extra = [...have].filter((f) => !need.has(f)).map((f) => path.relative(root, f));
+  assert.deepEqual(missing, [], `ontbreekt in index.html: ${missing.join(', ')}`);
+  assert.deepEqual(extra, [], `niet meer gebruikt: ${extra.join(', ')}`);
+});
