@@ -152,7 +152,13 @@ Daarom:
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
   ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`), bewaart ze
   in Cache Storage (verhoog `VERSION` als modellen veranderen) en geeft `null` tot ze klaar zijn: dan tekent het spel de
-  oude versie uit `art.js`/`figures.js`. De boerderij is ook 3D (akker met ruggen, graan, hek; de wieken van het molentje
+  oude versie uit `art.js`/`figures.js`. **Elk niveau ziet er anders (en beter) uit**, met dezelfde opbouw voor alle gebouwen:
+  1 hout en riet, klein; 2 groter, pannen, stenen voet; 3 steen, leien, een extra bouwsel (kraan, schachttoren, put, erker…);
+  4 een zichtbare aanbouw of tweede gebouw (aan de rechter- of voorkant, niet achteraan: daar zie je het niet) en vaandels
+  (`dressHigh`); 5 een toren/koepel, goud (`goldVane`), lantaarns. Ook `roof()` volgt `o.level` voor de daken van de volkeren
+  (pagode, plat, kantelen, koepel, Grieks). Controleer nieuwe modellen met een overzicht van alle niveaus en het verschil per
+  stap (render alle niveaus, meet het % gewijzigde pixels: < ±15% is te weinig). Verhoog `VERSION` in `sprite3d.js`.
+  De boerderij is ook 3D (akker met ruggen, graan, hek; de wieken van het molentje
   tekent `drawOverlay3d` via het anker `blades`). Kameel/strijdwagen/olifant en rammen zijn nog getekend.
   **Alles scherp bij inzoomen**: gebouwen (`S3.get(..., need)`), muren/torens (`S3.getWall(..., need)`), figuren, spullen en
   bomen gaan via `tiered()` (4 of 6 px per wereldpixel, sleutel `…@6`, geheugen `HI_BUDGET` in pixels, scherpe gebouwen
