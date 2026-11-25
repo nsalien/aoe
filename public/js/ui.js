@@ -41,7 +41,37 @@ export const ICON = {
 export const resImg = (r, cls = 'ico') => `<img class="${cls}" src="${ICON[r]}" alt="${RES_NAMES[r] || r}">`;
 
 // ---------- miniatuurafbeeldingen (één keer gerenderd) ----------
+// Niet meer meteen getekend: bij het opstarten kostte dat ±0,2 s op pc en ±1 s op een gsm (elk gebouw in 2D tekenen).
+// De eerste keer komt er een leeg plaatje met een eigen adres; de tekening volgt kort daarna op de achtergrond (een paar
+// per 6 ms) en dan krijgen alle <img> met dat adres de echte afbeelding, waar ze ook staan (paneel, venster, rapport).
 const thumbs = new Map();
+const thumbsTodo = new Map(); // sleutel -> { make, ph }
+let thumbTimer = null;
+function lazyThumb(key, make) {
+  const u = thumbs.get(key);
+  if (u) return u;
+  let p = thumbsTodo.get(key);
+  if (!p) {
+    p = { make, ph: `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1' data-k='${encodeURIComponent(key).replace(/'/g, '%27')}'/%3E` };
+    thumbsTodo.set(key, p);
+    if (!thumbTimer) thumbTimer = setTimeout(makeThumbs, 0);
+  }
+  return p.ph;
+}
+function makeThumbs() {
+  thumbTimer = null;
+  const t0 = performance.now();
+  for (const [key, p] of thumbsTodo) {
+    if (performance.now() - t0 > 6) break;
+    thumbsTodo.delete(key);
+    let url = '';
+    try { url = p.make().toDataURL(); } catch { /* geen canvas (bv. tests) */ }
+    if (!url) continue;
+    thumbs.set(key, url);
+    if (typeof document !== 'undefined') for (const img of document.images) if (img.getAttribute('src') === p.ph) img.setAttribute('src', url);
+  }
+  if (thumbsTodo.size) thumbTimer = setTimeout(makeThumbs, 16);
+}
 // ---------- volkeren ----------
 const EMBLEM = {
   egypt: '<circle cx="12" cy="12" r="10.5" fill="#2f5fa8" stroke="#d4a017" stroke-width="1.6"/><path d="M12 13v7M8.5 13.2h7" stroke="#f2c230" stroke-width="2.2" stroke-linecap="round"/><ellipse cx="12" cy="8.6" rx="2.6" ry="3.4" fill="none" stroke="#f2c230" stroke-width="2"/>',
@@ -75,33 +105,31 @@ let myCiv = null;
 export function setCiv(civ) { myCiv = civ; }
 
 export function buildingThumb(type, level = 1, team = '#c0392b', civ = myCiv) {
-  const key = `${type}:${level}:${team}:${civ || ''}`;
-  if (thumbs.has(key)) return thumbs.get(key);
-  const t = type === 'wall' ? 'tower' : type;
-  const spr = A.buildingSprite(t, Math.max(1, level), team, civ);
-  const big = BUILDINGS[t]?.size === 2;
-  const sc = big ? 1.05 : t === 'tower' ? 1.15 : 1.85;
-  const cv = document.createElement('canvas');
-  cv.width = 160; cv.height = 140;
-  const ctx = cv.getContext('2d');
-  A.drawSprite(ctx, spr, 80, big ? 104 : 108, sc);
-  const url = cv.toDataURL();
-  thumbs.set(key, url);
-  return url;
+  return lazyThumb(`${type}:${level}:${team}:${civ || ''}`, () => {
+    const t = type === 'wall' ? 'tower' : type;
+    const spr = A.buildingSprite(t, Math.max(1, level), team, civ);
+    const big = BUILDINGS[t]?.size === 2;
+    const sc = big ? 1.05 : t === 'tower' ? 1.15 : 1.85;
+    const cv = document.createElement('canvas');
+    cv.width = 160; cv.height = 140;
+    const ctx = cv.getContext('2d');
+    A.drawSprite(ctx, spr, 80, big ? 104 : 108, sc);
+    return cv;
+  });
 }
 
 export function unitThumb(unit, team = '#3f7fd9') {
-  const key = `u:${unit}:${team}`;
-  if (thumbs.has(key)) return thumbs.get(key);
+  return lazyThumb(`u:${unit}:${team}`, () => makeUnitThumb(unit, team));
+}
+
+function makeUnitThumb(unit, team) {
   const cv = document.createElement('canvas');
   cv.width = 88; cv.height = 88;
   const ctx = cv.getContext('2d');
   ctx.scale(2, 2);
   const o = { s: 2.1, team, thumb: true };
   const big = { elephant: 1.0, chariot: 1.4, camel: 1.12, yabusame: 1.24 };
-  if (FIG.uniqueUnit(ctx, unit, 22, 42, { s: big[unit] || 2.1, team, thumb: true })) {
-    const url = cv.toDataURL(); thumbs.set(key, url); return url;
-  }
+  if (FIG.uniqueUnit(ctx, unit, 22, 42, { s: big[unit] || 2.1, team, thumb: true })) return cv;
   switch (unit) {
     case 'villager': A.person(ctx, 22, 40, { ...o, team: null, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe' }); break;
     case 'spear': A.person(ctx, 20, 40, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
@@ -115,9 +143,7 @@ export function unitThumb(unit, team = '#3f7fd9') {
     case 'stonethrower': A.stoneThrower(ctx, 22, 38, 1.5); break;
     default:
   }
-  const url = cv.toDataURL();
-  thumbs.set(key, url);
-  return url;
+  return cv;
 }
 
 // ---------- kleine bouwstenen ----------
@@ -166,8 +192,10 @@ export function phaseHtml(w, now, peaceEnd) {
 // ---------- bouwbalk ----------
 // kleine tekeningen voor de muur- en grondkaart in de bouwbalk
 function specialThumb(kind, level = 1) {
-  const key = `sp:${kind}:${level}`;
-  if (thumbs.has(key)) return thumbs.get(key);
+  return lazyThumb(`sp:${kind}:${level}`, () => makeSpecialThumb(kind, level));
+}
+
+function makeSpecialThumb(kind, level) {
   const cv = document.createElement('canvas');
   cv.width = 160; cv.height = 140;
   const ctx = cv.getContext('2d');
@@ -185,9 +213,7 @@ function specialThumb(kind, level = 1) {
     ctx.fillStyle = '#f2c230'; ctx.beginPath(); ctx.moveTo(4, -26); ctx.lineTo(16, -22); ctx.lineTo(4, -18); ctx.fill();
     ctx.strokeStyle = '#5a3a1e'; ctx.beginPath(); ctx.moveTo(4, -10); ctx.lineTo(4, -27); ctx.stroke();
   }
-  const url = cv.toDataURL();
-  thumbs.set(key, url);
-  return url;
+  return cv;
 }
 
 export function buildBarHtml(live, placing, team) {
