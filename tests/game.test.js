@@ -2023,87 +2023,18 @@ test('beeldsnelheid: hooguit ±60 beelden per seconde, ook op een gsm-scherm van
   }
 });
 
-// ---------- ontdekkingen in de wildernis ----------
-import { SITES, SITE_ORDER, denSize } from '../public/shared/rules.js';
-import { siteDone, siteLoot, rates as ratesOf, exploredNow as exNow } from '../public/shared/sim.js';
-import { exEncode, T_W } from '../public/shared/territory.js';
-
-test('ontdekkingen: vaste plekken in de mist; schat, relikwie, uitkijkheuvel, reizigers en rovershol', () => {
-  // elke stad krijgt ze allemaal, op dezelfde plek in browser en server, in de mist (buiten wat je altijd ziet)
-  for (const seed of [1, 5, 17, 99, 1234]) {
-    const t = territory(seed);
-    assert.equal(t.sites.length, SITE_ORDER.length, `stad ${seed}`);
-    const s0 = terrTown(seed);
-    const seen = exNow(s0, s0.t);
-    for (const p of t.sites) {
-      assert.equal(t.tiles[tileIndex(Math.floor(p.x), Math.floor(p.y))], TILE.GRASS, 'op vrije grond');
-      assert.ok(!exHas(seen, Math.floor(p.x), Math.floor(p.y)), 'nog in de mist');
-    }
-  }
+test('oude ontdekkingen (weer weggehaald) worden opgeruimd: geen relikwie-goud, geen gevecht of tocht meer naar een plek', () => {
   const s = terrTown(5);
-  s.terr.camp.down = 1e15; // geen hinderlagen onderweg
-  const sites = territory(5).sites;
-  const of = (kind) => sites.find((p) => p.kind === kind);
-  // onontdekt: je kan er nog niet heen
-  s.units = { sword: 12 };
-  assert.throws(() => doFieldSend(s, { villager: 'food' }, null, null, { type: 'site', id: of('chest').id }, s.t), /nog niet ontdekt/);
-  s.terr.ex = exEncode(new Uint8Array(Math.ceil((T_W * T_W) / 8)).fill(255));
-  const go = (spec, p) => { const g = doFieldSend(s, spec, null, null, { type: 'site', id: p.id }, s.t); arriveAll(s, g); return g; };
-
-  // schat: grondstoffen, de dorpeling gaat daarna terug naar huis
-  const chest = of('chest');
-  const loot = siteLoot(s, chest);
-  const before = { ...s.res };
-  const g1 = go({ villager: 'food' }, chest);
-  assert.ok(siteDone(s, chest.id));
-  for (const r of RES) if (loot[r]) assert.ok(s.res[r] >= before[r] + loot[r] - 1, r);
-  assert.ok(!s.field.includes(g1), 'de dorpeling is terug thuis aan het werk');
-  assert.throws(() => doFieldSend(s, { villager: 'food' }, null, null, { type: 'site', id: chest.id }, s.t), /niets meer/);
-
-  // ruïne: een relikwie = voorgoed goud per uur
-  const gold0 = ratesOf(s, 1).gold;
-  go({ villager: 'wood' }, of('ruin'));
-  assert.equal(s.relics, 1);
-  assert.equal(ratesOf(s, 1).gold, gold0 + SITES.ruin.relicGold);
-
-  // uitkijkheuvel: een groot stuk van de wildernis wordt ontdekt
-  const look = of('lookout');
-  const g3 = doFieldSend(s, { units: { sword: 2 } }, null, null, { type: 'site', id: look.id }, s.t);
-  s.terr.ex = ''; // vergeten wat we al zagen: enkel de weg en de heuvel tellen
-  arriveAll(s, g3);
-  const ex = exDecode(s.terr.ex);
-  let inCircle = 0; let shown = 0;
-  for (let j = Math.floor(look.y - 8); j <= look.y + 8; j++) for (let i = Math.floor(look.x - 8); i <= look.x + 8; i++) {
-    if (Math.hypot(i + 0.5 - look.x, j + 0.5 - look.y) > 8 || i < T_MIN || j < T_MIN || i >= T_MIN + T_W || j >= T_MIN + T_W) continue;
-    inCircle++; if (exHas(ex, i, j)) shown++;
-  }
-  assert.equal(shown, inCircle, 'alles binnen 8 tegels van de heuvel is ontdekt');
-  assert.ok(g3.units.sword === 2 && !g3.pending && s.field.includes(g3), 'soldaten blijven staan');
-  s.terr.ex = exEncode(new Uint8Array(Math.ceil((T_W * T_W) / 8)).fill(255));
-
-  // reizigers: drie nieuwe dorpelingen (zolang er plaats is in je huizen)
-  s.buildings.push({ id: 90, type: 'house', x: 1, y: 1, level: 3 });
-  const vill = totalVillagers(s);
-  go({ villager: 'food' }, of('travelers'));
-  assert.equal(totalVillagers(s), vill + SITES.travelers.people);
-
-  // rovershol: dorpelingen mogen niet, een te kleine groep verliest, genoeg soldaten winnen de buit
-  const den = of('den');
-  assert.throws(() => doFieldSend(s, { villager: 'food' }, null, null, { type: 'site', id: den.id }, s.t), /vechten niet/);
-  const weak = go({ units: { sword: 1 } }, den);
-  assert.ok(weak.fight, 'het gevecht begint bij aankomst');
-  fightOver(s);
-  assert.ok(!siteDone(s, den.id) && s.terr.log.some((l) => l.kind === 'den-lost'));
-  const dl = siteLoot(s, den);
-  const r0 = { ...s.res };
-  s.units = { sword: denSize(1) * 2 };
-  go({ units: { sword: denSize(1) * 2 } }, den);
-  fightOver(s);
-  assert.ok(siteDone(s, den.id), 'hol veroverd');
-  for (const r of RES) assert.ok(s.res[r] >= Math.min(r0[r] + dl[r] - 1, 3000 - 1), r);
-
-  // deterministisch: dezelfde stad via JSON heen en terug geeft hetzelfde
-  const copy = JSON.parse(JSON.stringify(s));
-  advance(copy, s.t + 3600000, 1); advance(s, s.t + 3600000, 1);
-  assert.deepEqual(copy, s);
+  s.relics = 2; s.terr.sites = { 1: 1 };
+  s.terr.fights = [{ id: 7, foe: { type: 'den', id: 6 }, t0: s.t, a: [], b: [], end: s.t + 60000 }];
+  s.field = [{ id: 50, units: { sword: 3 }, x0: 1, y0: 1, x1: 1, y1: 1, t0: s.t, t1: s.t, pending: false, order: null, work: null, fight: 7 },
+    { id: 51, units: { villager: 1 }, job: 'food', x0: 1, y0: 1, x1: 9, y1: 9, t0: s.t, t1: s.t + 60000, pending: true, order: { type: 'site', id: 2 }, work: null }];
+  ensureTerritory(s, 5);
+  assert.equal(s.relics, undefined);
+  assert.equal(s.terr.sites, undefined);
+  assert.deepEqual(s.terr.fights, []);
+  assert.equal(s.field[0].fight, null);
+  assert.equal(s.field[1].order.type, 'move');
+  advance(s, s.t + 3600000, 1); // loopt gewoon verder zonder fouten
+  assert.equal(territory(5).sites, undefined, 'geen ontdekkingen meer in het gebied');
 });

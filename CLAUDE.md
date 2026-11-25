@@ -63,12 +63,6 @@ Daarom:
   aan vóór `advance()` op de server. Een deel van een groep apart sturen gaat met `doFieldSplit` (ook midden in een gevecht).
   Wat je altijd ziet (geen mist): `homeSight(s)` = bouwgrond (vierkant, loten, gekapt), muren en binnenkant + `FIELD.homeSight`
   tegels; `exploredNow` (server en browser) en `updateFog` in `town.js` gebruiken die.
-  **Ontdekkingen** (`SITES`/`SITE_ORDER` in `rules.js`, `t.sites` in `territory.js`, als laatste geplaatst zodat kamp/bronnen/
-  everzwijnen niet verschuiven): schat, oude ruïne (relikwie: `s.relics`, +goud/u in `rates()`), uitkijkheuvel (onthult een
-  cirkel), verdwaalde reizigers (+dorpelingen) en een rovershol (gevecht `foe.type = 'den'`, `denSize`). Doel `{ type: 'site', id }`
-  in `doFieldOrder`; aankomst → `claimSite` (of het gevecht); gedaan = `s.terr.sites[id]`. In de stad: `drawSite`, `pickSite`
-  (aantikken zonder keuze = uitleg via `onSite` → `siteText`), 3D-modellen `chest`, `ruin`, `lookout`, `travelers`, `den` in
-  `propmodels.js` (v = 1: al gedaan).
   Bevelen (`/field`) komen als lijst `ops` met het tijdstip van de tik (`at`); de server rekent de stad tot exact dat tijdstip
   verder (niet tot 'nu') en voert ze daar uit, net als de browser. Zo verspringt er niets. Een heel leger = één verzoek, met
   een gezamenlijk tempo (`pace`) zodat iedereen samen aankomt.

@@ -3,12 +3,12 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE, techTier, SITES, denSize } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE, techTier } from '../shared/rules.js';
 import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls, siteDone, age as ageOf,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -1736,9 +1736,6 @@ export class TownView {
       }
       const target = this.pickTarget(w);
       if (target) { this.issue(sel, null, target); return; }
-      // dorpelingen naar het rovershol (of een plek die al gedaan is): uitleg in plaats van er doelloos heen te lopen
-      const site = this.pickSite(w);
-      if (site && this.onSite) { this.onSite(site, this.selIsVillager()); return; }
       if (!order) {
         const v = this.pickWalker(w);
         if (v) { if (dbl) this.selectAllVillagers(v); else this.setSel({ type: 'walker', w: v }); return; }
@@ -1758,8 +1755,6 @@ export class TownView {
       if (this.onHarvest) this.onHarvest(node, null);
       return;
     }
-    const site = this.pickSite(w);
-    if (site && this.onSite) { this.onSite(site, null); return; }
     const v = this.pickWalker(w);
     if (v) { this.setSel({ type: 'walker', w: v }); return; }
     const so = this.pickSoldier(w);
@@ -2096,7 +2091,7 @@ export class TownView {
         this.onFieldOrder({ action: 'order', id, to: to && { x: to.x + off[0], y: to.y + off[1] }, target });
       });
     }
-    if (mark) this.orderMark = { ...mark, at: performance.now(), attack: !!(target && (target.type === 'boar' || target.type === 'camp' || (target.type === 'site' && this.terr.sites.some((p) => p.id === target.id && SITES[p.kind].fight)))) };
+    if (mark) this.orderMark = { ...mark, at: performance.now(), attack: !!(target && (target.type === 'boar' || target.type === 'camp')) };
   }
 
   targetPos(target) {
@@ -2105,7 +2100,6 @@ export class TownView {
     if (target.type === 'boar') { const b = terr.boars.find((x) => x.id === target.id); return b && { gx: b.x, gy: b.y }; }
     if (target.type === 'camp') return terr.camp && { gx: terr.camp.x, gy: terr.camp.y };
     if (target.type === 'dep') { const d = terr.deposits.find((x) => x.id === target.id); return d && { gx: d.x, gy: d.y }; }
-    if (target.type === 'site') { const p = (terr.sites || []).find((x) => x.id === target.id); return p && { gx: p.x, gy: p.y }; }
     if (target.type === 'tree') return { gx: target.i + 0.5, gy: target.j + 0.5 };
     if (target.type === 'home') { const d = tcDoor(); return { gx: d.gx, gy: d.gy }; }
     return null;
@@ -2127,8 +2121,6 @@ export class TownView {
       const p = toWorld(terr.camp.x, terr.camp.y);
       if (Math.abs(w.x - p.x) < 68 && w.y < p.y + 30 && w.y > p.y - 52) return { type: 'camp' };
     }
-    const site = this.pickSite(w);
-    if (site && !siteDone(s, site.id) && (fighter || !SITES[site.kind].fight)) return { type: 'site', id: site.id };
     for (const d of terr.deposits) {
       if (depLeft(s, d) <= 0 || !this.isExplored(d.x, d.y)) continue;
       const p = toWorld(d.x, d.y);
@@ -2141,24 +2133,6 @@ export class TownView {
       if (this.isExplored(i + 0.5, j + 0.5) && canChop(s, i, j)) return { type: 'tree', i, j };
     }
     return null;
-  }
-
-  // een ontdekking in je gebied onder de muis (enkel als je ze al ontdekt hebt)
-  pickSite(w) {
-    if (!this.state.terr || this.battleMode) return null;
-    let best = null; let bd = Infinity;
-    for (const p of this.terr.sites || []) {
-      if (!this.isExplored(p.x, p.y)) continue;
-      if (p.kind === 'travelers' && siteDone(this.state, p.id)) continue;
-      const q = toWorld(p.x, p.y);
-      const big = p.kind === 'den' || p.kind === 'lookout';
-      const top = p.kind === 'lookout' ? 80 : big ? 52 : 40;
-      if (Math.abs(w.x - q.x) < (big ? 42 : 30) && w.y < q.y + 18 && w.y > q.y - top) {
-        const d = Math.abs(w.x - q.x) + Math.abs(w.y - q.y + top / 2);
-        if (d < bd) { bd = d; best = p; }
-      }
-    }
-    return best;
   }
 
   pickGroup(w) {
@@ -2558,11 +2532,6 @@ export class TownView {
         items.push({ depth: bp.x + bp.y, kind: 'boar', b, bp });
       }
       if (terr.camp && this.isExplored(terr.camp.x, terr.camp.y)) items.push({ depth: terr.camp.x + terr.camp.y, kind: 'camp' });
-      for (const p of terr.sites || []) {
-        if (!this.isExplored(p.x, p.y) || !inView(toWorld(p.x, p.y))) continue;
-        if (p.kind === 'travelers' && siteDone(s, p.id)) continue;
-        items.push({ depth: p.x + p.y, kind: 'site', p });
-      }
       const raid = this.raidParty(now);
       if (raid && this.isExplored(raid.x, raid.y)) items.push({ depth: raid.x + raid.y, kind: 'raid', raid });
       for (const g of s.field || []) {
@@ -2598,7 +2567,6 @@ export class TownView {
         case 'deposit': this.drawDeposit(ctx, it.d, t); break;
         case 'boar': this.drawBoar(ctx, it.b, it.bp, t); break;
         case 'camp': this.drawCamp(ctx, t, now); break;
-        case 'site': this.drawSite(ctx, it.p, t, now); break;
         case 'raid': this.drawRaid(ctx, it.raid, t); break;
         case 'group': this.drawGroup(ctx, it.g, it.p, t, now, emit); break;
         case 'fighter': this.drawFighter(ctx, it.u, it.sc, t, now); break;
@@ -2792,48 +2760,6 @@ export class TownView {
     }
   }
 
-  // ontdekking in de wildernis (3D-model; tot dat klaar is een eenvoudige tekening) met een gouden teken erboven
-  drawSite(ctx, p, t, now) {
-    const s = this.state;
-    const done = siteDone(s, p.id);
-    const w = toWorld(p.x, p.y);
-    const sc = { chest: 1.7, ruin: 1.35, lookout: 1.45, travelers: 1.35, den: 1.4 }[p.kind] || 1.3;
-    const fighting = p.kind === 'den' && (this.fighting || []).some((x) => x.f.foe.type === 'den' && x.f.foe.id === p.id);
-    if (!A.prop3d(ctx, p.kind, done ? 1 : 0, w.x, w.y, sc)) {
-      // terugval: een hoop stenen of een tentje
-      if (p.kind === 'travelers') { ctx.fillStyle = '#c9b48a'; ctx.beginPath(); ctx.moveTo(w.x - 22, w.y); ctx.lineTo(w.x - 6, w.y - 26); ctx.lineTo(w.x + 10, w.y); ctx.closePath(); ctx.fill(); } else { A.rock(ctx, w.x - 8, w.y + 2, p.kind === 'den' ? 4 : 2.6); A.rock(ctx, w.x + 9, w.y + 4, 2); }
-    }
-    if (p.kind === 'ruin' && !done) FX.drawGlow(ctx, w.x, w.y - 12, 26 + Math.sin(t * 0.004) * 4, FX.WARM, 0.55);
-    if (p.kind === 'travelers') {
-      const f = toWorld(p.x + 0.2, p.y + 0.12);
-      A.fire(ctx, f.x, f.y, 0.7, t);
-      for (const [dx, dy, ph] of [[14, 6, 0], [-16, 10, 1], [2, 16, 2]]) {
-        const q = toWorld(p.x + dx / 40, p.y + dy / 40);
-        A.person(ctx, q.x, q.y + Math.sin(t * 0.004 + ph) * 0.4, { s: 1, body: ['#7a5a3a', '#4f6a7a', '#8a3a3a'][ph], skin: 1 + ph });
-      }
-    }
-    if (p.kind === 'den' && !done && !fighting) {
-      const f = toWorld(p.x + 0.24, p.y + 0.24);
-      A.fire(ctx, f.x, f.y, 0.8, t);
-      for (const [dx, dy, ph] of [[28, 22, 0], [-6, 30, 2]]) {
-        const q = toWorld(p.x + dx / 40, p.y + dy / 40);
-        facing(ctx, q.x, dx < 0 ? 1 : -1, () => A.person(ctx, q.x, q.y + Math.sin(t * 0.004 + ph) * 0.4, { s: 1.05, body: '#4f3a2a', weapon: ph ? 'spear' : 'sword', barb: true, skin: 1 + ph }));
-      }
-    }
-    if (done) return;
-    // zwevend teken: ! (iets te halen), zwaarden (vechten) en bij het hol hoeveel rovers er zijn
-    const top = { chest: 34, ruin: 50, lookout: 108, travelers: 48, den: 62 }[p.kind] || 50;
-    const y = w.y - top + Math.sin(t * 0.004 + p.id) * 2.5;
-    ctx.save();
-    ctx.fillStyle = p.kind === 'den' ? 'rgba(110,24,14,0.9)' : 'rgba(255,214,90,0.95)';
-    ctx.strokeStyle = 'rgba(60,34,10,0.9)'; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.arc(w.x, y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = p.kind === 'den' ? '#ffe2c2' : '#4a2a08';
-    ctx.font = '800 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(p.kind === 'den' ? `${denSize(ageOf(s))}` : p.kind === 'lookout' ? '?' : '!', w.x, y + 0.5);
-    ctx.restore();
-  }
-
   drawCamp(ctx, t, now) {
     const s = this.state;
     const c = this.terr.camp;
@@ -2908,10 +2834,6 @@ export class TownView {
       if (f.foe.type === 'boar') {
         const b = this.terr.boars.find((x) => x.id === f.foe.id);
         fx = b ? b.x : ax + 0.8; fy = b ? b.y : ay;
-      } else if (f.foe.type === 'den') {
-        const p = (this.terr.sites || []).find((x) => x.id === f.foe.id) || { x: ax + 0.8, y: ay };
-        const d = Math.hypot(p.x - ax, p.y - ay) || 1;
-        fx = ax + ((p.x - ax) / d) * 1.1; fy = ay + ((p.y - ay) / d) * 1.1;
       } else {
         const c = this.terr.camp; const d = Math.hypot(c.x - ax, c.y - ay) || 1;
         fx = ax + ((c.x - ax) / d) * 1.1; fy = ay + ((c.y - ay) / d) * 1.1;
