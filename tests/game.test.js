@@ -1620,3 +1620,33 @@ test('gebouwen verplaatsen: enkel naar vrije bouwgrond, het stadscentrum blijft 
   assert.throws(() => doMove(s, 90, 3, 1), GameError);
   assert.equal(h.level, 1, 'niveau blijft');
 });
+
+test('muren en poorten verplaatsen', async () => {
+  const { doMoveWalls, checkMoveWalls, wallRun } = await import('../public/shared/sim.js');
+  const { tileIndex } = await import('../public/shared/territory.js');
+  const s = newTownState(0);
+  s.buildings.find((b) => b.type === 'wall').level = 1;
+  s.buildings.push({ id: 90, type: 'house', x: 2, y: 4, level: 1 });
+  const T = (i, j) => tileIndex(i, j);
+  s.walls = [1, 2, 3, 6, 7, 8].map((i) => T(i, 2));
+  s.gates = [T(4, 2), T(5, 2)];
+  // het rechte stuk door (2, 2) = de hele rij met de poort erin
+  assert.equal(wallRun(s, 2, 2).length, 8);
+  // één muurstuk opschuiven
+  doMoveWalls(s, [[1, 2]], 0, 1);
+  assert.ok(s.walls.includes(T(1, 3)) && !s.walls.includes(T(1, 2)));
+  // de poort twee tegels opschuiven: de oude opening wordt muur
+  doMoveWalls(s, [[4, 2], [5, 2]], 2, 0);
+  assert.deepEqual([...s.gates].sort((a, b) => a - b), [T(6, 2), T(7, 2)].sort((a, b) => a - b));
+  assert.ok(s.walls.includes(T(4, 2)) && s.walls.includes(T(5, 2)));
+  // een halve poort, op een gebouw, op een muur, of een poort zonder muur ernaast: niet
+  assert.match(checkMoveWalls(s, [[6, 2]], 0, 1), /geheel/);
+  assert.match(checkMoveWalls(s, [[2, 2]], 0, 2), /gebouw/);
+  assert.match(checkMoveWalls(s, [[2, 2]], 1, 0), /al een muur/);
+  assert.match(checkMoveWalls(s, [[6, 2], [7, 2]], 0, 2), /recht stuk muur/);
+  // de hele rechte muur (met poort) één rij lager
+  const run = wallRun(s, 3, 2);
+  doMoveWalls(s, run, 0, -1);
+  assert.ok(s.gates.includes(T(6, 1)) && s.gates.includes(T(7, 1)));
+  assert.ok(run.every(([i]) => s.walls.includes(T(i, 1)) || s.gates.includes(T(i, 1))));
+});

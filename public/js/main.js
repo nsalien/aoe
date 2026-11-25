@@ -6,7 +6,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -233,6 +233,7 @@ function startGame(data) {
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
     town.onMove = moveBuilding;
+    town.onMoveWalls = moveWalls;
     town.onNotice = (msg) => toast(msg, '', 'move');
     town.onMoveChange = renderMoveHint;
     town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; };
@@ -924,13 +925,31 @@ async function moveBuilding(id, x, y) {
 function renderMoveHint(m) {
   const hint = $('#placeHint');
   if (!m) { hint.hidden = true; return; }
-  const b = app.live && app.live.buildings.find((x) => x.id === m.id);
-  const name = b ? BUILDINGS[b.type].name : 'Gebouw';
+  const walls = m.kind === 'walls';
+  const b = !walls && app.live && app.live.buildings.find((x) => x.id === m.id);
+  const name = walls ? m.label : b ? BUILDINGS[b.type].name : 'Gebouw';
   const mouse = town.cam.lastType === 'mouse';
-  const how = m.ok ? 'Mag hier staan.' : m.same ? (mouse ? 'Klik op de nieuwe plek.' : 'Tik op de nieuwe plek of sleep het gebouw.') : 'Daar kan het niet staan.';
+  const what = walls ? 'de muur' : 'het gebouw';
+  const how = m.ok ? 'Mag hier staan.' : m.same ? (mouse ? 'Klik op de nieuwe plek.' : `Tik op de nieuwe plek of sleep ${what}.`) : 'Daar kan het niet staan.';
   hint.hidden = false;
   setHTML(hint, `<span><b>${UI.esc(name)} verplaatsen</b> <span class="muted">${how}</span></span>
     <button class="btn small primary" data-action="moveHere" ${m.ok ? '' : 'disabled'}>Zet hier</button><button class="btn small" data-action="moveStop">Stoppen</button>`);
+}
+
+// muurstukken of een poort verplaatsen: meteen in de browser, dan de server (weigert die, dan terug)
+async function moveWalls(tiles, dx, dy) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const base = app.serverState || app.data.town.state;
+  try {
+    const c = structuredClone(base);
+    doMoveWalls(c, tiles, dx, dy);
+    setBaseState(c);
+    app.selWall = null; town.selWall = null; app.selBuilding = null; town.selected = null;
+    computeLive(true);
+    renderAll();
+  } catch (e) { toast(e.message, 'err'); return; }
+  const r = await act('/walls/move', { tiles, dx, dy }, 'Muur verplaatst');
+  if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
 }
 
 function cancelPlace() {
@@ -1187,6 +1206,21 @@ const actions = {
     if (app.mode) setMode(null);
     openPanelMobile(false);
     town.startMove(b);
+  },
+  moveWall(el) {
+    const live = app.live;
+    if (!live || !town) return;
+    if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+    const i = Number(el.dataset.i); const j = Number(el.dataset.j); const what = el.dataset.what;
+    const gate = gateList(live).find((g) => g.tiles.some(([a, b]) => a === i && b === j));
+    let tiles; let label;
+    if (what === 'run') { tiles = wallRun(live, i, j); label = `Muur (${tiles.length} stukken)`; }
+    else if (gate && (what === 'gate' || what === 'one')) { tiles = gate.tiles.map(([a, b]) => [a, b]); label = 'Poort'; }
+    else { tiles = [[i, j]]; label = 'Muurstuk'; }
+    cancelPlace();
+    if (app.mode) setMode(null);
+    openPanelMobile(false);
+    town.startWallMove(tiles, i, j, label);
   },
   moveHere() { if (town) town.dropMove(); },
   moveStop() { if (town) town.cancelMove(); },

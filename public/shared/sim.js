@@ -595,6 +595,89 @@ export function doRemoveWalls(s, tiles) {
   if (s.gates) s.gates = s.gates.filter((x) => !rm.has(x));
 }
 
+// ---------- muren verplaatsen (gratis) ----------
+// Het rechte stuk muur (met de poorten erin) door tegel (i, j): langs x of langs y, het langste dat geen poort doorsnijdt.
+export function wallRun(s, i, j) {
+  const set = wallSet(s);
+  const has = (a, b) => inTerr(a, b) && set.has(tileIndex(a, b));
+  if (!has(i, j)) return [];
+  const run = (dx, dy) => {
+    const out = [[i, j]];
+    for (let k = 1; has(i + dx * k, j + dy * k); k++) out.push([i + dx * k, j + dy * k]);
+    for (let k = 1; has(i - dx * k, j - dy * k); k++) out.unshift([i - dx * k, j - dy * k]);
+    return out;
+  };
+  const gl = gateList(s);
+  const whole = (r) => { const k = new Set(r.map(([a, b]) => tileIndex(a, b))); return gl.every((g) => { const n = g.tiles.filter(([a, b]) => k.has(tileIndex(a, b))).length; return !n || n === g.tiles.length; }); };
+  const cands = [run(1, 0), run(0, 1)].filter(whole).sort((a, b) => b.length - a.length);
+  return cands[0] || [[i, j]];
+}
+
+// staat een (verplaatste) poort in een recht stuk muur, met aan beide kanten een muurstuk en geen hoek ernaast?
+function gateFits(walls, gates, tl) {
+  const any = (a, b) => inTerr(a, b) && (walls.has(tileIndex(a, b)) || gates.has(tileIndex(a, b)));
+  const isW = (a, b) => inTerr(a, b) && walls.has(tileIndex(a, b));
+  if (tl.length === 1) { const all = new Set([...walls, ...gates]); return !!gateAxis(all, tl[0][0], tl[0][1]); }
+  const [a, b] = tl; const dx = b[0] - a[0]; const dy = b[1] - a[1];
+  if (!isW(a[0] - dx, a[1] - dy) || !isW(b[0] + dx, b[1] + dy)) return false;
+  return !tl.some(([u, v]) => any(u + dy, v + dx) || any(u - dy, v - dx));
+}
+
+// Verplaats muurstukken (en poorten in hun geheel) over (dx, dy). Een poort alleen verplaatsen: de oude opening wordt muur.
+// Geeft de nieuwe { walls, gates } terug, of een foutmelding.
+export function planWallMove(s, tiles, dx, dy) {
+  if (!bLevel(s, 'wall')) return 'Bouw eerst de stadsmuur.';
+  if (!Array.isArray(tiles) || !tiles.length) return 'Kies welke muur je wil verplaatsen.';
+  if (tiles.length > WALL_TILE.maxPerOrder) return `Maximaal ${WALL_TILE.maxPerOrder} muurstukken tegelijk.`;
+  if (!Number.isInteger(dx) || !Number.isInteger(dy) || (!dx && !dy) || Math.abs(dx) > T_W || Math.abs(dy) > T_W) return 'Kies een nieuwe plek voor de muur.';
+  const walls = new Set(s.walls || []); const gates = new Set(s.gates || []);
+  const src = new Set();
+  for (const t of tiles) {
+    if (!Array.isArray(t) || !Number.isInteger(t[0]) || !Number.isInteger(t[1]) || !inTerr(t[0], t[1])) return 'Ongeldige plaats.';
+    const idx = tileIndex(t[0], t[1]);
+    if (!walls.has(idx) && !gates.has(idx)) return 'Daar staat geen muur.';
+    if (src.has(idx)) return 'Ongeldige plaats.';
+    src.add(idx);
+  }
+  const moved = [];
+  for (const g of gateList(s)) {
+    const n = g.tiles.filter(([a, b]) => src.has(tileIndex(a, b))).length;
+    if (n && n < g.tiles.length) return 'Een poort verplaats je in zijn geheel.';
+    if (n) moved.push(g);
+  }
+  const gateOnly = moved.length > 0 && [...src].every((x) => gates.has(x));
+  const nw = new Set(walls); const ng = new Set(gates);
+  for (const x of src) { nw.delete(x); ng.delete(x); }
+  if (gateOnly) for (const x of src) nw.add(x); // de oude opening wordt muur
+  const cl = clearedSet(s); const occ = occupied(s);
+  for (const x of src) {
+    const { i, j } = tileOf(x); const a = i + dx; const b = j + dy;
+    if (!inTerr(a, b) || !isBuildable(s, a, b, cl)) return 'Muren kan je enkel op je eigen bouwgrond zetten.';
+    if (occ.has(`${a},${b}`)) return 'Daar staat een gebouw.';
+    const t = tileIndex(a, b);
+    if (ng.has(t)) return 'Daar staat al een poort.';
+    if (nw.has(t) && !gateOnly) return 'Daar staat al een muur.';
+    if (gates.has(x)) { nw.delete(t); ng.add(t); } else nw.add(t);
+  }
+  for (const g of moved) {
+    if (!gateFits(nw, ng, g.tiles.map(([i, j]) => [i + dx, j + dy]))) return 'Een poort moet in een recht stuk muur staan, met aan beide kanten een muurstuk.';
+  }
+  if (!ng.size && insideSet(s, nw)) return 'Zo is je stad helemaal dicht zonder poort. Maak eerst een poort (2 tegels breed) in een recht stuk muur.';
+  return { walls: [...nw], gates: [...ng] };
+}
+
+export function checkMoveWalls(s, tiles, dx, dy) {
+  const p = planWallMove(s, tiles, dx, dy);
+  return typeof p === 'string' ? p : null;
+}
+
+export function doMoveWalls(s, tiles, dx, dy) {
+  const p = planWallMove(s, tiles, dx, dy);
+  if (typeof p === 'string') throw new GameError(p);
+  s.walls = p.walls;
+  s.gates = p.gates;
+}
+
 export function buildRing(s) {
   return ringForAge(age(s));
 }

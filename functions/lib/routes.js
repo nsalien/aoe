@@ -14,7 +14,7 @@ import {
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
   townScore, totalVillagers, unitsPop, ensureTerritory, doFieldSend, doFieldOrder, doFieldSplit,
-  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove,
+  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -325,6 +325,13 @@ route('POST', '/build', { auth: true, active: true }, async (ctx) => {
 route('POST', '/move', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   return townAction(ctx, (s) => doMove(s, int(body.id), int(body.x, -9999), int(body.y, -9999)));
+});
+
+// muurstukken of een poort verplaatsen (gratis)
+route('POST', '/walls/move', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  const tiles = Array.isArray(body.tiles) ? body.tiles.slice(0, 200).map((t) => (Array.isArray(t) ? [int(t[0], -9999), int(t[1], -9999)] : [-9999, -9999])) : [];
+  return townAction(ctx, (s) => doMoveWalls(s, tiles, int(body.dx, 0), int(body.dy, 0)));
 });
 
 // gebouw afbreken (een deel van de kosten komt terug)
