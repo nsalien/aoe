@@ -1,7 +1,11 @@
 // Meldingen op je gsm (Web Push), zonder externe bibliotheek: VAPID-handtekening (ES256) en
 // versleuteling van de inhoud (aes128gcm, RFC 8291), allebei met de WebCrypto van Cloudflare Workers.
-// notifyDue() stuurt ±2 minuten voor een aanval aankomt een melding naar de aanvaller (en de verdediger).
-// Het draait elke minuut in de cron-worker (cron/worker.js) en ook 'lui' bij gewone verzoeken.
+// notifyDue() stuurt ±2 minuten voor een aanval aankomt een melding naar de aanvaller (en de verdediger), notifyBuilds()
+// als een bouwwerk klaar is, notifyAttack() meteen als iemand een aanval op je stad stuurt. Elke soort staat apart aan/uit
+// per toestel (NOTIFY_KINDS). notifyAll() draait elke minuut in de cron-worker (cron/worker.js) en ook 'lui' bij gewone verzoeken.
+
+import { BUILDINGS, AGES } from '../../public/shared/rules.js';
+import { maxBuilds } from '../../public/shared/sim.js';
 
 const enc = new TextEncoder();
 
@@ -92,9 +96,16 @@ async function sendOne(keys, sub, payload, ttl) {
   return res.status;
 }
 
-// stuur een melding naar alle toestellen van een speler; vervallen inschrijvingen worden opgeruimd
-export async function notifyPlayer(db, keys, playerId, payload, ttl = 120) {
-  const subs = (await db.prepare('SELECT id, endpoint, p256dh, auth FROM push_subs WHERE player_id = ? ORDER BY id DESC LIMIT 4').bind(playerId).all()).results;
+// soorten meldingen, elk apart aan/uit per toestel (kolommen in push_subs, migratie 0008)
+export const NOTIFY_KINDS = { attack: 'n_attack', build: 'n_build', march: 'n_march' };
+
+// stuur een melding naar alle toestellen van een speler; vervallen inschrijvingen worden opgeruimd.
+// kind: enkel naar de toestellen waar die soort aan staat (zonder kind: naar alle, bv. de proefmelding)
+export async function notifyPlayer(db, keys, playerId, payload, ttl = 120, kind = null) {
+  const col = kind ? NOTIFY_KINDS[kind] : null;
+  if (kind && !col) throw new Error(`onbekende soort melding: ${kind}`);
+  const subs = (await db.prepare(`SELECT id, endpoint, p256dh, auth FROM push_subs WHERE player_id = ?${col ? ` AND ${col} = 1` : ''} ORDER BY id DESC LIMIT 4`).bind(playerId).all()).results;
+  if (kind) payload = { ...payload, kind };
   let ok = 0;
   for (const sub of subs) {
     try {
@@ -134,13 +145,70 @@ export async function notifyDue(db, now, max = 6) {
     sent += await notifyPlayer(db, keys, m.player_id, {
       ...data, title: 'Je leger komt over {left} aan',
       body: `Aanval op ${where}, aankomst om {clock}. Open het spel en kies: zelf besturen of automatisch.`,
-    }, left / 1000);
+    }, left / 1000, 'march');
     if (m.def_player) {
       sent += await notifyPlayer(db, keys, m.def_player, {
         ...data, title: `Aanval op ${m.town} over {left}!`,
         body: `${m.att_name} valt aan om {clock}. Open het spel om je stad zelf te verdedigen.`,
-      }, left / 1000);
+      }, left / 1000, 'attack');
     }
   }
   return sent;
+}
+
+// Meteen bij het vertrek van een aanval op een stad: de verdediger weet dat er iets aankomt (zonder de troepen).
+// Zelfde tag als de melding ±2 min vooraf, die deze later vervangt. Wordt opgeroepen na /march en na een aanval van een bot.
+export async function notifyAttack(db, marchId, now) {
+  const m = await db.prepare(
+    `SELECT m.id, m.kind, m.arrive_at, t.name AS town, t.player_id AS def_player, p.name AS att_name
+     FROM marches m JOIN towns t ON t.id = m.target_id AND m.target_kind = 'town' JOIN players p ON p.id = m.player_id
+     WHERE m.id = ?`,
+  ).bind(marchId).first();
+  if (!m || m.kind !== 'attack' || m.arrive_at <= now) return 0;
+  return notifyPlayer(db, await vapidKeys(db), m.def_player, {
+    tag: `march-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at,
+    title: `Aanval op ${m.town}!`,
+    body: `${m.att_name} stuurt een leger naar je stad. Aankomst om {clock} (over {left}).`,
+  }, Math.max(60, (m.arrive_at - now) / 1000), 'attack');
+}
+
+// Bouwwerken die klaar zijn: 'een bouwer is vrij'. towns.build_at = het eerstvolgende einde (saveTown houdt het bij).
+// Alles wat sinds build_at klaar is wordt gemeld en build_at schuift naar het volgende einde (de UPDATE met de oude
+// waarde voorkomt dubbele meldingen als de cron en een verzoek tegelijk kijken).
+export async function notifyBuilds(db, now, max = 4) {
+  const rows = (await db.prepare(
+    'SELECT id, player_id, name, state, build_at FROM towns WHERE build_at IS NOT NULL AND build_at <= ? ORDER BY build_at LIMIT ?',
+  ).bind(now, max).all()).results;
+  if (!rows.length) return 0;
+  let keys = null;
+  let sent = 0;
+  for (const r of rows) {
+    let s = null;
+    try { s = JSON.parse(r.state); } catch { /* kapotte stad: enkel build_at opruimen */ }
+    const builds = (s && s.builds) || [];
+    const done = builds.filter((j) => j.end >= r.build_at && j.end <= now);
+    let next = null;
+    for (const j of builds) if (j.end > now && (next === null || j.end < next)) next = j.end;
+    const claim = await db.prepare('UPDATE towns SET build_at = ? WHERE id = ? AND build_at = ?').bind(next, r.id, r.build_at).run();
+    if (!claim.meta.changes || !done.length) continue;
+    const names = done.map((j) => {
+      const b = s.buildings.find((x) => x.id === j.bid);
+      if (!b || !BUILDINGS[b.type]) return null;
+      return b.type === 'tc' ? `je stadscentrum (${AGES[j.to] ? AGES[j.to].name : `niveau ${j.to}`})` : `${BUILDINGS[b.type].name} (niveau ${j.to})`;
+    }).filter(Boolean);
+    if (!names.length) continue;
+    const free = Math.max(1, maxBuilds(s) - builds.filter((j) => j.end > now).length);
+    if (!keys) keys = await vapidKeys(db);
+    sent += await notifyPlayer(db, keys, r.player_id, {
+      tag: `build-${r.id}`, url: '/',
+      title: free === 1 ? `Een bouwer is vrij in ${r.name}` : `${free} bouwers zijn vrij in ${r.name}`,
+      body: `Klaar: ${names.join(', ')}. Geef je bouwers een nieuwe opdracht.`,
+    }, 6 * 3600, 'build');
+  }
+  return sent;
+}
+
+// alles wat op tijd moet uitgaan (cron elke minuut, en als vangnet na gewone verzoeken)
+export async function notifyAll(db, now, max = 6) {
+  return (await notifyDue(db, now, max)) + (await notifyBuilds(db, now, max));
 }

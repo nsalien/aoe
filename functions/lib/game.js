@@ -62,9 +62,17 @@ export async function loadTown(db, id) {
   return row;
 }
 
+// wanneer het eerstvolgende bouwwerk klaar is (voor de melding 'bouwer vrij'); niet voor computerspelers
+export function nextBuildAt(s) {
+  if (!s || s.bot) return null;
+  let m = null;
+  for (const j of s.builds || []) if (m === null || j.end < m) m = j.end;
+  return m;
+}
+
 export async function saveTown(db, town) {
-  const r = await db.prepare('UPDATE towns SET state = ?, version = version + 1 WHERE id = ? AND version = ?')
-    .bind(JSON.stringify(town.state), town.id, town.version).run();
+  const r = await db.prepare('UPDATE towns SET state = ?, build_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+    .bind(JSON.stringify(town.state), nextBuildAt(town.state), town.id, town.version).run();
   if (!r.meta.changes) throw new ConflictError();
   town.version++;
 }

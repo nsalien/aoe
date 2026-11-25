@@ -64,8 +64,10 @@ async function initPush() {
     const reg = await navigator.serviceWorker.register('/sw.js');
     const sub = await reg.pushManager.getSubscription();
     if (sub && Notification.permission === 'granted') {
-      await post('/push/subscribe', sub.toJSON());
+      const r = await post('/push/subscribe', sub.toJSON());
       app.pushOn = true;
+      app.pushEndpoint = sub.endpoint;
+      app.pushPrefs = r.prefs || null;
       renderPanel(true);
     }
   } catch (e) { console.warn('meldingen', e); }
@@ -106,8 +108,10 @@ async function enablePush() {
       sub = await within(reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64(key) }), 20000,
         'De meldingendienst van je gsm antwoordde niet. Controleer je internet en probeer opnieuw.');
     }
-    await post('/push/subscribe', sub.toJSON());
+    const sr = await post('/push/subscribe', sub.toJSON());
     app.pushOn = true;
+    app.pushEndpoint = sub.endpoint;
+    app.pushPrefs = sr.prefs || null;
     const r = await post('/push/test', {});
     app.pushNote = r.sent ? 'Gelukt! Je kreeg net een proefmelding.' : 'Aangezet, maar de proefmelding kon niet verstuurd worden. Probeer "Proefmelding".';
     toast(r.sent ? 'Meldingen staan aan. Je kreeg net een proefmelding.' : 'Meldingen staan aan.', 'ok', 'bell');
@@ -125,6 +129,22 @@ async function enablePush() {
     renderPanel(true);
     refreshPushCards();
   }
+}
+
+// één soort melding aan of uit op dit toestel (aanval op je stad, bouwer vrij, je leger komt aan)
+async function setPushPref(k) {
+  if (!app.pushPrefs || !app.pushEndpoint || !(k in app.pushPrefs)) return;
+  const before = { ...app.pushPrefs };
+  app.pushPrefs = { ...before, [k]: !before[k] }; // meteen tonen; de server bevestigt
+  refreshPushCards();
+  try {
+    const r = await post('/push/prefs', { endpoint: app.pushEndpoint, [k]: app.pushPrefs[k] });
+    if (r.prefs) app.pushPrefs = r.prefs;
+  } catch (e) {
+    app.pushPrefs = before;
+    toast(e.message, 'err', 'bell');
+  }
+  refreshPushCards();
 }
 
 async function disablePush() {
@@ -1475,6 +1495,7 @@ const actions = {
   practice(el) { startPractice(el.dataset.role); },
   pushOn() { enablePush(); },
   pushOff() { disablePush(); },
+  pushPref(el) { setPushPref(el.dataset.k); },
   async pushTest() {
     try {
       const r = await post('/push/test', {});

@@ -11,6 +11,7 @@ import {
   newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age, townScore, loyalty,
 } from '../../public/shared/sim.js';
 import { nobleBlock } from './vassal.js';
+import { notifyAttack } from './push.js';
 import { resolveBattle, slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import { phaseOf, gameTime, peaceEnd, peaceBlock, loadTown, saveTown, travelMs, worldTimes, ConflictError } from './game.js';
@@ -223,11 +224,15 @@ export async function botTick(db, world, now) {
 }
 
 async function insertMarch(db, bot, town, m, now) {
-  await db.prepare(
+  const ins = await db.prepare(
     `INSERT INTO marches (player_id, team_id, kind, from_town, from_x, from_y, target_kind, target_id, target_team, to_x, to_y,
        units, res, depart_at, arrive_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'out')`,
   ).bind(bot.id, bot.team_id, m.kind, town.id, town.x, town.y, m.tkind, m.target.id, m.target.team ?? 0, m.target.x, m.target.y,
     JSON.stringify(m.units || {}), JSON.stringify(m.res || {}), now, now + m.dur).run();
+  // aanval op een speler: die krijgt meteen een melding (botTick draait al op de achtergrond)
+  if (m.kind === 'attack' && m.tkind === 'town' && ins.meta && ins.meta.last_row_id) {
+    try { await notifyAttack(db, ins.meta.last_row_id, now); } catch (e) { console.error('notify', e && e.message); }
+  }
 }
 
 // troepen bij een clanlid terughalen (zoals de knop 'terugroepen')

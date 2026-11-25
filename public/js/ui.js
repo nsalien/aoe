@@ -431,6 +431,8 @@ export function townOverviewHtml(app, live) {
     <dt>Verborgen in opslag</dt><dd>${fmt(protectAmount(live))} per grondstof</dd>
     ${live.terr ? `<dt>Barbarenkamp</dt><dd>${campText(live, app.now())}</dd>` : ''}</dl>
     <div class="actions"><button class="btn" data-action="selectWall">Stadsmuur bekijken</button></div></div>`;
+  // meldingen op je gsm (aanval op je stad, bouwer vrij, ...): ook hier, niet enkel bij de wereldkaart
+  html += pushCardHtml(app);
   return html;
 }
 
@@ -1108,7 +1110,23 @@ function marchCargo(m) {
   return res ? `${units} · buit: ${res}` : units;
 }
 
-// meldingen op je gsm: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt)
+// soorten meldingen, elk apart aan/uit op dit toestel (zelfde namen als NOTIFY_KINDS op de server)
+const PUSH_KINDS = [
+  ['attack', 'shield', 'Aanval op je stad', 'meteen als iemand je aanvalt, en nog eens ±2 minuten voor aankomst'],
+  ['build', 'hammer', 'Een bouwer is vrij', 'als een bouwwerk klaar is (niet als je het spel open hebt)'],
+  ['march', 'swords', 'Je leger komt bijna aan', '±2 minuten vooraf, om zelf te kiezen: zelf besturen of automatisch'],
+];
+
+function pushPrefsHtml(app) {
+  const p = app.pushPrefs;
+  if (!p) return '';
+  return `<div class="push-prefs">${PUSH_KINDS.map(([k, ic, label, sub]) => `
+    <button class="push-pref ${p[k] ? 'on' : ''}" data-action="pushPref" data-k="${k}" role="switch" aria-checked="${!!p[k]}">
+      <span class="pp-ic">${icon(ic)}</span><span class="pp-tx"><b>${label}</b><span>${sub}</span></span><i class="tgl" aria-hidden="true"></i>
+    </button>`).join('')}</div>`;
+}
+
+// meldingen op je gsm: aanval op je stad, bouwer vrij, je leger komt aan (elk apart aan/uit)
 export function pushCardHtml(app) {
   const st = app.pushState;
   if (st === 'unsupported') return '';
@@ -1119,8 +1137,9 @@ export function pushCardHtml(app) {
       <div class="actions"><button class="btn primary small" disabled><span class="spin"></span> Bezig…</button></div></div>`;
   }
   if (st === 'on') {
-    return `<div class="card push-card on">${head}${note(app.pushNote, 'ok')}<p class="small muted" style="margin:0">Staan aan op dit toestel: ±2 minuten voor je leger aankomt (of je stad aangevallen wordt) krijg je een melding.</p>
-      <div class="actions"><button class="btn small" data-action="pushTest">Proefmelding</button><button class="btn small ghost" data-action="pushOff">Uitzetten</button></div></div>`;
+    return `<div class="card push-card on">${head}${note(app.pushNote, 'ok')}<p class="small muted" style="margin:0">Staan aan op dit toestel. Kies welke meldingen je wil krijgen:</p>
+      ${pushPrefsHtml(app)}
+      <div class="actions"><button class="btn small" data-action="pushTest">Proefmelding</button><button class="btn small ghost" data-action="pushOff">Alles uitzetten</button></div></div>`;
   }
   if (st === 'ios-home') {
     return `<div class="card push-card">${head}<p class="small muted" style="margin:0">Op een iPhone kan dat enkel vanuit de app op je beginscherm:
@@ -1135,7 +1154,7 @@ export function pushCardHtml(app) {
     return `<div class="card push-card err">${head}${note('Meldingen zijn geblokkeerd voor dit spel.', 'err')}<p class="small muted" style="margin:0">${how} Kom daarna terug en tik op <b>Opnieuw proberen</b>.</p>
       <div class="actions"><button class="btn small" data-action="pushOn">${icon('bell')} Opnieuw proberen</button></div></div>`;
   }
-  return `<div class="card push-card${app.pushErr ? ' err' : ''}">${head}${note(app.pushErr, 'err')}<p class="small muted" style="margin:0">Krijg ±2 minuten voor je leger aankomt een melding, zodat je op tijd zelf kan kiezen: zelf besturen of automatisch.</p>
+  return `<div class="card push-card${app.pushErr ? ' err' : ''}">${head}${note(app.pushErr, 'err')}<p class="small muted" style="margin:0">Krijg een melding op je gsm bij een aanval op je stad, als een bouwer vrij is en als je leger bijna aankomt. Daarna kies je zelf welke.</p>
     <div class="actions"><button class="btn primary small" data-action="pushOn">${icon('bell')} ${app.pushErr ? 'Opnieuw proberen' : 'Meldingen aanzetten'}</button></div></div>`;
 }
 
