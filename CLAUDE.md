@@ -260,7 +260,9 @@ Daarom:
 
 - Het spel moet werken op **pc (hoofdgebruik, browser) én gsm**, rechtop én liggend. Test 1440×900, 390×844 en 915×412.
   Liggend (`@media (orientation: landscape) and (max-height: 540px)` in `style.css`): menu als kolom links, dunne balk
-  bovenaan, detailpaneel schuift van rechts in. Het bouwmenu (`#buildwrap`) kan overal ingeklapt worden (`app.bbMin`).
+  bovenaan, detailpaneel schuift van rechts in. Op gsm/tablet heeft het schuifpaneel bovenaan een sluitknop (`SHEET_CLOSE` in
+  `main.js`, vooraan in de inhoud van `renderPanel`; breed pijltje omlaag, liggend naar rechts; ook vegen): `closeSheet()` sluit
+  het en laat daarna de keuze los. Op pc verborgen. Het bouwmenu (`#buildwrap`) kan overal ingeklapt worden (`app.bbMin`).
 - Grafisch: warme middeleeuwse stijl (perkament, hout, goud). Nieuwe gebouwen/eenheden tekenen in `art.js` in dezelfde stijl.
 - De server controleert elke actie opnieuw; vertrouw nooit invoer uit de browser.
 
