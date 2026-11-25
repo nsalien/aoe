@@ -649,6 +649,15 @@ export function gainsHtml(app, live, b, to) {
 }
 
 // ---------- gebouwpaneel ----------
+// andere gebouwen op de plek waar je tikte (bv. een klein gebouw achter het stadscentrum): één tik om ze te kiezen
+export function alsoHereHtml(app, live, b) {
+  const ids = app.pickStack || [];
+  if (ids.length < 2 || !ids.includes(b.id)) return '';
+  const others = ids.filter((id) => id !== b.id).map((id) => live.buildings.find((x) => x.id === id)).filter(Boolean);
+  if (!others.length) return '';
+  return `<div class="also-here">${icon('magnifier')}<span>Ook op deze plek:</span>${others.map((o) => `<button class="btn small" data-action="pickBuilding" data-id="${o.id}">${BUILDINGS[o.type].name}${o.level ? ` <small>niv. ${o.level}</small>` : ''}</button>`).join('')}</div>`;
+}
+
 export function buildingPanelHtml(app, live, b) {
   const d = app.data;
   const def = BUILDINGS[b.type];
@@ -656,8 +665,9 @@ export function buildingPanelHtml(app, live, b) {
   const canAct = app.canAct;
   const lvl = b.level;
   let html = `<div class="ph"><img class="thumb" src="${buildingThumb(b.type, Math.max(1, lvl), d.team.color)}" alt="">
-    <div><h2>${def.name}</h2><div class="lvl">${lvl ? `Niveau ${lvl} van ${def.maxLevel}` : 'In aanbouw'}${b.type === 'tc' ? ` · ${AGES[lvl].short}tijd` : ''}</div></div></div>
-    <p class="desc">${def.desc}</p>`;
+    <div><h2>${def.name}</h2><div class="lvl">${lvl ? `Niveau ${lvl} van ${def.maxLevel}` : 'In aanbouw'}${b.type === 'tc' ? ` · ${AGES[lvl].short}tijd` : ''}</div></div></div>`;
+  html += alsoHereHtml(app, live, b);
+  html += `<p class="desc">${def.desc}</p>`;
   // verplaatsen: meteen bovenaan, zodat je de knop ook op een gsm direct ziet
   if (b.type !== 'tc' && b.type !== 'wall') {
     html += `<div class="actions move-row"><button class="btn" data-action="moveBuilding" data-id="${b.id}" ${canAct ? '' : 'disabled'}>${icon('move')} Verplaatsen</button></div>`;

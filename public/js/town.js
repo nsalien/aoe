@@ -1577,20 +1577,70 @@ export class TownView {
     return toWorld(b.x + size / 2, b.y + size / 2);
   }
 
+  // het beeld dat drawBuilding voor dit gebouw tekent, met de schaal (null voor steigers)
+  buildingImage(b) {
+    if (b.level === 0) return null;
+    const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null, this.treeNeed);
+    if (s3) return { spr: s3, sc: 1 };
+    return { spr: A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id, S3.has(b.type) ? 0 : this.treeNeed * bScale(b)), sc: bScale(b) };
+  }
+
+  // raakt het punt (wereldpixels) het getekende gebouw? Kijkt naar de doorzichtigheid van het beeld rond dat punt.
+  hitsBuilding(b, w) {
+    const size = BUILDINGS[b.type].size;
+    const c = toWorld(b.x + size / 2, b.y + size / 2);
+    const im = this.buildingImage(b);
+    if (!im) return Math.abs(w.x - c.x) < size * 22 && w.y < c.y + 6 && w.y > c.y - 30;
+    const { spr, sc } = im;
+    const x0 = c.x - spr.ax * sc; const y0 = c.y - spr.ay * sc;
+    const R = 2.5; // marge in wereldpixels: dunne torens en palen blijven raak te tikken
+    if (w.x < x0 - R || w.y < y0 - R || w.x > x0 + spr.w * sc + R || w.y > y0 + spr.h * sc + R) return false;
+    const cv = spr.cv; const kx = cv.width / (spr.w * sc); const ky = cv.height / (spr.h * sc);
+    if (!this.pickCv) { this.pickCv = document.createElement('canvas'); this.pickCv.width = 8; this.pickCv.height = 8; this.pickCtx = this.pickCv.getContext('2d', { willReadFrequently: true }); }
+    const g = this.pickCtx;
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, 8, 8);
+    try { g.drawImage(cv, (w.x - R - x0) * kx, (w.y - R - y0) * ky, 2 * R * kx, 2 * R * ky, 0, 0, 8, 8); } catch { return true; }
+    const d = g.getImageData(0, 0, 8, 8).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 165) return true; // slagschaduw op de grond (hooguit 60% dekking) telt niet
+    return false;
+  }
+
+  // alle gebouwen onder dit punt, het voorste eerst (zelfde volgorde als het tekenen)
+  buildingsAt(sx, sy) {
+    const s = this.state;
+    const w = this.cam.screenToWorld(sx, sy); const g = toGrid(w.x, w.y);
+    const out = [];
+    s.buildings.forEach((b, k) => {
+      if (!isPlaced(b) || b.hide) return;
+      const size = BUILDINGS[b.type].size;
+      const foot = g.gx >= b.x && g.gx < b.x + size && g.gy >= b.y && g.gy < b.y + size;
+      if (foot || this.hitsBuilding(b, w)) out.push({ b, d: b.x + b.y + size, k });
+    });
+    out.sort((a, b) => b.d - a.d || b.k - a.k);
+    return out.map((o) => o.b);
+  }
+
   pick(sx, sy) {
     const s = this.state;
     if (!s) return null;
     const w = this.cam.screenToWorld(sx, sy);
     const g = toGrid(w.x, w.y);
-    const list = s.buildings.filter(isPlaced).map((b) => ({ b, d: b.x + b.y + BUILDINGS[b.type].size }))
-      .sort((a, b) => b.d - a.d);
-    for (const { b } of list) {
-      const size = BUILDINGS[b.type].size;
-      if (g.gx >= b.x && g.gx < b.x + size && g.gy >= b.y && g.gy < b.y + size) return b;
-      const c = this.footprintCenter(b);
-      const h = b.level > 0 ? (SPRITE_H[b.type] || 55) : 30;
-      if (Math.abs(w.x - c.x) < size * 22 && w.y < c.y && w.y > c.y - h) return b;
+    const hits = this.buildingsAt(sx, sy);
+    if (hits.length) {
+      // staat het gekozen (of net nog gekozen) gebouw op deze plek, dan kiest een nieuwe tik het gebouw erachter, en zo rond.
+      // 'Net nog' = zelfde plek binnen 8 s, ook als het paneel intussen dicht ging (gsm).
+      const last = this.lastPick; const tnow = performance.now();
+      const ref = hits.some((b) => b.id === this.selected) ? this.selected
+        : last && tnow - last.t < 8000 && Math.hypot(sx - last.sx, sy - last.sy) < 24 ? last.id : null;
+      const k = hits.findIndex((b) => b.id === ref);
+      const b = k >= 0 ? hits[(k + 1) % hits.length] : hits[0];
+      this.lastPick = { sx, sy, t: tnow, id: b.id };
+      this.pickStack = hits.length > 1 ? hits.map((x) => x.id) : null;
+      if (hits.length > 1 && k < 0) this.hintBehind();
+      return b;
     }
+    this.pickStack = null;
     // een muurtegel aanklikken = het muurpaneel
     const wall = s.buildings.find((b) => b.type === 'wall');
     if (wall && ((s.walls || []).length || (s.gates || []).length)) {
@@ -1604,6 +1654,16 @@ export class TownView {
       }
     }
     return null;
+  }
+
+  // eenmalige tip (hooguit 3 keer per toestel) wanneer er op de getikte plek meer dan één gebouw staat
+  hintBehind() {
+    let n = 0;
+    try { n = Number(localStorage.getItem('rvdv-hint-behind')) || 0; } catch { /* geen opslag */ }
+    if (n >= 3 || this.hintShown) return;
+    this.hintShown = true;
+    try { localStorage.setItem('rvdv-hint-behind', String(n + 1)); } catch { /* geen opslag */ }
+    if (this.onNotice) this.onNotice('Hier staan meer gebouwen: tik nog eens, of kies bij "Ook op deze plek".', 'magnifier');
   }
 
   click(sx, sy, e, order) {
@@ -2479,6 +2539,7 @@ export class TownView {
         default: { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, t); }
       }
     }
+    this.drawSelXray(ctx, t);
 
     // vuurwerk bij een nieuw tijdperk
     const pn = performance.now();
@@ -3356,6 +3417,49 @@ export class TownView {
       body: idle ? '#a08560' : ['#8b6a43', '#7a5a3a', '#6f7f4a', '#8a5a4a'][w.skin % 4], hat: idle ? null : '#d8ae52',
       weapon: idle || w.phase === 'back' ? null : 'tool', tool: TOOL[w.job], carry: w.phase === 'back' && !idle ? w.job : null,
     }));
+  }
+
+  // schermvak (wereldpixels) van het getekende gebouw
+  buildingRect(b) {
+    const size = BUILDINGS[b.type].size;
+    const c = toWorld(b.x + size / 2, b.y + size / 2);
+    const im = this.buildingImage(b);
+    if (!im) return { x0: c.x - size * 32, y0: c.y - 50, x1: c.x + size * 32, y1: c.y + size * 16, c };
+    const { spr, sc } = im;
+    return { x0: c.x - spr.ax * sc, y0: c.y - spr.ay * sc, x1: c.x - spr.ax * sc + spr.w * sc, y1: c.y - spr.ay * sc + spr.h * sc, c, im };
+  }
+
+  // het gekozen gebouw doorschijnend bovenop tekenen als een ander gebouw ervoor staat:
+  // zo zie je ook een klein gebouw achter het stadscentrum (dat je niet kunt verplaatsen)
+  drawSelXray(ctx, t) {
+    const s = this.state;
+    if (this.selected == null || this.moveB || this.battleMode) return;
+    const k = s.buildings.findIndex((x) => x.id === this.selected);
+    const b = s.buildings[k];
+    if (!b || !isPlaced(b) || b.hide || b.type === 'wall') return;
+    const size = BUILDINGS[b.type].size; const d = b.x + b.y + size;
+    const r = this.buildingRect(b);
+    const area = Math.max(1, (r.x1 - r.x0) * (r.y1 - r.y0));
+    let cover = 0;
+    s.buildings.forEach((o, j) => {
+      if (o === b || !isPlaced(o) || o.hide || o.type === 'wall') return;
+      const od = o.x + o.y + BUILDINGS[o.type].size;
+      if (od < d || (od === d && j < k)) return; // staat erachter
+      const q = this.buildingRect(o);
+      const w = Math.min(r.x1, q.x1) - Math.max(r.x0, q.x0); const h = Math.min(r.y1, q.y1) - Math.max(r.y0, q.y0);
+      if (w > 0 && h > 0) cover = Math.max(cover, (w * h) / area);
+    });
+    if (cover < 0.2) return;
+    const pulse = 0.7 + Math.sin(t * 0.006) * 0.2;
+    ctx.save();
+    if (r.im) { ctx.globalAlpha = 0.55; A.drawSprite(ctx, r.im.spr, r.c.x, r.c.y, r.im.sc); }
+    const w = (size * A.TW) / 2 + 5; const hh = (size * A.TH) / 2 + 2.5;
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = 'rgba(255,210,80,0.9)'; ctx.shadowBlur = 8;
+    ctx.strokeStyle = `rgba(255,228,120,${pulse})`; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(r.c.x - w, r.c.y); ctx.lineTo(r.c.x, r.c.y - hh); ctx.lineTo(r.c.x + w, r.c.y); ctx.lineTo(r.c.x, r.c.y + hh); ctx.closePath(); ctx.stroke();
+    ctx.restore();
   }
 
   drawBuilding(ctx, b, job, t, now, emit) {

@@ -228,13 +228,13 @@ function startGame(data) {
   if (!town) {
     town = new TownView($('#townCanvas'));
     world = new WorldView($('#worldCanvas'));
-    town.onSelect = (b) => { app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
+    town.onSelect = (b) => { app.pickStack = town.pickStack; app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
     town.onGate = async (i, j) => { const r = await act('/gate', { i, j }, 'Poort gebouwd'); if (r) setMode(null); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
     town.onMove = moveBuilding;
     town.onMoveWalls = moveWalls;
-    town.onNotice = (msg) => toast(msg, '', 'move');
+    town.onNotice = (msg, ic) => toast(msg, '', ic || 'move');
     town.onMoveChange = renderMoveHint;
     town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; };
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
@@ -1304,8 +1304,16 @@ const actions = {
     const r = await act('/recall', { id: Number(el.dataset.id) }, 'Troepen keren terug');
     if (r) refresh();
   },
+  // een ander gebouw op de plek waar je tikte (rij 'Ook op deze plek' in het paneel)
+  pickBuilding(el) {
+    const id = Number(el.dataset.id);
+    if (!app.live.buildings.some((x) => x.id === id)) return;
+    app.selBuilding = id; town.selected = id; app.selWall = null; town.selWall = null;
+    town.lastPick = null;
+    renderPanel();
+  },
   deselect() {
-    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null;
+    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null; app.pickStack = null;
     if (world) world.selected = null;
     renderPanel();
   },
