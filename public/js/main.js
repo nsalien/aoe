@@ -810,6 +810,39 @@ function focusBuilding(b) {
   openPanelMobile(true);
 }
 
+// Sluitknop bovenaan het schuifpaneel (gsm): een breed pijltje naar beneden (liggend: naar rechts, het paneel komt dan van
+// rechts). Hoort bij de inhoud zelf, zodat hij bij elke verversing blijft staan; op pc verborgen (CSS).
+const SHEET_CLOSE = '<button class="sheet-close" data-action="closeSheet" aria-label="Sluiten" title="Sluiten">'
+  + '<svg class="sc-down" viewBox="0 0 72 20" aria-hidden="true"><path d="M6 5L36 15L66 5"/></svg>'
+  + '<svg class="sc-right" viewBox="0 0 16 30" aria-hidden="true"><path d="M4 4L12 15L4 26"/></svg></button>';
+
+// paneel wegschuiven; daarna het gekozen gebouw (of de gekozen stad) loslaten, anders blijft het gemarkeerd zonder uitleg
+function closeSheet() {
+  const panel = $('#panel');
+  panel.classList.remove('open');
+  clearTimeout(app.sheetTimer);
+  app.sheetTimer = setTimeout(() => {
+    if (panel.classList.contains('open')) return;
+    if (app.selBuilding == null && !app.selWall && !(world && world.selected)) return;
+    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null; app.pickStack = null;
+    if (world) world.selected = null;
+    renderPanel();
+  }, 280);
+}
+
+// over de sluitknop naar beneden vegen (liggend: naar rechts) sluit ook
+let sheetDrag = null;
+document.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest && e.target.closest('.sheet-close');
+  sheetDrag = b ? { x: e.clientX, y: e.clientY } : null;
+});
+document.addEventListener('pointermove', (e) => {
+  if (!sheetDrag) return;
+  const side = matchMedia('(orientation: landscape) and (max-height: 540px)').matches;
+  if ((side ? e.clientX - sheetDrag.x : e.clientY - sheetDrag.y) > 28) { sheetDrag = null; closeSheet(); }
+});
+document.addEventListener('pointerup', () => { sheetDrag = null; });
+
 function renderPanel(force = false) {
   const panel = $('#panel');
   const key = `${app.view}|${app.selBuilding}|${app.selWall ? `${app.selWall.i},${app.selWall.j}` : ''}|${world && world.selected ? world.selected.kind + world.selected.obj.id : ''}`;
@@ -825,6 +858,7 @@ function renderPanel(force = false) {
   } else {
     html = UI.worldPanelHtml(app, world.selected);
   }
+  html = SHEET_CLOSE + html;
   if (newContext) {
     // ander gebouw of andere weergave: alles vervangen en zacht laten inschuiven
     app.panelKey = key;
@@ -1225,6 +1259,7 @@ const actions = {
     else world.centerOnTile(app.data.town.x, app.data.town.y);
   },
   togglePanel() { $('#panel').classList.toggle('open'); },
+  closeSheet() { closeSheet(); },
   place(el) {
     const type = el.dataset.type;
     if (app.placing === type) { cancelPlace(); return; }
