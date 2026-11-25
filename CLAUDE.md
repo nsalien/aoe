@@ -175,7 +175,8 @@ Daarom:
   stap (render alle niveaus, meet het % gewijzigde pixels: < ±15% is te weinig). Die meting telt ook 'enkel groter' mee:
   bekijk de overzichten zelf en zorg voor nieuwe onderdelen per niveau (vb. wachttoren: houten post op palen → stenen voet
   met houten wachtkamer → steen, traptorentje, wachthuisje → mezekouwen, hoektorentjes → open bovenverdieping met vuurbaken,
-  anker `glow`). Verhoog `VERSION` in `sprite3d.js`.
+  anker `glow`). Verhoog `VERSION` in `sprite3d.js`. Ankers die een model teruggeeft moeten altijd `[x, y, z]` zijn (geen
+  `undefined`): mislukt een model in de werker, dan valt het spel stil terug op de 2D-tekening (test in `tests/game.test.js`).
   De boerderij is ook 3D (akker met ruggen, graan, hek; de wieken van het molentje
   tekent `drawOverlay3d` via het anker `blades`). Kameel/strijdwagen/olifant en rammen zijn nog getekend.
   **Alles scherp bij inzoomen**: gebouwen (`S3.get(..., need)`), muren/torens (`S3.getWall(..., need)`), figuren, spullen en

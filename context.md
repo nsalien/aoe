@@ -374,6 +374,11 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     donkere balken); daken krijgen vanaf niveau 4 nokversiering per volk en op 5 goud. Open loodsen van Egypte, Babylon en
     Perzië kregen een plat dak in plaats van een leien zadeldak. Alle 6 volkeren nagekeken. `VERSION` 9.
 
+44. **Fout: wachttoren 3 en 4 toonden de oude 2D-tekening** (gemeld met een schermafbeelding: "niveau 3 ziet er bij mij
+    anders uit"). Het model gaf een leeg anker `glow` mee; de werker liep daarop vast en het spel viel terug op 2D. Opgelost
+    in het model en in `render-worker.js` (lege ankers overslaan), plus een test die elk model van elk volk en niveau bouwt
+    en de ankers nakijkt. Nagekeken in de browser: alle torens 1-5 in 3D.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
