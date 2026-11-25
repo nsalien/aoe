@@ -2012,3 +2012,13 @@ test('bots: geen aanval op een speler die meer dan dubbel zo sterk is, ook al zo
   for (let k = 0; k < 20; k++) { t += 60000; await cronTick(db, t); }
   assert.equal(sql("SELECT COUNT(*) AS c FROM marches WHERE kind = 'attack' AND target_kind = 'town' AND target_id = ?", anna.tid)[0].c, 0);
 });
+
+test('beeldsnelheid: hooguit ±60 beelden per seconde, ook op een gsm-scherm van 90/120/144 Hz', async () => {
+  const FX = await import('../public/js/fx.js');
+  for (const [hz, want] of [[60, 60], [90, 45], [120, 60], [144, 48]]) {
+    const p = new FX.Pacer(); let drawn = 0; let t = 0;
+    for (let i = 0; i < hz * 3; i++) { t += 1000 / hz; if (p.ok(t) && i >= hz) drawn++; }
+    assert.ok(Math.abs(drawn / 2 - want) <= 1, `${hz} Hz: ${drawn / 2} beelden/s`);
+    assert.ok(Math.abs(FX.frameMs - 1000 / want) < 0.5);
+  }
+});

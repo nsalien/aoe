@@ -7,6 +7,7 @@ import { stepTo, queueOrder, FB, FORMS, formsFor, mobile, aliveN, battleTime, de
 import { SiegeView, toWorld } from './siegeview.js';
 import { icon } from './icons.js';
 import { setHTML } from './dom.js';
+import * as FX from './fx.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const mmss = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -560,6 +561,7 @@ export class BattleView {
   frame(t) {
     this.raf = requestAnimationFrame((tt) => this.frame(tt));
     if (this.root.hidden) return;
+    if (!(this.pacer || (this.pacer = new FX.Pacer())).ok(t)) return; // hooguit ±60 beelden per seconde
     const dt = Math.min(100, t - (this.lastT || t));
     this.lastT = t;
     const st = this.state;

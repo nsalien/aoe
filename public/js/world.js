@@ -11,7 +11,7 @@ const { toWorld } = isoFns(WTW, WTH);
 export class WorldView {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false }); // ondoorzichtig: elk beeld begint met een volle achtergrond
     this.cam = new Camera(canvas, { zoom: 1.2, minZoom: 0.35, maxZoom: 3 });
     this.towns = [];
     this.camps = [];
