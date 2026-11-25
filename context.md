@@ -353,6 +353,11 @@ bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraa
     volgen het niveau, en de eigen stadscentra van de volkeren hebben extra's op niveau 4 en 5. Nu minstens ±15% verschil per
     stap bij alle gebouwen en volkeren (meestal 25-70%). `VERSION` 7: de browser rendert de gebouwen één keer opnieuw.
 
+40. **Muren en poorten verplaatsen** (gevraagd: "op dezelfde manier als gebouwen"). Tik op een muurstuk: bovenaan het paneel
+    'Dit muurstuk' of 'Rechte muur (N)' (het hele rechte stuk, poorten gaan mee); op een poort: 'Poort verplaatsen' (de oude
+    opening wordt muur). Dan tikken of slepen en 'Zet hier' (muis: klikken). Gratis; vrije bouwgrond; poorten blijven in een
+    recht stuk muur; nooit dicht zonder poort. Getest op gsm (aanraking) en pc, ook na herladen.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
