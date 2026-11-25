@@ -18,6 +18,11 @@ import { phaseOf, gameTime, peaceEnd, peaceBlock, loadTown, saveTown, travelMs, 
 import { botEconomy, botLevel, armyValue, botStyle, savingFor, BOT_TIERS, tierOf, botTarget } from './botbrain.js';
 
 export const BOT_MAX = 12;
+// Aanvallen op steden: enkel tegen wie ongeveer even sterk is (score t.o.v. de eigen score). Alleen tot soloMax x,
+// samen met de clan (in golven) tot waveMax x; vanaf waveFrom x valt de clan altijd samen aan. De golven komen
+// telkens 'step' speluren na elkaar aan (10 minuten bij snelheid 1); wie later dan 'late' uur na de eerste golf zou
+// aankomen, doet niet meer mee. De andere bots van de clan krijgen 'gather' uur om aan de beurt te komen.
+export const BOT_WAR = { minRatio: 0.45, soloMax: 1.5, waveMax: 1.9, waveFrom: 0.8, step: 1 / 6, late: 3, gather: 0.25 };
 // namen van computerspelers en hun steden
 const BOT_NAMES = [
   ['Graaf Boudewijn', 'Ravenstein'], ['Vrouwe Machteld', 'Lindenhof'], ['Heer Gijsbrecht', 'Amstelburcht'],
@@ -331,57 +336,124 @@ async function military(db, world, bot, town, now, ctx) {
   if (value < 60 + 60 * age(s)) return out;
   const { warEnd } = worldTimes(world);
   const smithy = bLevel(s, 'smithy');
-  const sim = (ts) => resolveBattle({
-    attUnits: send, attSmithy: smithy, groups: [{ key: 'home', units: scale(ts.units, L.edge * tier.edge) }], defSmithy: bLevel(ts, 'smithy'),
-    wall: effectiveWall(ts), towerDef: towerDefense(ts), baseDef: townBaseDef(ts), attTech: s.tech || null, defTech: ts.tech || null,
-  });
+  // golven na elkaar (eerst de eerste golf, dan wat er overblijft tegen de volgende): wint de laatste?
+  const simWaves = (ts, waves) => {
+    let def = scale(ts.units, L.edge * tier.edge); let r = null;
+    for (const u of waves) {
+      r = resolveBattle({
+        attUnits: u, attSmithy: smithy, groups: [{ key: 'home', units: def }], defSmithy: bLevel(ts, 'smithy'),
+        wall: effectiveWall(ts), towerDef: towerDefense(ts), baseDef: townBaseDef(ts), attTech: s.tech || null, defTech: ts.tech || null,
+      });
+      if (r.attWins) return r;
+      def = r.groupsLeft[0].units;
+    }
+    return r;
+  };
+  const nextAttAt = () => now + L.attackHours * tier.attack * H * (0.75 + ((now / 1000) % 50) / 100);
+  const myLord = s.vas && s.vas.until > now ? s.vas.ltown : 0;
+  const clanKey = `clan:${bot.team_id}`;
+  const cr = await db.prepare('SELECT v FROM config WHERE k = ?').bind(clanKey).first();
+  const clan = cr ? JSON.parse(cr.v) : null;
+
+  // 4a. de clan valt samen aan: sluit aan als volgende golf, BOT_WAR.step na de vorige (eigen wachttijd telt niet)
+  if (clan && clan.wave && Array.isArray(clan.waves) && clan.waves.length && now < clan.until && clan.t !== myLord
+    && !clan.waves.some((w) => w.p === bot.id)) {
+    const tr = await db.prepare('SELECT t.id, t.x, t.y, t.state, p.created_at, p.team_id FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
+      .bind(clan.t).first();
+    if (tr && tr.team_id !== bot.team_id) {
+      const ts = JSON.parse(tr.state);
+      ensureTerritory(ts, tr.id);
+      const last = clan.waves[clan.waves.length - 1].at;
+      const at = Math.max(now + travelMs(world, home, tr, slowestSpeed(send, s.tech)), last + BOT_WAR.step * H);
+      const ratio = townScore(ts) / Math.max(1, myScore);
+      const own = ts.vas && ts.vas.until > now && ts.vas.lord === bot.id;
+      if (!own && at <= clan.waves[0].at + BOT_WAR.late * H && at <= warEnd && !peaceBlock(world, bot.created_at, tr.created_at, now, at)
+        && ratio <= BOT_WAR.waveMax && simWaves(ts, [...clan.waves.map((w) => w.u), send]).attWins) {
+        const nv = JSON.stringify({ ...clan, waves: [...clan.waves, { p: bot.id, at, u: send }] });
+        const u = await db.prepare('UPDATE config SET v = ? WHERE k = ? AND v = ?').bind(nv, clanKey, cr.v).run();
+        if (u.meta.changes) {
+          take(s, send);
+          // vertrekt nu en loopt in een rustiger tempo, zodat hij precies op zijn beurt aankomt
+          out.marches.push({ kind: 'attack', tkind: 'town', target: { id: tr.id, x: tr.x, y: tr.y, team: tr.team_id }, units: send, dur: at - now });
+          mem.hit[tr.id] = now + 10 * H;
+          mem.nextAtt = nextAttAt();
+          out.log.push(`golf ${clan.waves.length + 1} op stad ${tr.id}`);
+          return out;
+        }
+      }
+    }
+  }
+
+  // loopt er al een gezamenlijke aanval van de clan (waar hij niet bij kan), dan valt hij enkel alleen aan
+  const busy = !!(clan && clan.wave && now < clan.until);
   if (now >= (mem.nextAtt || 0)) {
-    // samen met de clan: liefst hetzelfde doelwit als een clanlid net koos
-    const cr = await db.prepare('SELECT v FROM config WHERE k = ?').bind(`clan:${bot.team_id}`).first();
-    const clan = cr ? JSON.parse(cr.v) : null;
-    // steden die net door een bot aangevallen werden, laten alle bots even met rust (behalve de clan die samen aanvalt)
+    // steden die net door een bot aangevallen werden, laten alle bots even met rust
     const prey = new Map((await db.prepare("SELECT k, v FROM config WHERE k LIKE 'prey:%'").all()).results.map((r) => [Number(r.k.slice(5)), Number(r.v)]));
     const rows = (await db.prepare(
       'SELECT t.id, t.x, t.y, t.state, p.created_at, p.team_id, p.bot FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id != ?',
     ).bind(bot.team_id).all()).results;
+    // de legers van de andere bots in de clan (voor een gezamenlijke aanval in golven)
+    const mateList = (await db.prepare('SELECT t.x, t.y, t.state FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id = ? AND p.bot = 1 AND t.id != ?')
+      .bind(bot.team_id, town.id).all()).results.map((r) => {
+      const ms = JSON.parse(r.state); const a = armyHome(ms); delete a.noble;
+      const u = part(a, 1 - L.reserve); for (const k of Object.keys(a)) if (UNITS[k].siege) u[k] = a[k];
+      return { u, x: r.x, y: r.y, tech: ms.tech || null };
+    }).filter((m) => armyValue(m.u) >= 60).sort((a, b) => armyValue(b.u) - armyValue(a.u));
+    const mates = mateList.map((m) => m.u);
     // heren van clanleden: een gewonnen aanval bevrijdt die clanleden
     const lords = new Set((await db.prepare('SELECT v.lord_town FROM vassals v JOIN players p ON p.id = v.player_id WHERE p.team_id = ?')
       .bind(bot.team_id).all()).results.map((r) => r.lord_town));
-    const myLord = s.vas && s.vas.until > now ? s.vas.ltown : 0;
     const nob = s.units.noble || 0;
     const vassalCount = nob ? (await db.prepare('SELECT COUNT(*) AS c FROM vassals WHERE lord_player = ?').bind(bot.id).first()).c : 0;
     let best = null;
     for (const t of rows) {
       if (t.id === myLord) continue; // zijn eigen heer valt een vazal niet aan
       if (now < (mem.hit[t.id] || 0)) continue;
-      const together = clan && clan.t === t.id && now < clan.until;
-      if (!together && now < (prey.get(t.id) || 0)) continue;
+      if (now < (prey.get(t.id) || 0)) continue;
       const dur = travelMs(world, home, t, slowestSpeed(send, s.tech));
       if (now + dur > warEnd || peaceBlock(world, bot.created_at, t.created_at, now, now + dur)) continue;
       const ts = JSON.parse(t.state);
       ensureTerritory(ts, t.id);
       if (ts.vas && ts.vas.until > now && ts.vas.lord === bot.id) continue; // zijn eigen vazal
-      // geen jacht op veel zwakkere steden (minder dan 45% van zijn eigen score), tenzij die hem eerst aanviel
-      if (townScore(ts) < myScore * 0.45 && !((mem.foe || {})[t.id] > now)) continue;
-      const r = sim(ts);
-      if (!r.attWins) continue;
+      // enkel tegen wie ongeveer even sterk is: niet veel zwakker (tenzij die hem eerst aanviel), niet veel sterker
+      // (alleen tot BOT_WAR.soloMax x zijn score, samen met de clan tot BOT_WAR.waveMax x)
+      const ratio = townScore(ts) / Math.max(1, myScore);
+      if (ratio < BOT_WAR.minRatio && !((mem.foe || {})[t.id] > now)) continue;
+      if (ratio > BOT_WAR.waveMax) continue;
+      let r = ratio <= BOT_WAR.soloMax ? simWaves(ts, [send]) : null;
+      let wave = !!(r && r.attWins && mates.length && !busy && ratio >= BOT_WAR.waveFrom); // tegen een gelijkwaardige: samen
+      if (!(r && r.attWins)) {
+        if (!mates.length || busy) continue;
+        r = simWaves(ts, [send, ...mates]);
+        if (!r.attWins) continue;
+        wave = true;
+      }
       let loot = 0; const prot = protectAmount(ts);
       for (const k of RES) loot += Math.max(0, (ts.res[k] || 0) - prot);
       // met edelmannen: liefst een stad waar ze iets kunnen doen (en waarvan de trouw al laag staat)
-      const conquer = nob > 0 && r.attLoss < 0.35 && !nobleBlock(ts, now, myScore, vassalCount);
-      const score = ((Math.min(loot, 6000) + 400) / (1 + dur / H)) * (t.bot ? 0.35 : 1) * (together ? 3 : 1)
+      const conquer = !wave && nob > 0 && r.attLoss < 0.35 && !nobleBlock(ts, now, myScore, vassalCount);
+      // liefst iemand van ongeveer zijn eigen sterkte
+      const near = 1 / (1 + 1.5 * Math.abs(Math.log(Math.max(0.05, ratio))));
+      const score = ((Math.min(loot, 6000) + 400) / (1 + dur / H)) * (t.bot ? 0.35 : 1) * near
         * (lords.has(t.id) ? 3 : 1) * (conquer ? 2 + (100 - loyalty(ts)) / 25 : 1);
-      if (!best || score > best.score) best = { t, dur, score, conquer };
+      if (!best || score > best.score) best = { t, dur, score, conquer, wave };
     }
     if (best) {
       if (best.conquer) send.noble = nob;
       take(s, send);
       out.marches.push({ kind: 'attack', tkind: 'town', target: { id: best.t.id, x: best.t.x, y: best.t.y, team: best.t.team_id }, units: send, dur: best.dur });
       mem.hit[best.t.id] = now + (best.conquer ? 2 : 10) * H; // niet steeds dezelfde stad (behalve om ze te onderwerpen)
-      mem.nextAtt = now + L.attackHours * tier.attack * H * (0.75 + ((now / 1000) % 50) / 100);
-      out.clan = { t: best.t.id, until: now + H };
+      mem.nextAtt = nextAttAt();
+      // de eerste golf: de andere bots van de clan sluiten aan, telkens BOT_WAR.step later. Wie verder weg woont, moet
+      // dat ook halen (ze komen binnen BOT_WAR.gather aan de beurt): de eerste golf loopt dan wat rustiger.
+      let first = now + best.dur;
+      if (best.wave) {
+        for (const m of mateList) first = Math.max(first, now + travelMs(world, m, best.t, slowestSpeed(m.u, m.tech)) + (BOT_WAR.gather - BOT_WAR.step) * H);
+        out.marches[out.marches.length - 1].dur = first - now;
+      }
+      if (!busy) out.clan = { t: best.t.id, wave: best.wave, until: best.wave ? first + BOT_WAR.late * H : now + H, waves: [{ p: bot.id, at: first, u: send }] };
       out.prey = { id: best.t.id, until: now + L.prey * H };
-      out.log.push(`aanval op stad ${best.t.id}${best.conquer ? ' met edelman' : ''}`);
+      out.log.push(`aanval op stad ${best.t.id}${best.conquer ? ' met edelman' : ''}${best.wave ? ' (golf 1, de clan volgt)' : ''}`);
       return out;
     }
     mem.nextAtt = now + 0.75 * H; // niemand te verslaan: straks opnieuw kijken

@@ -151,6 +151,11 @@ Op de kaart, bij een stad en in de ranglijst staat "computer" met hun sterkte. *
 goede balans t.o.v. de echte spelers, wat mindere en wat sterkere bots"): elke bot is zwak, gemiddeld of sterk en groeit enkel
 tot een doelscore t.o.v. de actieve echte spelers (zwak ±70% van de mediaan, gemiddeld de mediaan, sterk zo goed als de beste);
 bots vallen geen veel zwakkere speler aan (< 45% van hun score), tenzij uit wraak. Een speler die stopt, laten ze met rust.
+**Doelwit en clanaanvallen** (gevraagd: "bots vallen echte spelers aan na hun 24 u; niet wie dubbel zo sterk is, eerder wie
+gelijkaardig is; als team gecoördineerd, elke bot een aanval met ±10 minuten verschil"): alleen tegen 0,45–1,5× hun score
+(liefst rond 1), samen tot 1,9×. Tegen wie minstens 0,8× zo sterk is (of als het alleen niet lukt maar samen wel) valt de
+clan in golven aan: elke bot één leger, telkens 10 speelminuten na elkaar. Sinds de cron-worker draait, komt er ook elke
+minuut een bot aan de beurt als niemand online is.
 
 **Punten**: opbouwpunten (gebouwen, onderzoek, dorpelingen, troepen; monument +1500/niveau, kathedraal +600/niveau)
 + 20% van de punten van je vazallen + gevechtspunten.
