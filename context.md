@@ -148,6 +148,10 @@ registratie; oude spelers kregen een vast willekeurig volk.
      de flanken); **lijn trekken** (rechts slepen, gsm: knop Lijn) = richting en breedte. Flank/rug en stormloop doen meer
      schade. **Moed**: wie zwaar verliest of omsingeld wordt, vlucht (witte vlag) en hergroepeert na rust; vlucht een heel
      leger, dan is de slag verloren. Kijkt niemand meer (30 s), dan rekent de server de rest automatisch uit.
+  5. **Replay** (gevraagd: "als een gevecht automatisch verliep, achteraf een replay van hoe de oorlog ging, zonder zelf te
+     besturen; 24 uur beschikbaar"): elke automatisch uitgerekende slag (stad, roverskamp, overval van de barbaren) kan je 24 uur
+     lang naspelen via 'Bekijk de replay' in het rapport (of 'Replay' in het logboek bij een overval). De computer leidt beide
+     legers in de echte stad; de slag wordt bijgestuurd zodat de winnaar en de verliezen kloppen met het rapport.
 
 **Computerspelers (bots)** (gevraagd: "bots die als echte spelers hun stad uitbouwen en je na je 24 uur vrede aanvallen,
 in eigen clans die samenwerken"): standaard 4 bots in clans van 2 (beheer: aantal 0–12 en niveau makkelijk/normaal/sterk).
@@ -510,12 +514,26 @@ minuut een bot aan de beurt als niemand online is.
     tegen de barbaren (de computer leidt hen, ze komen uit de richting van hun kamp). Een groot kamp verwoesten geeft
     meer buit. Getest op pc en gsm (venster en balk passen op 390 breed).
 
+58. **Replay van automatische slagen** (gevraagd: "als er een gevecht 'automatisch' verliep, achteraf een replay van hoe de oorlog
+    is gegaan zonder zelf te besturen; tot 24 uur na de aanval of verdediging"). De server bewaart per automatische slag een klein
+    recept (±1,5–5 kB, tabel `replays`, enkel als er een echte speler bij is); de browser speelt de slag na met de bestaande
+    slagmotor (computer tegen computer, `replayBattle`) en stuurt ze bij (`setFate`), want het automatische gevecht (`resolveBattle`)
+    en de live slag zijn verschillende modellen: zonder bijsturing won in de proef soms de andere kant. Nu: winnaar altijd juist,
+    verliezen van de verliezer exact (wie vlucht wordt neergehaald), van de winnaar ±80%; een slag duurt ±0:30–2:40. Knoppen:
+    pauze, 1×/2×/4×/8×, Einde, Opnieuw; eindscherm met de cijfers van het rapport. Ook voor roverskampen, voor 'Automatisch' gekozen
+    slagen (uitslagkaartje) en voor overvallen van de barbaren (logboek). Getest: Node (determinisme na JSON, winnaar en verliezen,
+    routes, 24 u-grens, rechten) en in Chromium op pc, gsm rechtop en liggend.
+    Onderweg gevonden: rook boven puin van een muur op tegels met negatieve coördinaten gaf een negatieve straal (`A.smoke`), waardoor
+    de rest van het beeld niet getekend werd (ook in gewone belegeringen). Opgelost.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
   in een rechte lijn, ook over water.
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
+- Replay: de verliezen van de winnaar kloppen niet altijd per soort (schutters achteraan worden soms niet geraakt); het eindscherm
+  toont daarom de cijfers van het rapport. Een overval-replay gebruikt de stad zoals ze nu is (niet zoals tijdens de overval).
 - Aanvallen wachten niet tot de aanvaller online komt (zie §3); er is nu wel een melding + aftelling. Mogelijke
   uitbreiding: een wachttijd voor de stad tot de aanvaller online komt.
 - Headless Chromium meldt meldingen altijd als 'geblokkeerd': de echte inschrijving is niet in de container te testen
