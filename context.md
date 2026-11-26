@@ -474,6 +474,11 @@ minuut een bot aan de beurt als niemand online is.
     (opent meteen de chat op het juiste kanaal), '(n)' in de titel van het tabblad, een getal per kanaal en een melding met
     wie wat schreef (tik = naar de chat). Geen extra verzoeken: zit in de gewone peiling van 20 s. Getest op pc, gsm en liggend.
 
+55. **Mooiere poorten** (gemeld: "de poorten van de muur vind ik niet zo mooi vergeleken met de rest"). Vroeger: twee gewone
+    muurtorens met een vlakke getekende balk en platte bruine deuren. Nu een 3D-poortgebouw dat per muurniveau beter wordt
+    (houten torens met loopbrug → stenen voet en dakjes → stenen poortgebouw met boog en valhek → vaandels en wapenschild →
+    torenspitsen en goud), met deuren en valhek die echt opengaan (4 standen) en fakkels die 's nachts gloeien.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog

@@ -6,7 +6,8 @@
 // - de beelden die vorige keer gebruikt werden (lijst in localStorage) worden bij het opstarten in één keer uit de
 //   cache gehaald (`preloaded`), zodat het spel meteen in 3D start in plaats van eerst alles in 2D te tekenen;
 // - een figuur waarvan een beeld van de animatie nog niet klaar is, toont een ander beeld van dezelfde figuur.
-import { HAS_3D } from './models3d.js';
+import { HAS_3D, GATE_STATES } from './models3d.js';
+export { GATE_STATES };
 import { HAS_PROP } from './propmodels.js';
 
 const SCALE = typeof window !== 'undefined' && (window.devicePixelRatio || 1) > 1.5 && window.innerWidth > 900 ? 3 : 2;
@@ -231,6 +232,17 @@ export function getWall(seg, level, hPx, need = 0) {
   const dx = Math.round((seg.x1 - seg.x0) * 100) / 100; const dy = Math.round((seg.y1 - seg.y0) * 100) / 100;
   const h = Math.round((hPx / 39.19) * 100) / 100;
   return tiered(`wall|${level}|${dx}|${dy}|${h}|${seg.tower ? 1 : 0}`, { wall: { dx, dy, h, level, tower: !!seg.tower } }, need);
+}
+
+// poortgebouw in de muur (models3d.js gateScene): niveau van de muur, richting van de muur, stand van de deuren
+// (0 dicht .. GATE_STATES open). peekGate geeft enkel wat al klaar is (zonder iets te laten renderen).
+export function getGate(level, ax, st, need = 0) {
+  if (!enabled()) return null;
+  return tiered(`gate|${level}|${ax}|${st}`, { gate: { level, ax, st } }, need);
+}
+export function peekGate(level, ax, st) {
+  if (!enabled()) return null;
+  return cache.get(`gate|${level}|${ax}|${st}`) || null;
 }
 
 // figuur (mens of ruiter) in 3D; L = de opties van de getekende figuur, mode = idle/walk/work, f = beeld 0..7

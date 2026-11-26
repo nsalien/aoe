@@ -1395,6 +1395,23 @@ export class TownView {
   }
 
   drawGate(ctx, seg, level) {
+    // 3D-poortgebouw (models3d.js gateScene): een beeld per stand van de deuren; zolang een stand niet klaar is, de
+    // dichtstbijzijnde die er al is. Nog niets: de getekende poort hieronder.
+    const open3 = this.gateOpenness(seg, this.now);
+    const st = Math.round(open3 * S3.GATE_STATES);
+    let g3 = S3.getGate(level, seg.ax, st, this.treeNeed);
+    for (let d = 1; !g3 && d <= S3.GATE_STATES; d++) g3 = S3.peekGate(level, seg.ax, st - d) || S3.peekGate(level, seg.ax, st + d);
+    if (g3) {
+      const w = toWorld(seg.cx, seg.cy);
+      A.drawSprite(ctx, g3, w.x, w.y, 1);
+      // de andere standen alvast laten maken (dan gaan de deuren vloeiend open)
+      const pk = `${level}|${seg.ax}`;
+      if (!this.gatePre) this.gatePre = new Set();
+      if (!this.gatePre.has(pk)) { this.gatePre.add(pk); for (let k = 0; k <= S3.GATE_STATES; k++) S3.getGate(level, seg.ax, k); }
+      const a = g3.anchors && g3.anchors.flag;
+      if (a) A.flag(ctx, w.x + a[0], w.y + a[1], 16, this.team || '#c0392b', performance.now(), 0.7);
+      return;
+    }
     const stone = level >= 3;
     const cx = seg.cx; const cy = seg.cy;
     const wide = (seg.w || 1) >= 2;
@@ -3369,6 +3386,15 @@ export class TownView {
       }
     }
     for (const seg of segs) {
+      if (seg.gateTile) {
+        // fakkels naast de doorgang van het poortgebouw
+        const along = seg.ax === 'x'; const hu = wallLevel >= 3 ? 0.59 : 0.6; const v = wallLevel >= 3 ? 0.37 : 0.33;
+        for (const sg of [-1, 1]) {
+          const [px, py] = A.P(seg.cx + (along ? sg * hu : v), seg.cy + (along ? v : sg * hu), 20);
+          FX.drawGlow(ctx, px, py, 18, FX.FIRE, night * (0.75 + Math.sin(t * 0.017 + px) * 0.15));
+        }
+        continue;
+      }
       if (!seg.gate) continue;
       const h = this.wallHeight(seg, wallLevel);
       const [px, py] = A.P((seg.x0 + seg.x1) / 2, (seg.y0 + seg.y1) / 2, h + 10);

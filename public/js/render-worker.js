@@ -3,7 +3,7 @@
 // (ImageBitmap, zonder kopie naar de hoofdthread) en het bewaren in Cache Storage. De hoofdthread hoeft dan niets meer
 // te tekenen of te coderen. Anders stuurt hij de ruwe pixels en doet sprite3d.js het zoals vroeger.
 import { render, ZPX } from './render3d.js';
-import { build, wallScene } from './models3d.js';
+import { build, wallScene, gateScene } from './models3d.js';
 import { figureScene } from './figmodels.js';
 import { propScene } from './propmodels.js';
 
@@ -28,14 +28,14 @@ let storeP = null;
 const openStore = (name) => storeP || (storeP = (typeof caches !== 'undefined' ? caches.open(name) : Promise.reject(new Error('geen cache'))).catch(() => null));
 
 self.onmessage = async (e) => {
-  const { id, type, level, civ, variant, scale, wall, low, fig, prop, store, url } = e.data;
+  const { id, type, level, civ, variant, scale, wall, gate, low, fig, prop, store, url } = e.data;
   let msg;
   try {
     let sc; let r;
     if (prop) { sc = propScene(prop.kind, prop.v); r = render(sc, scale, { ao: low ? 3 : 4, aa: true, fill: 0.3, ground: prop.kind === 'tree' || prop.kind === 'campfront' ? false : undefined }); } else {
-      sc = fig ? figureScene(fig.kind, fig.L, fig.mode, fig.f) : wall ? wallScene(wall) : build(type, level, civ, variant);
+      sc = fig ? figureScene(fig.kind, fig.L, fig.mode, fig.f) : gate ? gateScene(gate) : wall ? wallScene(wall) : build(type, level, civ, variant);
       // scherpe versies (scale > 3) van gebouwen en muren krijgen ook gladde randen
-      r = render(sc, scale, fig || wall ? { ground: false, ao: fig ? 3 : low ? 3 : 5, fill: fig ? 0.5 : 0.16, aa: !!fig || scale > 3 } : { apron: sc.apron, ao: low ? 3 : 5, aa: scale > 3 });
+      r = render(sc, scale, fig || wall || gate ? { ground: false, ao: fig ? 3 : low ? 3 : 5, fill: fig ? 0.5 : 0.16, aa: !!fig || scale > 3 } : { apron: sc.apron, ao: low ? 3 : 5, aa: scale > 3 });
     }
     const anchors = {};
     for (const k of Object.keys(sc.anchors || {})) { const a = sc.anchors[k]; if (!Array.isArray(a)) continue; const [x, y, z] = a; anchors[k] = [(x - y) * 32, (x + y) * 16 - z * ZPX]; }
