@@ -12,7 +12,7 @@
 // stormlopen en de formatie veranderen de schade.
 // Vaste tikken van 100 ms en volledig deterministisch (geen Math.random, Math.hypot of goniometrie), zodat de
 // server (gezaghebbend) en de browser (vloeiend, rekent zelf verder) exact hetzelfde verloop zien.
-import { UNITS, FIELD, TOWER, TC_POS, TECH_IDS, REPLAY } from './rules.js';
+import { UNITS, BUILDINGS, FIELD, TOWER, TC_POS, TECH_IDS, REPLAY } from './rules.js';
 import { hitDamage } from './skirmish.js';
 import { territory, tileIndex, tileOf, ringOf, ringForAge, T_MIN, T_MAX, TILE } from './territory.js';
 import { occupied, isBuildable, clearedSet, insideSet, bLevel, age as townAge } from './sim.js';
@@ -46,13 +46,18 @@ export const FB = {
 };
 
 // Replay van een automatisch uitgerekende slag: de uitslag ligt al vast (resolveBattle in battle.js). Met setFate()
-// speelt de computer de slag voor beide kanten na en stuurt ze bij zodat ze daar uitkomt: per soort (en groep) sneuvelen
-// er hooguit zoveel als in het rapport, enkel de echte winnaar kan winnen, de winnaar vlucht nooit en de verliezer pas
-// laat, en de schade wordt bijgestuurd (verliezen van de winnaar in hetzelfde tempo, de winnaar steeds sterker na 'ramp').
+// speelt de computer de slag voor beide kanten na en stuurt ze bij zodat ze daar precies uitkomt: per soort (en groep)
+// sneuvelen er exact zoveel soldaten als in het rapport, voor beide kanten. Een klap die er meer zou doden, verwondt enkel;
+// de verliezer blijft overeind (en valt de soorten aan die nog verliezen moeten lijden) tot de winnaar zijn verliezen heeft;
+// enkel de echte winnaar kan winnen, de winnaar vlucht nooit, de verliezer pas op het einde en wie vlucht wordt neergehaald.
 export const FATE = {
   ramp: 45000, rampK: 15000, maxM: 12, // na 45 s slag doet de winnaar elke 15 s één keer zijn schade extra (hooguit 12x)
+  push: 40000, // zolang de winnaar nog verliezen moet lijden, valt de verliezer na 40 s zelf aan (wie stilstaat)
+  stall: 15000, // ... en lijdt hij 15 s lang geen verliezen meer, dan trekken zijn regimenten die nog moeten bloeden naar de vijand
+  pace: 90000, // de winnaar heeft zijn verliezen liefst binnen 90 s slag
+  stuck: 45000, // zit het daarna nog vast, dan valt er elke seconde één soldaat die nog moet sneuvelen (klap of pijl van de dichtste vijand)
   mayRout: 90000, routAll: 150000, // de verliezer mag op de vlucht slaan na 90 s (of als hij al 75% kwijt is); na 150 s vlucht alles
-  end: 210000, // vangnet: dan is de slag sowieso voorbij
+  end: 240000, // laatste vangnet: dan is de slag sowieso voorbij (wie dan nog moest sneuvelen, bezwijkt aan zijn wonden)
 };
 
 const SQ = (v) => v * v;
@@ -368,56 +373,136 @@ function nearestStand(st, nv, side, k, x, y, ok = null, maxR = 8) {
 }
 
 // ---------- replay: de vaste uitslag van een automatisch uitgerekende slag (zie FATE) ----------
+// Per pool (kant|groep|soort, zoals battleOutcome telt) ligt vast hoeveel soldaten sneuvelen (q); d = hoeveel al.
+// Gewonden tellen als levend (zoals de figuren op het scherm), dus wat je ziet, klopt met het rapport.
 const poolKey = (u) => `${u.s}|${u.s ? u.g : ''}|${u.k}`; // zoals battleOutcome telt
+const soldiers = (u, hp = u.hp) => (hp <= 0 ? 0 : Math.min(u.n || 1, Math.ceil(hp / u.hp0 - 1e-9))); // = aliveN
 
 // fate: { win: 0 (aanvaller wint) | 1, left: { poolKey: overlevenden } }
 export function setFate(st, fate) {
-  const hp = {}; const h0 = {};
+  const n0 = {};
   for (const u of st.units) {
     if (u.k === 'tower') continue;
-    const k = poolKey(u);
-    hp[k] = R3((hp[k] || 0) + u.hp); h0[k] = u.hp0;
+    u.pk = poolKey(u);
+    n0[u.pk] = (n0[u.pk] || 0) + (u.n || 1);
   }
-  const floor = {};
-  for (const k of Object.keys(hp)) floor[k] = R3(Math.min(hp[k], Math.max(0, Number(fate.left && fate.left[k]) || 0) * h0[k]));
-  const r = {};
-  for (const k of Object.keys(hp)) r[k] = 1;
-  st.fate = { win: fate.win ? 1 : 0, floor, hp, hp0: { ...hp }, m: [1, 1], r };
+  const q = {}; const d = {}; const r = {};
+  for (const k of Object.keys(n0)) {
+    const left = Math.max(0, Math.round(Number(fate.left && fate.left[k]) || 0));
+    q[k] = n0[k] - Math.min(n0[k], left); d[k] = 0; r[k] = 1;
+  }
+  st.fate = { win: fate.win ? 1 : 0, n0, q, d, m: [1, 1], r, ow: 1 };
   return st;
 }
 
-// hoeveel schade e mag krijgen zonder onder de vaste overlevenden te zakken (en het bijhouden)
-function fateCap(st, e, d) {
-  const f = st.fate; const k = poolKey(e);
-  if (f.hp[k] == null) return d;
-  const take = Math.max(0, Math.min(d, f.hp[k] - f.floor[k], e.hp));
-  f.hp[k] = R3(f.hp[k] - take);
-  return take;
+const fateSum = (f, s, fighters = false) => {
+  let q = 0; let d = 0;
+  for (const k of Object.keys(f.q)) if (k.charCodeAt(0) === 48 + s && !(fighters && isSiege(k.slice(k.lastIndexOf('|') + 1)))) { q += f.q[k]; d += f.d[k]; }
+  return { q, d };
+};
+const fateProg = (f, s, only = null) => {
+  if (only) return f.q[only] ? Math.min(1, f.d[only] / f.q[only]) : 1;
+  const t = fateSum(f, s);
+  return t.q ? Math.min(1, t.d / t.q) : 1;
+};
+const fateOwes = (f, s) => Object.keys(f.q).some((k) => k.charCodeAt(0) === 48 + s && f.d[k] < f.q[k]);
+const fateFull = (f, u) => !!u.pk && f.d[u.pk] >= f.q[u.pk]; // deze soort verliest niemand meer
+// replay: zolang de winnaar nog verliezen moet lijden, slaat de verliezer niet op wie niet meer kan sneuvelen
+const fateSkip = (st, u, e) => !!st.fate && !!st.fate.ow && u.s !== st.fate.win && fateFull(st.fate, e);
+
+// hoeveel soldaten van pool k nu nog mogen sneuvelen. De verliezer blijft overeind zolang de winnaar zijn verliezen nog
+// niet heeft (hooguit 35% voor op de winnaar, en nooit de laatste): zo kan hij ze toebrengen. Rammen tellen daarbij niet
+// mee (die raken geen soldaten).
+function fateRoom(st, k) {
+  const f = st.fate;
+  let room = f.q[k] - f.d[k];
+  if (room <= 0) return 0;
+  const L = 1 - f.win;
+  if (k.charCodeAt(0) === 48 + L && !isSiege(k.slice(k.lastIndexOf('|') + 1))) {
+    const w = fateSum(f, f.win);
+    if (w.d < w.q) {
+      const l = fateSum(f, L, true);
+      room = Math.min(room, Math.min(l.q - 1, Math.floor(l.q * (w.d / w.q + 0.35))) - l.d);
+    }
+  }
+  return Math.max(0, room);
+}
+
+// hoeveel levens e verliest bij een klap van dmg: wie niet meer mag sneuvelen, raakt enkel gewond
+function fateCap(st, e, dmg) {
+  const f = st.fate;
+  if (!e.pk || f.q[e.pk] == null || dmg <= 0) return dmg;
+  const a0 = soldiers(e);
+  let nh = R3(e.hp - dmg);
+  let die = a0 - soldiers(e, nh);
+  if (die > 0) {
+    const room = fateRoom(st, e.pk);
+    if (die > room) {
+      const keep = a0 - room; // zoveel soldaten blijven leven (gewond)
+      nh = R3(Math.max(nh, (keep - 1) * e.hp0 + Math.min(2, e.hp0 * 0.1)));
+      die = room;
+    }
+  }
+  nh = Math.min(e.hp, nh);
+  if (die > 0) f.d[e.pk] += die;
+  return e.hp - nh;
 }
 
 // schade van kant s aan doelwit e in een replay
 function fateDmg(st, s, e, d) {
   const f = st.fate;
   const win = s === f.win;
-  if (e.wall) return win ? d * f.m[s] : d;
+  if (e.wall) return win || f.ow ? d * f.m[s] : d; // de verliezer moet soms nog een bres slaan om de winnaar te raken
+  if (e.tc) return 0; // het stadscentrum (pijlen van de bezetting) valt niet
   if (e.k === 'tower') return win ? d * f.m[s] : 0; // de verliezer sloopt geen torens (die bleven echt staan)
-  return fateCap(st, e, d * f.m[s] * (f.r[poolKey(e)] || 1));
+  return fateCap(st, e, d * f.m[s] * (f.r[e.pk] || 1));
 }
 
-const fateProg = (f, s, only = null) => {
-  let a = 0; let b = 0;
-  for (const k of only ? [only] : Object.keys(f.hp)) if (k.charCodeAt(0) === 48 + s) { a += f.hp0[k] - f.hp[k]; b += f.hp0[k] - f.floor[k]; }
-  return b > 0.5 ? Math.min(1, a / b) : 1;
-};
+// één soldaat van de winnaar die nog moet sneuvelen, valt door een klap of pijl van de dichtstbijzijnde vijand
+function fateStrike(st) {
+  const f = st.fate; const bt = st.n * FB.tick;
+  const foes = st.units.filter((u) => u.s !== f.win && u.hp > 0 && u.k !== 'ram');
+  let best = null; let by = null; let bd = Infinity;
+  for (const e of st.units) {
+    if (e.s !== f.win || e.hp <= 0 || !e.pk || f.d[e.pk] >= f.q[e.pk]) continue;
+    for (const a of foes) { const d = SQ(a.x - e.x) + SQ(a.y - e.y); if (d < bd || (d === bd && e.id < best.id)) { bd = d; best = e; by = a; } }
+  }
+  if (!best) return;
+  const a = soldiers(best);
+  best.hp = a > 1 ? R3((a - 1.5) * best.hp0) : 0;
+  if (best.hp <= 0) best.died = bt;
+  f.d[best.pk]++; f.sk = (f.sk || 0) + 1;
+  by.at = bt; by.ax = R3(best.x); by.ay = R3(best.y); // het slaan of schieten tonen
+}
 
-// elke tik: pools opnieuw tellen, schade bijsturen, de verliezer laten vluchten als het moet
-function fateTick(st, M) {
+// iedereen van pool k die nog moest sneuvelen (laatste vangnet op het einde: bezweken aan zijn wonden)
+function fateSettle(st) {
+  const f = st.fate; const bt = st.n * FB.tick;
+  for (const k of Object.keys(f.q)) {
+    let owe = f.q[k] - f.d[k];
+    if (owe <= 0) continue;
+    const list = st.units.filter((u) => u.pk === k && u.hp > 0).sort((a, b) => a.hp - b.hp || a.id - b.id);
+    for (const u of list) {
+      while (owe > 0 && u.hp > 0) {
+        const a = soldiers(u);
+        u.hp = a > 1 ? R3((a - 1) * u.hp0 - 0.5 * u.hp0) : 0;
+        owe--; f.d[k]++; f.settled = (f.settled || 0) + 1;
+        if (u.hp <= 0) u.died = bt;
+      }
+      if (owe <= 0) break;
+    }
+  }
+}
+
+// elke tik: tellen wie er sneuvelde, schade bijsturen, de verliezer laten aanvallen of vluchten als het moet
+function fateTick(st, nv, M) {
   const f = st.fate;
-  for (const k of Object.keys(f.hp)) f.hp[k] = 0;
-  for (const u of st.units) if (u.hp > 0 && u.k !== 'tower') { const k = poolKey(u); if (f.hp[k] != null) f.hp[k] += u.hp; }
-  for (const k of Object.keys(f.hp)) f.hp[k] = R3(f.hp[k]);
+  const alive = {};
+  for (const u of st.units) if (u.pk && u.hp > 0) alive[u.pk] = (alive[u.pk] || 0) + soldiers(u);
+  for (const k of Object.keys(f.q)) f.d[k] = f.n0[k] - (alive[k] || 0);
   const bt = (st.n - st.ph1) * FB.tick;
   const W = f.win; const L = 1 - W;
+  f.ow = fateOwes(f, W) ? 1 : 0;
   // wie van de verliezer vlucht, wordt (na 2 s) achtervolgd en neergehaald, tot zijn verliezen kloppen met het rapport
   for (const u of st.units) {
     if (u.s !== L || u.hp <= 0 || !u.sq) continue;
@@ -430,9 +515,9 @@ function fateTick(st, M) {
   }
   if ((st.n - st.ph1) % 10 !== 0) return;
   f.m[W] = R3(Math.min(FATE.maxM, 1 + Math.max(0, bt - FATE.ramp) / FATE.rampK));
-  // de winnaar verliest zijn soldaten in hetzelfde tempo als de verliezer (een beetje vroeger)
+  // de winnaar verliest zijn soldaten in hetzelfde tempo als de verliezer (een beetje vroeger), en hoe dan ook binnen ±90 s
   const pl = fateProg(f, L); const pw = fateProg(f, W);
-  const want = Math.min(1, pl * 1.15);
+  const want = Math.min(1, Math.max(pl * 1.15 + 0.05, bt / FATE.pace));
   if (pw < want - 0.06) f.m[L] = R3(Math.min(10, f.m[L] * 1.3));
   else if (pw > want + 0.06) f.m[L] = R3(Math.max(0.2, f.m[L] * 0.8));
   // en per soort: wie achterloopt op zijn verliezen, krijgt meer schade (schutters achteraan, ruiters, ...)
@@ -442,13 +527,38 @@ function fateTick(st, M) {
     if (p < want - 0.06) f.r[k] = R3(Math.min(8, f.r[k] * 1.25));
     else if (p > want + 0.06) f.r[k] = R3(Math.max(0.25, f.r[k] * 0.8));
   }
-  // de verliezer slaat op de vlucht: een soort die alles verloor wat ze mocht verliezen, of iedereen na 'routAll'
+  // geen vooruitgang meer bij de winnaar (de verliezer raakt ze niet: schutters op de muur, ruiters achteraan, ...):
+  // zijn regimenten die nog verliezen moeten lijden, trekken naar de dichtstbijzijnde vijand
+  const wd = fateSum(f, W).d - (f.sk || 0); // vooruitgang zonder de klappen van het vangnet (fateStrike)
+  if (f.wd !== wd) { f.wd = wd; f.wt = st.n; }
+  if (f.ow && bt >= FATE.push && st.n - (f.wt ?? st.ph1) >= FATE.stall / FB.tick && st.n - (f.wm ?? 0) >= FATE.stall / FB.tick) {
+    f.wm = st.n;
+    const foes = st.units.filter((u) => u.s === L && u.hp > 0); // ook torens en het stadscentrum: die schieten
+    if (foes.length) {
+      for (const r of st.regs) {
+        if (r.s !== W || r.st === 'rout') continue;
+        const list = M.get(r.id);
+        if (!list || !list.length || fateFull(f, list[0])) continue;
+        const c = centroid(list); const e = nearestTo(foes, c);
+        const fv = unitVec(e.x - c.x, e.y - c.y, { x: r.fx, y: r.fy });
+        regMove(st, nv, r, list, e.x, e.y, fv.x, fv.y, regSpeed(r), null);
+      }
+    }
+  }
+  // zit het echt vast: elke seconde één soldaat die nog moet sneuvelen, geraakt door de dichtstbijzijnde vijand
+  if (f.ow && bt >= FATE.push && st.n - (f.wt ?? st.ph1) >= FATE.stuck / FB.tick && st.n - (f.ws ?? 0) >= 10) {
+    f.ws = st.n;
+    fateStrike(st);
+  }
   for (const r of st.regs) {
     if (r.s !== L || r.st === 'rout' || role(r.k) === 'siege') continue;
     const list = M.get(r.id);
     if (!list || !list.length) continue;
-    const k = poolKey(list[0]);
-    const atFloor = f.floor[k] > 0 && f.hp[k] - f.floor[k] < 0.5;
+    // de winnaar moet nog verliezen lijden en het duurt: het voetvolk van de verliezer valt zelf aan
+    if (f.ow) { if (bt >= FATE.push && r.st === 'hold' && !r.spread) regCharge(r); continue; }
+    // de verliezer slaat op de vlucht: een soort die verloor wat ze moest verliezen (wie overblijft, ontkomt), of iedereen na 'routAll'
+    const k = list[0].pk;
+    const atFloor = f.d[k] >= f.q[k] && (f.q[k] > 0 || bt >= FATE.mayRout);
     if (atFloor || bt >= FATE.routAll) regRout(st, r, list, M);
   }
 }
@@ -466,6 +576,12 @@ export function replayBattle(rec) {
     kind: camp ? 'camp' : 'town', att: rec.att, defGroups: rec.defGroups, town, townId: v.seed, campSeed: rec.campSeed,
     dir: rec.dir, aiAtt: true, aiDef: true, now: 0, techA: rec.techA, techD: rec.techD, smithyA: rec.smithyA, smithyD: rec.smithyD,
   });
+  // het stadscentrum schiet mee (de bezetting en de dorpelingen: in het automatische gevecht een deel van de verdediging)
+  const tc = camp ? null : (v.buildings || []).find((b) => b.type === 'tc');
+  if (tc) {
+    const z = (BUILDINGS.tc && BUILDINGS.tc.size) || 2;
+    st.units.push({ id: st.uid++, s: 1, k: 'tower', b: 0, tc: 1, L: 1, x: tc.x + z / 2, y: tc.y + z / 2, hp: TOWER.hp[1], hp0: TOWER.hp[1], n: 1, cd: 600, tg: null, tw: -1, at: -1 });
+  }
   setFate(st, rec.fate);
   st.meta = {
     replay: true, attInit: rec.att, defInit: Object.fromEntries(rec.defGroups.map((g) => [g.key, g.units])), style: rec.style || null,
@@ -498,7 +614,7 @@ export function raidReplay(s, e, me) {
   };
 }
 
-const fateMayRout = (st, r) => r.s !== st.fate.win && ((st.n - st.ph1) * FB.tick >= FATE.mayRout || fateProg(st.fate, r.s) >= 0.75);
+const fateMayRout = (st, r) => r.s !== st.fate.win && !st.fate.ow && ((st.n - st.ph1) * FB.tick >= FATE.mayRout || fateProg(st.fate, r.s) >= 0.75);
 
 // ---------- een nieuw slagveld ----------
 // o: { kind: 'town'|'camp', att, defGroups: [{key, units}], town (staat van de stad), townId, campSeed, level,
@@ -1173,6 +1289,7 @@ function pickEnemy(st, nv, u, alive, maxD, from = u, stayIn = false) {
   for (const e of alive) {
     if (e.s === u.s || e.hp <= 0) continue;
     if (stay) { const ec = cellOf(st, e.x, e.y); if (ec < 0 || !inside(nv, ec)) continue; }
+    if (e.tc || fateSkip(st, u, e)) continue; // replay: het stadscentrum schiet enkel; zie fateSkip
     const d = Math.sqrt(SQ(e.x - from.x) + SQ(e.y - from.y));
     if (d > maxD) continue;
     const score = d + (e.k === 'tower' ? 2.5 : 0);
@@ -1333,11 +1450,11 @@ function fightWall(st, nv, u, w, bt, spd) {
 // schieten: liefst op het doelwit van het regiment, anders op de dichtstbijzijnde vijand binnen bereik
 function shoot(st, nv, u, alive, byId, bt, r, M) {
   let e = u.tg != null ? byId.get(u.tg) : null;
-  if (e && (e.hp <= 0 || dist(u, e) > reachOf(st, nv, u, e) + 0.1)) e = null;
+  if (e && (e.hp <= 0 || dist(u, e) > reachOf(st, nv, u, e) + 0.1 || fateSkip(st, u, e))) e = null;
   if (!e && (st.n + u.id) % 3 === 0) {
     const reach = reachOf(st, nv, u, null);
     const tl = r.tr ? M.get(r.tr) : null;
-    if (tl) { let bd = SQ(reach); for (const x of tl) { const d = SQ(x.x - u.x) + SQ(x.y - u.y); if (x.hp > 0 && d <= bd) { bd = d; e = x; } } }
+    if (tl) { let bd = SQ(reach); for (const x of tl) { const d = SQ(x.x - u.x) + SQ(x.y - u.y); if (x.hp > 0 && d <= bd && !fateSkip(st, u, x)) { bd = d; e = x; } } }
     if (!e) e = pickEnemy(st, nv, u, alive, reach + 0.2);
   }
   u.tg = e ? e.id : null;
@@ -1351,7 +1468,7 @@ function shoot(st, nv, u, alive, byId, bt, r, M) {
 function pickFoe(st, nv, u, alive, r, M, uc) {
   const tl = r.tr ? M.get(r.tr) : null;
   let best = null; let bd = Infinity;
-  if (tl) for (const e of tl) { if (e.hp <= 0) continue; const d = SQ(e.x - u.x) + SQ(e.y - u.y); if (d < bd && canHit(st, nv, u, e, uc)) { bd = d; best = e; } }
+  if (tl) for (const e of tl) { if (e.hp <= 0 || fateSkip(st, u, e)) continue; const d = SQ(e.x - u.x) + SQ(e.y - u.y); if (d < bd && canHit(st, nv, u, e, uc)) { bd = d; best = e; } }
   const other = pickEnemy(st, nv, u, alive, 1.2);
   if (other && (!best || SQ(other.x - u.x) + SQ(other.y - u.y) < bd - 0.5)) best = other;
   return best || pickEnemy(st, nv, u, alive, 6);
@@ -1377,7 +1494,7 @@ function actUnit(st, nv, u, alive, byId, bt, r, M) {
   if (u.mv) u.mv = u.mv > 0.02 ? R3(u.mv * 0.9) : 0;
   if (u.k === 'tower') {
     let e = u.tg != null ? byId.get(u.tg) : null;
-    if (!e || e.hp <= 0 || dist(u, e) > TOWER.range) e = pickEnemy(st, nv, u, alive, TOWER.range);
+    if (!e || e.hp <= 0 || dist(u, e) > TOWER.range || fateSkip(st, u, e)) e = pickEnemy(st, nv, u, alive, TOWER.range);
     u.tg = e ? e.id : null;
     if (e && u.cd <= 0) hit(st, nv, u, e, bt);
     return;
@@ -1388,7 +1505,7 @@ function actUnit(st, nv, u, alive, byId, bt, r, M) {
   const ranged = isRangedK(u.k);
   const spd = speedOf(u.k) * (fxOf(r).speed || 1) * (r.sp || 1);
   let e = u.tg != null ? byId.get(u.tg) : null;
-  if (e && e.hp <= 0) e = null;
+  if (e && (e.hp <= 0 || fateSkip(st, u, e))) e = null;
   // A. op een muur of poort beuken (wie aangevallen wordt, verweert zich)
   if (r.st === 'wall') {
     const w = st.walls[r.tw];
@@ -1459,6 +1576,7 @@ function nearestFoeReg(st, nv, r, list, M, c) {
     if (o.s === r.s) continue;
     const ol = M.get(o.id);
     if (!ol || !ol.length) continue;
+    if (fateSkip(st, r, ol[0])) continue;
     const oc = centroid(ol); const d = Math.sqrt(SQ(oc.x - c.x) + SQ(oc.y - c.y)) + (o.st === 'rout' ? 6 : 0);
     if (d >= bd) continue;
     if (!ranged && !ol.some((e) => e.hp > 0 && canHit(st, nv, lead, e, lc))) continue;
@@ -1489,7 +1607,7 @@ function regFight(st, nv, r, list, M, alive, byId) {
   const c = centroid(list);
   const ranged = isRangedK(r.k);
   if (r.tu) { const t = byId.get(r.tu); if (!t || t.hp <= 0) r.tu = 0; }
-  if (r.tr && !(M.get(r.tr) || []).some((e) => e.hp > 0)) { r.tr = 0; r.eng = 0; }
+  if (r.tr && !(M.get(r.tr) || []).some((e) => e.hp > 0 && !fateSkip(st, r, e))) { r.tr = 0; r.eng = 0; }
   if (r.st === 'charge' && !r.tu && (!r.tr || (st.n + r.id) % 10 === 0)) {
     const nt = nearestFoeReg(st, nv, r, list, M, c);
     if (nt && nt.id !== r.tr) {
@@ -1534,6 +1652,7 @@ function regFight(st, nv, r, list, M, alive, byId) {
     return;
   }
   if (!r.eng && near <= FB.contact + (r.tu ? 0.6 : 0)) { r.eng = 1; r.path = null; }
+  else if (r.eng && st.fate && near > FB.contact + 2) r.eng = 0; // replay: het doelwit trok weg (zie fateTick), achterna
   if (r.eng) { r.x = R3(c.x); r.y = R3(c.y); if (f) { r.fx = f.x; r.fy = f.y; } return; }
   chase(st, nv, r, list, tc);
 }
@@ -1703,7 +1822,7 @@ function aiAttack(st, nv, alive, M) {
       if (r.st !== 'hold' && !(r.st === 'wall' && st.walls[r.tw] && st.walls[r.tw].hp > 0)) continue;
       const list = M.get(r.id); const c = centroid(list);
       let tw = null; let td = Infinity;
-      for (const u of alive) if (u.k === 'tower' && u.hp > 0) { const d = SQ(u.x - c.x) + SQ(u.y - c.y); if (d < td) { td = d; tw = u; } }
+      for (const u of alive) if (u.k === 'tower' && u.hp > 0 && !u.tc) { const d = SQ(u.x - c.x) + SQ(u.y - c.y); if (d < td) { td = d; tw = u; } }
       if (tw) regAttack(r, tw);
       else if (SQ(c.x - st.plaza.x) + SQ(c.y - st.plaza.y) > 4) { const f = unitVec(st.plaza.x - c.x, st.plaza.y - c.y, { x: r.fx, y: r.fy }); regMove(st, nv, r, list, st.plaza.x, st.plaza.y, f.x, f.y, regSpeed(r)); }
     }
@@ -1754,7 +1873,7 @@ function step(st) {
   const alive = st.units.filter((u) => u.hp > 0);
   const byId = new Map(alive.map((u) => [u.id, u]));
   const M = membersMap(st);
-  if (st.fate) fateTick(st, M);
+  if (st.fate) fateTick(st, nv, M);
   if (st.ai[1] && (st.n - st.ph1) % FB.ai === 0) aiDefend(st, nv, alive, M);
   if (st.ai[0] && (st.n - st.ph1) % FB.ai === 5) aiAttack(st, nv, alive, M);
   for (const r of st.regs) {
@@ -1843,15 +1962,15 @@ function judge(st, nv) {
   else if ((st.n - st.ph1) * FB.tick >= FB.maxMs) st.over = 1;
 }
 
-// replay: enkel de echte winnaar kan winnen, en pas als de verliezer zoveel verloor als in het rapport
+// replay: enkel de echte winnaar kan winnen, en pas als beide kanten precies zoveel verloren als in het rapport
 // (wie vlucht, wordt eerst nog neergehaald: zie fateTick)
 function judgeFate(st, att, attFled, attNear, def, defFled, towers) {
   const f = st.fate; const W = f.win;
-  const done = Object.keys(f.hp).every((k) => k.charCodeAt(0) !== 49 - W || f.hp[k] <= f.floor[k] + 0.01);
+  const done = !fateOwes(f, 1 - W) && !fateOwes(f, W);
   if (W === 0) {
-    if (!att || ((!def || (defFled === def && done)) && (!towers || attNear || def))) st.over = 0;
-  } else if (!att || (attFled === att && done) || (!def && !towers)) st.over = 1;
-  if (st.over == null && (st.n - st.ph1) * FB.tick >= FATE.end) st.over = W;
+    if (done && (!att || ((!def || defFled === def) && (!towers || attNear || def)))) st.over = 0;
+  } else if (done && (!att || attFled === att || (!def && !towers))) st.over = 1;
+  if (st.over == null && (st.n - st.ph1) * FB.tick >= FATE.end) { fateSettle(st); st.over = W; }
 }
 
 // speel de slag af tot tijdstip t (hooguit maxTicks tikken); geeft het aantal gespeelde tikken terug
