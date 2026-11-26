@@ -3,14 +3,14 @@
 import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
-import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE, techTier } from '../shared/rules.js';
+import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, ARMY_UNITS, landCost, WALL_TILE, techTier, FISH } from '../shared/rules.js';
 import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls, shoreSide, shoreSpots, boatsReady,
 } from '../shared/sim.js';
-import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE } from '../shared/territory.js';
+import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE, inTerr } from '../shared/territory.js';
 import { ICON } from './ui.js';
 import * as NAT from './nature.js';
 import * as FIG from './figures.js';
@@ -1394,6 +1394,13 @@ export class TownView {
     return st.v * st.v * (3 - 2 * st.v);
   }
 
+  // variant van het 3D-model: de Academie (afgewerkte onderzoeken), het havenhuis (aan welke kant het water ligt)
+  bVariant(b) {
+    if (b.type === 'academy') return this.academyVariant();
+    if (b.type === 'harbor') return shoreSide(this.state, b.x, b.y);
+    return null;
+  }
+
   drawGate(ctx, seg, level) {
     // 3D-poortgebouw (models3d.js gateScene): een beeld per stand van de deuren; zolang een stand niet klaar is, de
     // dichtstbijzijnde die er al is. Nog niets: de getekende poort hieronder.
@@ -1601,7 +1608,7 @@ export class TownView {
   // het beeld dat drawBuilding voor dit gebouw tekent, met de schaal (null voor steigers)
   buildingImage(b) {
     if (b.level === 0) return null;
-    const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null, this.treeNeed);
+    const s3 = S3.get(b.type, b.level, this.state.civ, b.id, this.bVariant(b), this.treeNeed);
     if (s3) return { spr: s3, sc: 1 };
     return { spr: A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id, S3.has(b.type) ? 0 : this.treeNeed * bScale(b)), sc: bScale(b) };
   }
@@ -2549,6 +2556,7 @@ export class TownView {
         items.push({ depth: bp.x + bp.y, kind: 'boar', b, bp });
       }
       if (terr.camp && this.isExplored(terr.camp.x, terr.camp.y)) items.push({ depth: terr.camp.x + terr.camp.y, kind: 'camp' });
+      for (const bt of this.boatsNow(now)) if (this.isExplored(bt.gx, bt.gy) && inView(toWorld(bt.gx, bt.gy))) items.push({ depth: bt.gx + bt.gy, kind: 'boat', bt });
       const raid = this.raidParty(now);
       if (raid && this.isExplored(raid.x, raid.y)) items.push({ depth: raid.x + raid.y, kind: 'raid', raid });
       for (const g of s.field || []) {
@@ -2585,6 +2593,7 @@ export class TownView {
         case 'boar': this.drawBoar(ctx, it.b, it.bp, t); break;
         case 'camp': this.drawCamp(ctx, t, now); break;
         case 'raid': this.drawRaid(ctx, it.raid, t); break;
+        case 'boat': this.drawBoat(ctx, it.bt, t); break;
         case 'group': this.drawGroup(ctx, it.g, it.p, t, now, emit); break;
         case 'fighter': this.drawFighter(ctx, it.u, it.sc, t, now); break;
         case 'x': it.draw(ctx); break;
@@ -2609,6 +2618,7 @@ export class TownView {
     if (night > 0.05) this.drawNightLights(ctx, t, night, segs, wallLevel);
     if (this.flutter && night >= 0.5) this.flutter.draw(ctx, t, night);
 
+    if (this.placing === 'harbor') this.drawShoreSpots(ctx, t);
     if (this.placing && this.hoverTile) this.drawGhost(ctx);
     if (this.moveB) this.drawMoveGhost(ctx, t, now);
     for (const b of s.buildings) {
@@ -3368,7 +3378,7 @@ export class TownView {
     for (const b of s.buildings) {
       if (!isPlaced(b) || b.level === 0) continue;
       const c = this.footprintCenter(b);
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, this.bVariant(b));
       const spr = s3 || A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id);
       const k = s3 ? 1 : bScale(b);
       for (const [lx, ly, r] of spr.lights || []) {
@@ -3431,6 +3441,140 @@ export class TownView {
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     for (const [i, j] of this.buildOutline().extra) { ctx.fillRect(i, j, 1, 1); ctx.strokeRect(i, j, 1, 1); }
     ctx.restore();
+  }
+
+  // ---------- havenhuis: vissersbootjes op het water ----------
+
+  // het water bij het havenhuis (verbonden watertegels) en vaste vaarpunten per bootje; één keer per plaats uitgerekend
+  harborWater(b) {
+    const key = `${b.id}|${b.x}|${b.y}`;
+    if (this.harborCache && this.harborCache.key === key) return this.harborCache;
+    const tiles = this.terr.tiles;
+    const isW = (i, j) => inTerr(i, j) && tiles[tileIndex(i, j)] === TILE.WATER;
+    const side = shoreSide(this.state, b.x, b.y);
+    const dx = [1, 0, -1, 0][side]; const dy = [0, 1, 0, -1][side];
+    const start = [b.x + dx, b.y + dy];
+    const seen = new Set(); const list = []; const stack = isW(...start) ? [start] : [];
+    while (stack.length && list.length < 400) {
+      const [i, j] = stack.pop(); const k = tileIndex(i, j);
+      if (seen.has(k)) continue; seen.add(k); list.push([i, j]);
+      for (const [a, c] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (isW(i + a, j + c) && !seen.has(tileIndex(i + a, j + c))) stack.push([i + a, j + c]);
+    }
+    // liefst open water (alle buren ook water), anders gewoon water
+    const deep = list.filter(([i, j]) => isW(i + 1, j) && isW(i - 1, j) && isW(i, j + 1) && isW(i, j - 1));
+    const pool = deep.length >= 3 ? deep : list;
+    const dock = { gx: b.x + 0.5 + dx * 1.05, gy: b.y + 0.5 + dy * 1.05, dx, dy };
+    const routes = [];
+    for (let k = 0; k < 4; k++) {
+      const pts = [];
+      for (let n = 0; n < 4 && pool.length; n++) {
+        const [i, j] = pool[Math.floor(hashInt(b.id * 13 + k, n * 7 + 3, 91) * pool.length) % pool.length];
+        pts.push({ gx: i + 0.25 + hashInt(k, n, 92) * 0.5, gy: j + 0.25 + hashInt(n, k, 93) * 0.5 });
+      }
+      // de tocht: van punt naar punt (0,3 tegel/s), op elk punt 9 s vissen
+      const legs = []; let T = 0;
+      for (let n = 0; n < pts.length; n++) {
+        const a = pts[n]; const c = pts[(n + 1) % pts.length];
+        const d = Math.hypot(c.gx - a.gx, c.gy - a.gy);
+        legs.push({ a, c, t0: T, fish: 9, move: d / 0.3 }); T += 9 + d / 0.3;
+      }
+      routes.push({ legs, T });
+    }
+    this.harborCache = { key, list, dock, routes };
+    return this.harborCache;
+  }
+
+  // waar is elk bootje nu? Bemand: op tocht; niet bemand (of in aanbouw): aan de steiger
+  boatsNow(now) {
+    const s = this.state;
+    if (this.battleMode || !s.terr) return [];
+    const b = s.buildings.find((x) => x.type === 'harbor' && x.level > 0);
+    if (!b) return [];
+    const ready = boatsReady(s);
+    const building = !!s.boatJob;
+    if (!ready && !building) return [];
+    const W = this.harborWater(b);
+    if (!W.list.length) return [];
+    const crewed = Math.min(ready, Math.ceil((s.villagers.fish || 0) / FISH.crew));
+    const kind = b.level >= 5 ? 2 : b.level >= 3 ? 1 : 0;
+    const out = [];
+    const sec = performance.now() / 1000;
+    for (let k = 0; k < ready + (building ? 1 : 0); k++) {
+      const sail = k < crewed;
+      if (!sail) {
+        // aan de steiger, om beurten links en rechts
+        const off = (k % 2 ? 1 : -1) * (0.32 + Math.floor(k / 2) * 0.22);
+        out.push({ k, gx: W.dock.gx - W.dock.dy * off, gy: W.dock.gy + W.dock.dx * off, dir: W.dock.dx - W.dock.dy >= 0 ? 1 : -1, kind, crew: false, moving: false, ghost: k >= ready });
+        continue;
+      }
+      const R = W.routes[k % W.routes.length];
+      let tt = (sec + k * 11.3) % R.T;
+      for (const L of R.legs) {
+        if (tt > L.fish + L.move) { tt -= L.fish + L.move; continue; }
+        if (tt <= L.fish) { out.push({ k, gx: L.a.gx, gy: L.a.gy, dir: (L.c.gx - L.c.gy) - (L.a.gx - L.a.gy) >= 0 ? 1 : -1, kind, crew: true, moving: false, fishing: tt }); break; }
+        const f = (tt - L.fish) / L.move; const e = f * f * (3 - 2 * f);
+        out.push({ k, gx: L.a.gx + (L.c.gx - L.a.gx) * e, gy: L.a.gy + (L.c.gy - L.a.gy) * e, dir: (L.c.gx - L.c.gy) - (L.a.gx - L.a.gy) >= 0 ? 1 : -1, kind, crew: true, moving: true });
+        break;
+      }
+    }
+    return out;
+  }
+
+  drawBoat(ctx, bt, t) {
+    const p = toWorld(bt.gx, bt.gy);
+    const bob = Math.sin(t * 0.0024 + bt.k * 1.7) * 0.9;
+    // kringen in het water rond het bootje, een kielzog als het vaart
+    ctx.save();
+    ctx.strokeStyle = 'rgba(235,245,255,0.45)'; ctx.lineWidth = 0.9;
+    if (bt.moving) {
+      for (let n = 1; n <= 3; n++) { ctx.globalAlpha = 0.5 - n * 0.13; ctx.beginPath(); ctx.ellipse(p.x - bt.dir * n * 7, p.y + n * 1.2, 4 + n * 2.5, 1.4 + n * 0.6, 0, 0, Math.PI * 2); ctx.stroke(); }
+    } else {
+      const r = ((t * 0.0006 + bt.k * 0.37) % 1);
+      ctx.globalAlpha = 0.55 * (1 - r); ctx.beginPath(); ctx.ellipse(p.x, p.y + 1, 10 + r * 16, 4 + r * 6, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+    const v = bt.kind * 2 + (bt.crew ? 1 : 0);
+    const sc = bt.kind === 2 ? 1.45 : 1.6;
+    if (bt.ghost) ctx.globalAlpha = 0.55;
+    let drawn = false;
+    facing(ctx, p.x, bt.dir, () => { drawn = A.prop3d(ctx, 'boat', v, p.x, p.y + bob, sc); });
+    if (!drawn) {
+      // terugval: een eenvoudig bootje
+      ctx.fillStyle = '#7a4a24'; ctx.beginPath(); ctx.ellipse(p.x, p.y + bob - 2, 14, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // af en toe springt er een vis bij een bootje dat aan het vissen is
+    if (bt.fishing != null && bt.fishing % 4.5 > 3.6) {
+      const f = (bt.fishing % 4.5 - 3.6) / 0.9;
+      const x = p.x + (bt.k % 2 ? 14 : -14) + f * 8 * (bt.k % 2 ? 1 : -1); const y = p.y - Math.sin(f * Math.PI) * 9;
+      ctx.fillStyle = '#c9d6df'; ctx.beginPath(); ctx.ellipse(x, y, 2.6, 1.1, (f - 0.5) * 1.6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // plekken aan het water waar het havenhuis kan staan (tijdens het plaatsen)
+  drawShoreSpots(ctx, t) {
+    const now = performance.now();
+    if (!this.shoreCache || now - this.shoreCache.at > 1500) this.shoreCache = { at: now, spots: shoreSpots(this.state) };
+    const pulse = 0.55 + Math.sin(t * 0.005) * 0.25;
+    for (const [i, j] of this.shoreCache.spots) {
+      const c = toWorld(i + 0.5, j + 0.5);
+      A.diamond(ctx, c.x, c.y, A.TW - 6, A.TH - 3, `rgba(90,170,235,${0.25 * pulse + 0.1})`, `rgba(140,210,255,${pulse})`);
+    }
+  }
+
+  // bij het kiezen van het havenhuis: naar de dichtste plek aan het water kijken (als er geen in beeld is)
+  showShore() {
+    const spots = shoreSpots(this.state);
+    if (!spots.length) return false;
+    const vr = this.viewRect(-40);
+    const vis = spots.some(([i, j]) => { const c = toWorld(i + 0.5, j + 0.5); return c.x > vr.x0 && c.x < vr.x1 && c.y > vr.y0 && c.y < vr.y1; });
+    if (!vis) {
+      const cx = this.cam.x; const cy = this.cam.y;
+      let best = null; let bd = Infinity;
+      for (const [i, j] of spots) { const c = toWorld(i + 0.5, j + 0.5); const d = Math.hypot(c.x - cx, c.y - cy); if (d < bd) { bd = d; best = c; } }
+      this.cam.x = best.x; this.cam.y = best.y;
+    }
+    return true;
   }
 
   drawGhost(ctx) {
@@ -3541,7 +3685,7 @@ export class TownView {
       facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
       if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
     } else {
-      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, b.type === 'academy' ? this.academyVariant() : null, this.treeNeed);
+      const s3 = S3.get(b.type, b.level, this.state.civ, b.id, this.bVariant(b), this.treeNeed);
       if (s3) A.drawSprite(ctx, s3, c.x, c.y, 1);
       else A.drawSprite(ctx, A.buildingSprite(b.type, b.level, this.team, this.state.civ, b.id, S3.has(b.type) ? 0 : this.treeNeed * bScale(b)), c.x, c.y, bScale(b));
       if (s3) this.drawOverlay3d(ctx, b, c, t, s3); else this.drawOverlay(ctx, b, c, t);

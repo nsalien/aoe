@@ -8,7 +8,7 @@ import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
 import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList } from '../shared/sim.js';
-import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
+import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration, JOBS } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -1073,9 +1073,10 @@ let allocTimer = null;
 function changeVillagers(res, d) {
   const live = app.live;
   const alloc = { ...(app.pendingAlloc || live.villagers) };
-  const total = RES.reduce((a, k) => a + live.villagers[k], live.villagers.idle);
+  const total = JOBS.reduce((a, k) => a + (live.villagers[k] || 0), live.villagers.idle);
   const slotsNow = slotsOf(live);
-  let used = RES.reduce((a, k) => a + alloc[k], 0);
+  if (alloc[res] == null) alloc[res] = 0;
+  let used = JOBS.reduce((a, k) => a + (alloc[k] || 0), 0);
   let step = d;
   if (step > 0) step = Math.min(step, total - used, slotsNow[res] - alloc[res]);
   else step = Math.max(step, -alloc[res]);
@@ -1100,7 +1101,7 @@ async function sendAlloc() {
   if (!a) return;
   const seq = allocSeq;
   allocBusy = true;
-  const r = await act('/villagers', { food: a.food, wood: a.wood, stone: a.stone, gold: a.gold });
+  const r = await act('/villagers', { food: a.food, wood: a.wood, stone: a.stone, gold: a.gold, fish: a.fish || 0 });
   allocBusy = false;
   if (seq === allocSeq || !r) app.pendingAlloc = null;
   renderPanel(true);
@@ -1359,7 +1360,12 @@ const actions = {
     app.selBuilding = null;
     const hint = $('#placeHint');
     hint.hidden = false;
-    hint.innerHTML = `Kies een plek voor: <b>${BUILDINGS[type].name}</b> <span class="muted">(shift = meerdere)</span><button class="btn small" data-action="cancelPlace">Annuleren</button>`;
+    // het havenhuis: enkel aan het water (blauwe tegels); kijk meteen naar de dichtste plek
+    const shore = BUILDINGS[type].shore;
+    const anyShore = shore ? town.showShore() : true;
+    hint.innerHTML = shore
+      ? (anyShore ? `Kies een <b>blauwe plek aan het water</b> voor het ${BUILDINGS[type].name.toLowerCase()}.` : 'Er is geen vrij land aan het water dicht genoeg bij je stad.') + '<button class="btn small" data-action="cancelPlace">Annuleren</button>'
+      : `Kies een plek voor: <b>${BUILDINGS[type].name}</b> <span class="muted">(shift = meerdere)</span><button class="btn small" data-action="cancelPlace">Annuleren</button>`;
     openPanelMobile(false);
     renderBuildBar();
     renderPanel();
@@ -1469,6 +1475,9 @@ const actions = {
   },
   research(el) {
     act('/research', { id: el.dataset.id }, 'Onderzoek gestart');
+  },
+  buildBoat() {
+    act('/boat', {}, 'Het bootje wordt gebouwd: vrije dorpelingen gaan meteen aan boord.');
   },
   async ransom() {
     if (!confirm('Losgeld betalen? Je bent meteen vrij.')) return;

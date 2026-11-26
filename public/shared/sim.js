@@ -5,7 +5,7 @@ import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
   LAND, landCost, WALL_TILE, GATE, DEMOLISH, TECHS, TECH_IDS, LOYALTY,
-  levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
+  levelCost, levelTime, levelAge, unitTime, costValue, unitValue, JOBS, FISH,
 } from './rules.js';
 import {
   territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, T_W, TILE, exDecode, exEncode, revealCircle, revealSegment,
@@ -49,7 +49,7 @@ export const fieldSoldierPop = (s) => (s.field || []).reduce((a, g) => {
   for (const k of Object.keys(g.units)) if (k !== 'villager' && UNITS[k]) p += UNITS[k].pop * g.units[k];
   return a + p;
 }, 0);
-export const totalVillagers = (s) => RES.reduce((a, r) => a + s.villagers[r], s.villagers.idle) + harvesting(s) + fieldVillagers(s);
+export const totalVillagers = (s) => JOBS.reduce((a, r) => a + (s.villagers[r] || 0), s.villagers.idle) + harvesting(s) + fieldVillagers(s);
 // dorpelingen die nu thuis zijn en verdeeld kunnen worden
 export const homeVillagers = (s) => totalVillagers(s) - harvesting(s) - fieldVillagers(s);
 
@@ -59,7 +59,68 @@ export function slots(s) {
     const sl = BUILDINGS[b.type].slots;
     if (sl && b.level > 0) for (const r of Object.keys(sl)) out[r] += sl[r] * b.level;
   }
+  out.fish = boatsReady(s) * FISH.crew; // vissers: zoveel per bootje
   return out;
+}
+
+// ---------- havenhuis en vissersbootjes ----------
+export const maxBoats = (s) => FISH.boats[Math.min(FISH.boats.length - 1, bLevel(s, 'harbor'))] || 0;
+// bootjes die kunnen uitvaren (een kleiner havenhuis na afbreken heeft minder plaats)
+export const boatsReady = (s) => Math.min(s.boats || 0, maxBoats(s));
+export const fishMult = (s) => 1 + FISH.levelBonus * Math.max(0, bLevel(s, 'harbor') - 1);
+export function boatTime(s, speed = 1) {
+  return Math.max(5000, Math.round((FISH.boatTime * 1000) / speed));
+}
+export function checkBoat(s) {
+  if (!bLevel(s, 'harbor')) return 'Bouw eerst een havenhuis.';
+  if (s.boatJob) return 'Er wordt al een bootje gebouwd.';
+  if ((s.boats || 0) >= maxBoats(s)) return maxBoats(s) >= FISH.boats[FISH.boats.length - 1] ? `Je hebt het maximum van ${maxBoats(s)} bootjes.` : 'Verbeter je havenhuis voor een bootje meer.';
+  if (!canAfford(s.res, FISH.boatCost)) return 'Niet genoeg grondstoffen.';
+  return null;
+}
+export function doBoat(s, now, speed = 1) {
+  const err = checkBoat(s);
+  if (err) throw new GameError(err);
+  pay(s.res, FISH.boatCost);
+  s.boatJob = { start: now, end: now + boatTime(s, speed) };
+  return s.boatJob;
+}
+// een bootje is klaar: vrije dorpelingen gaan meteen aan boord
+function finishBoat(s) {
+  s.boats = (s.boats || 0) + 1;
+  s.boatJob = null;
+  const free = slots(s).fish - (s.villagers.fish || 0);
+  const n = Math.max(0, Math.min(free, s.villagers.idle));
+  s.villagers.fish = (s.villagers.fish || 0) + n; s.villagers.idle -= n;
+}
+// mag het havenhuis op tegel (i, j)? Vrij land (geen bos, geen water) naast water, niet te ver van je bouwgrond.
+export function shoreTile(s, i, j, cl = null) {
+  if (!s.terr || !inTerr(i, j)) return false;
+  const terr = territory(s.terr.seed);
+  const T = terr.tiles[tileIndex(i, j)];
+  if (T === TILE.WATER) return false;
+  const set = cl || clearedSet(s);
+  if (T === TILE.FOREST && !set.has(tileIndex(i, j)) && !isBuildable(s, i, j, set)) return false;
+  if (ringOf(i, j) > ringForAge(age(s)) + FISH.reach) return false;
+  if (reservedTile(terr, i, j)) return false;
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inTerr(i + dx, j + dy) && terr.tiles[tileIndex(i + dx, j + dy)] === TILE.WATER);
+}
+// alle tegels waar het havenhuis kan staan (om ze te tonen bij het plaatsen)
+export function shoreSpots(s, ignoreId = null) {
+  if (!s.terr) return [];
+  const R = ringForAge(age(s)) + FISH.reach;
+  const cl = clearedSet(s);
+  const out = [];
+  for (let j = -R; j < TOWN_GRID + R; j++) for (let i = -R; i < TOWN_GRID + R; i++) if (shoreTile(s, i, j, cl) && canPlaceAt(s, 'harbor', i, j, ignoreId)) out.push([i, j]);
+  return out;
+}
+// aan welke kant ligt het water? 0 = +x, 1 = +y, 2 = -x, 3 = -y (voor de steiger van het model)
+export function shoreSide(s, i, j) {
+  if (!s.terr) return 0;
+  const tiles = territory(s.terr.seed).tiles;
+  const w = (a, b) => inTerr(a, b) && tiles[tileIndex(a, b)] === TILE.WATER;
+  if (w(i + 1, j)) return 0; if (w(i, j + 1)) return 1; if (w(i - 1, j)) return 2; if (w(i, j - 1)) return 3;
+  return 0;
 }
 
 export function popCap(s) {
@@ -95,6 +156,8 @@ export function rates(s, speed = 1) {
   const bo = boost(s);
   const out = {};
   for (const r of RES) out[r] = s.villagers[r] * GATHER_RATE[r] * mult * (1 + bo[r]);
+  // vissers (havenhuis): sneller voedsel dan de boerderij
+  if (s.villagers.fish) out.food += s.villagers.fish * FISH.rate * mult * (1 + bo.food) * fishMult(s);
   return out;
 }
 
@@ -148,9 +211,9 @@ function accrue(s, t, speed) {
 
 function placeVillager(s) {
   const sl = slots(s);
-  const order = s.rally && s.rally !== 'auto' ? [s.rally] : ['food', 'wood', 'gold', 'stone'];
+  const order = s.rally && s.rally !== 'auto' ? [s.rally] : ['fish', 'food', 'wood', 'gold', 'stone'];
   for (const r of order) {
-    if (s.villagers[r] < sl[r]) { s.villagers[r]++; return; }
+    if ((s.villagers[r] || 0) < (sl[r] || 0)) { s.villagers[r] = (s.villagers[r] || 0) + 1; return; }
   }
   s.villagers.idle++;
 }
@@ -244,7 +307,7 @@ function finishHarvest(s, hv) {
   }
   s.harvests = s.harvests.filter((x) => x !== hv);
   // de dorpeling gaat terug naar zijn vorige taak
-  if (hv.job !== 'idle' && s.villagers[hv.job] < slots(s)[hv.job]) s.villagers[hv.job]++;
+  if (hv.job !== 'idle' && (s.villagers[hv.job] || 0) < (slots(s)[hv.job] || 0)) s.villagers[hv.job] = (s.villagers[hv.job] || 0) + 1;
   else s.villagers.idle++;
 }
 
@@ -270,10 +333,10 @@ export function doHarvest(s, nodeId, job, now) {
   const node = s.nodes.find((n) => n.id === nodeId);
   let from = null;
   if (job === 'idle' && s.villagers.idle > 0) from = 'idle';
-  else if (RES.includes(job) && s.villagers[job] > 0) from = job;
+  else if (JOBS.includes(job) && s.villagers[job] > 0) from = job;
   else if (s.villagers.idle > 0) from = 'idle';
   else {
-    from = RES.reduce((best, r) => (s.villagers[r] > (best ? s.villagers[best] : 0) ? r : best), null);
+    from = JOBS.reduce((best, r) => ((s.villagers[r] || 0) > (best ? s.villagers[best] : 0) ? r : best), null);
   }
   if (!from) throw new GameError('Je hebt geen dorpeling vrij.');
   s.villagers[from]--;
@@ -314,9 +377,12 @@ export function advance(s, t, speed = 1) {
     if (s.nextNode < next) { next = s.nextNode; job = null; qkey = null; hv = null; spawn = true; wild = null; }
     let rs = false;
     if (s.research && s.research.end < next) { next = s.research.end; job = null; qkey = null; hv = null; spawn = false; wild = null; rs = true; }
+    let bj = false;
+    if (s.boatJob && s.boatJob.end < next) { next = s.boatJob.end; job = null; qkey = null; hv = null; spawn = false; wild = null; rs = false; bj = true; }
     if (next > t) break;
     accrue(s, next, speed);
-    if (rs) finishResearch(s);
+    if (bj) finishBoat(s);
+    else if (rs) finishResearch(s);
     else if (wild) applyWildEvent(s, wild, speed);
     else if (spawn) spawnBonus(s, next, speed);
     else if (hv) finishHarvest(s, hv);
@@ -380,6 +446,7 @@ export function ensureTerritory(s, seed) {
   // steden van voor de volkeren krijgen een willekeurig (maar vast) volk
   if (!CIVS[s.civ]) s.civ = CIV_IDS[(Math.imul(seed | 0, 2654435761) >>> 0) % CIV_IDS.length];
   if (!s.field) s.field = [];
+  if (s.villagers && s.villagers.fish == null) s.villagers.fish = 0; // vissers (havenhuis) bestonden vroeger niet
   // ontdekkingen in de wildernis (25/11 kort online, op vraag van de gebruiker weer weggehaald): restjes opruimen.
   // Wat al gevonden werd, blijft; relikwieën leveren niets meer op.
   if (s.relics !== undefined) delete s.relics;
@@ -1091,7 +1158,7 @@ function disband(s, g) {
     if (!n) continue;
     if (k === 'villager') {
       for (let i = 0; i < n; i++) {
-        if (g.job && g.job !== 'idle' && s.villagers[g.job] < slots(s)[g.job]) s.villagers[g.job]++;
+        if (g.job && g.job !== 'idle' && (s.villagers[g.job] || 0) < (slots(s)[g.job] || 0)) s.villagers[g.job] = (s.villagers[g.job] || 0) + 1;
         else s.villagers.idle++;
       }
     } else s.units[k] = (s.units[k] || 0) + n;
@@ -1333,8 +1400,8 @@ export function doFieldSend(s, spec, from, to, target, now, pace = null) {
   let job = null;
   if (spec && spec.villager !== undefined) {
     job = spec.villager;
-    if (job === 'idle' ? s.villagers.idle < 1 : !(RES.includes(job) && s.villagers[job] > 0)) {
-      job = s.villagers.idle > 0 ? 'idle' : RES.reduce((b, r) => (s.villagers[r] > (b ? s.villagers[b] : 0) ? r : b), null);
+    if (job === 'idle' ? s.villagers.idle < 1 : !(JOBS.includes(job) && s.villagers[job] > 0)) {
+      job = s.villagers.idle > 0 ? 'idle' : JOBS.reduce((b, r) => ((s.villagers[r] || 0) > (b ? s.villagers[b] : 0) ? r : b), null);
     }
     if (!job) throw new GameError('Je hebt geen dorpeling vrij.');
     const n = Math.max(1, Math.min(s.villagers[job], 40, Math.floor(Number(spec.n) || 1)));
@@ -1500,7 +1567,10 @@ export function canPlaceAt(s, type, x, y, ignoreId = null) {
   const size = BUILDINGS[type].size;
   if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
   const cl = clearedSet(s);
-  for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
+  // het havenhuis: naast water (mag net buiten je bouwgrond, zie shoreTile); de rest op je bouwgrond
+  if (BUILDINGS[type].shore) { if (!shoreTile(s, x, y, cl)) return false; } else {
+    for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
+  }
   const grid = occupied(s, ignoreId);
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (grid.has(`${x + dx},${y + dy}`)) return false;
   if ((s.walls || []).length) {
@@ -1528,7 +1598,7 @@ export function checkBuild(s, type) {
 export function doBuild(s, type, x, y, now, speed) {
   const err = checkBuild(s, type);
   if (err) throw new GameError(err);
-  if (!canPlaceAt(s, type, x, y)) throw new GameError('Daar kan je niet bouwen.');
+  if (!canPlaceAt(s, type, x, y)) throw new GameError(BUILDINGS[type].shore ? 'Het havenhuis moet op vrij land naast het water staan (de vijver bij je dorp).' : 'Daar kan je niet bouwen.');
   pay(s.res, levelCost(type, 1));
   const b = { id: s.nextId++, type, x, y, level: 0 };
   s.buildings.push(b);
@@ -1617,10 +1687,12 @@ export function doDemolish(s, bid) {
   s.buildings = s.buildings.filter((x) => x !== b);
   s.builds = s.builds.filter((j) => j.bid !== bid);
   addRes(s, refund);
+  // het havenhuis weg: de bootjes ook (een lopende bouw van een bootje valt weg)
+  if (b.type === 'harbor') { s.boats = 0; s.boatJob = null; }
   // werkplekken die wegvallen: die dorpelingen worden vrij
   const sl = slots(s);
-  for (const r of RES) {
-    if (s.villagers[r] > sl[r]) { s.villagers.idle += s.villagers[r] - sl[r]; s.villagers[r] = sl[r]; }
+  for (const r of JOBS) {
+    if ((s.villagers[r] || 0) > sl[r]) { s.villagers.idle += s.villagers[r] - sl[r]; s.villagers[r] = sl[r]; }
   }
   return refund;
 }
@@ -1673,17 +1745,18 @@ export function doAssign(s, alloc, rally) {
   const total = homeVillagers(s);
   let sum = 0;
   const next = {};
-  for (const r of RES) {
-    const v = alloc[r];
+  for (const r of JOBS) {
+    // vissers: wie ze niet meegeeft (oudere browser, bots), houdt ze zoals ze waren
+    const v = alloc[r] === undefined && r === 'fish' ? Math.min(s.villagers.fish || 0, sl.fish) : alloc[r];
     if (!Number.isInteger(v) || v < 0) throw new GameError('Ongeldige verdeling.');
-    if (v > sl[r]) throw new GameError(`Te weinig werkplekken voor ${r}.`);
+    if (v > sl[r]) throw new GameError(r === 'fish' ? 'Te weinig plaats op je bootjes.' : `Te weinig werkplekken voor ${r}.`);
     next[r] = v;
     sum += v;
   }
   if (sum > total) throw new GameError('Zoveel dorpelingen heb je niet.');
-  for (const r of RES) s.villagers[r] = next[r];
+  for (const r of JOBS) s.villagers[r] = next[r];
   s.villagers.idle = total - sum;
-  if (rally && (rally === 'auto' || RES.includes(rally))) s.rally = rally;
+  if (rally && (rally === 'auto' || JOBS.includes(rally))) s.rally = rally;
 }
 
 export function marketRate(s) {

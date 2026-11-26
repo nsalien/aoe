@@ -3,6 +3,7 @@ import * as A from './art.js';
 import * as FIG from './figures.js';
 import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
+  JOBS, FISH, GATHER_RATE,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
   fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf,
 } from '../shared/rules.js';
@@ -12,6 +13,7 @@ import {
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
   isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
+  maxBoats, boatsReady, checkBoat, fishMult,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -30,6 +32,7 @@ export const ICON = {
   food: svg('<path d="M12 22V9" stroke="#8a6a1c" stroke-width="1.6"/><g fill="#e9b93a" stroke="#a8781c" stroke-width=".6"><ellipse cx="12" cy="5" rx="2" ry="3.2"/><ellipse cx="9" cy="9" rx="1.8" ry="3" transform="rotate(-30 9 9)"/><ellipse cx="15" cy="9" rx="1.8" ry="3" transform="rotate(30 15 9)"/><ellipse cx="8.6" cy="13.5" rx="1.8" ry="3" transform="rotate(-35 8.6 13.5)"/><ellipse cx="15.4" cy="13.5" rx="1.8" ry="3" transform="rotate(35 15.4 13.5)"/></g><circle cx="17.5" cy="18" r="3.6" fill="#d9483b"/><path d="M17.5 14.6c.4-1 1.2-1.5 2-1.6" stroke="#4a7a2a" stroke-width="1" fill="none"/>'),
   wood: svg('<rect x="2.5" y="8" width="15" height="9" rx="2" fill="#8b5a2b"/><path d="M4 10.5h12M4 14.5h11" stroke="#6b4220" stroke-width=".8"/><ellipse cx="17.5" cy="12.5" rx="3.6" ry="4.5" fill="#e0b47a" stroke="#8b5a2b" stroke-width="1"/><ellipse cx="17.5" cy="12.5" rx="1.9" ry="2.5" fill="none" stroke="#b5864f" stroke-width=".8"/>'),
   stone: svg('<path d="M3 18l2.5-7 5-4 6 1.5 4.5 5-1 5.5z" fill="#9e998e" stroke="#6d685e" stroke-width=".8"/><path d="M5.5 11l5-4 6 1.5-3 4-6 .5z" fill="#c4c0b6"/><path d="M13 19l1.5-5 6 0" stroke="#6d685e" stroke-width=".7" fill="none"/>'),
+  fish: svg('<path d="M3 12c3-5 9-6.5 13-3l4-3v12l-4-3c-4 3.5-10 2-13-3z" fill="#6fa3c8" stroke="#2f5f86" stroke-width="1"/><path d="M8 9.5c1.5 1.5 1.5 3.5 0 5" stroke="#2f5f86" stroke-width=".9" fill="none"/><circle cx="6" cy="11" r="1" fill="#1d2f3f"/><path d="M11 9l1.5-2.5M13 9.3l1.2-2" stroke="#cfe3f2" stroke-width=".8"/>'),
   gold: svg('<circle cx="12" cy="12" r="8.5" fill="#f2c230" stroke="#b5861a" stroke-width="1.2"/><circle cx="12" cy="12" r="5.8" fill="none" stroke="#d9a523" stroke-width="1"/><path d="M10.2 9.2h3.2l-1.6 5.6" stroke="#b5861a" stroke-width="1.3" fill="none"/><path d="M7.5 8.5a6 6 0 0 1 3-2.6" stroke="#fff6c8" stroke-width="1.2" fill="none"/>'),
   pop: svg('<circle cx="12" cy="7" r="3.6" fill="#f1c9a0" stroke="#8b6a43" stroke-width=".8"/><path d="M5 21c0-5 3.2-8 7-8s7 3 7 8z" fill="#8b6a43"/>'),
   atk: svg('<path d="M5 19L18 6l1-3-3 1L3 17z" fill="#c9ced6" stroke="#6b717c" stroke-width=".8"/><path d="M4 15l5 5M3 21l3-3" stroke="#6b4a2b" stroke-width="2"/>'),
@@ -372,7 +375,9 @@ export function townOverviewHtml(app, live) {
   const total = homeVillagers(live);
   const away = totalVillagers(live) - total;
   const alloc = app.pendingAlloc || live.villagers;
-  const assigned = RES.reduce((a, k) => a + alloc[k], 0);
+  const harbor = bLevel(live, 'harbor') > 0;
+  const jobs = harbor ? JOBS : RES; // vissers enkel met een havenhuis
+  const assigned = JOBS.reduce((a, k) => a + (alloc[k] || 0), 0);
   const idle = total - assigned;
   const canAct = app.canAct;
   const a = age(live);
@@ -385,20 +390,24 @@ export function townOverviewHtml(app, live) {
   html += loyaltyCardHtml(app, live);
   html += bonusCardHtml(app, live);
   html += `<div class="card"><h3>${icon('people')} Dorpelingen <span class="right">${total + away} totaal · ${idle} vrij${away ? ` · ${away} op pad` : ''}</span></h3>`;
-  for (const k of RES) {
+  const fishRate = (n) => n * FISH.rate * (1 + 0.1 * (a - 1)) * d.world.speed * (1 + boost(live).food) * fishMult(live);
+  for (const k of jobs) {
+    const nm = k === 'fish' ? 'Vissers' : RES_NAMES[k];
+    const per = k === 'fish' ? `${alloc.fish || 0}/${sl.fish} op ${boatsReady(live)} bootje${boatsReady(live) === 1 ? '' : 's'} · +${fmt(fishRate(alloc.fish || 0))}/u`
+      : `${alloc[k]}/${sl[k]} plaatsen · +${fmt(k === 'food' ? r.food - fishRate(live.villagers.fish || 0) : r[k])}/u`;
     html += `<div class="vrow"><img src="${ICON[k]}" alt="">
-      <div class="nm">${RES_NAMES[k]}<small>${alloc[k]}/${sl[k]} plaatsen · +${fmt(r[k])}/u</small></div>
+      <div class="nm">${nm}<small>${per}</small></div>
       <div class="stepper">
-        <button data-action="vill" data-res="${k}" data-d="-5" ${!canAct || alloc[k] <= 0 ? 'disabled' : ''} title="-5">«</button>
-        <button data-action="vill" data-res="${k}" data-d="-1" ${!canAct || alloc[k] <= 0 ? 'disabled' : ''}>−</button>
-        <b>${alloc[k]}</b>
-        <button data-action="vill" data-res="${k}" data-d="1" ${!canAct || idle <= 0 || alloc[k] >= sl[k] ? 'disabled' : ''}>+</button>
-        <button data-action="vill" data-res="${k}" data-d="5" ${!canAct || idle <= 0 || alloc[k] >= sl[k] ? 'disabled' : ''} title="+5">»</button>
+        <button data-action="vill" data-res="${k}" data-d="-5" ${!canAct || !(alloc[k] > 0) ? 'disabled' : ''} title="-5">«</button>
+        <button data-action="vill" data-res="${k}" data-d="-1" ${!canAct || !(alloc[k] > 0) ? 'disabled' : ''}>−</button>
+        <b>${alloc[k] || 0}</b>
+        <button data-action="vill" data-res="${k}" data-d="1" ${!canAct || idle <= 0 || (alloc[k] || 0) >= sl[k] ? 'disabled' : ''}>+</button>
+        <button data-action="vill" data-res="${k}" data-d="5" ${!canAct || idle <= 0 || (alloc[k] || 0) >= sl[k] ? 'disabled' : ''} title="+5">»</button>
       </div><span></span></div>`;
   }
   html += `<div class="row small" style="margin-top:8px"><span class="grow muted">Nieuwe dorpelingen gaan naar</span>
     <select class="field" data-change="rally" ${canAct ? '' : 'disabled'} style="width:auto">
-      ${[['auto', 'Automatisch'], ...RES.map((k) => [k, RES_NAMES[k]])].map(([v, n]) => `<option value="${v}" ${live.rally === v ? 'selected' : ''}>${n}</option>`).join('')}
+      ${[['auto', 'Automatisch'], ...jobs.map((k) => [k, k === 'fish' ? 'Vissen' : RES_NAMES[k]])].map(([v, n]) => `<option value="${v}" ${live.rally === v ? 'selected' : ''}>${n}</option>`).join('')}
     </select></div>
     ${idle > 0 ? `<p class="req">${idle} dorpeling(en) doen niets! Bouw werkplaatsen (boerderij, kampen) of verdeel ze.</p>` : ''}
   </div>`;
@@ -722,6 +731,12 @@ export function gainsHtml(app, live, b, to) {
       : `Je grootste voorraad (${RES_NAMES[top].toLowerCase()}) is ${fmt(live.res[top])} van ${fmt(cap)}.`);
   }
   add('Bouwers tegelijk', String(maxBuilds(live)), String(maxBuilds(nx)));
+  if (b.type === 'harbor') {
+    add('Plaats voor bootjes', String(maxBoats(live)), String(maxBoats(nx)));
+    const one = (st) => FISH.rate * (1 + 0.1 * (age(st) - 1)) * speed * (1 + boost(st).food) * fishMult(st);
+    add('Vangst per visser', per(one(live)), per(one(nx)));
+    if (maxBoats(nx) > maxBoats(live)) notes.push('Na de verbetering kan je een bootje meer bouwen (en 2 vissers meer laten varen).');
+  }
   if (!sl) {
     const r0 = rates(live, speed); const r1 = rates(nx, speed);
     for (const r of RES) if (Math.floor(r0[r]) !== Math.floor(r1[r])) add(`${RES_NAMES[r]} per uur`, per(r0[r]), per(r1[r]));
@@ -893,6 +908,30 @@ function wallTileHtml(app, live) {
       <button class="btn danger small" data-action="wallTileRemove" data-i="${w.i}" data-j="${w.j}" ${canAct ? '' : 'disabled'}>Afbreken</button></div></div>`;
 }
 
+// havenhuis: bootjes (bouwen, hoeveel bemand) en wat de vissers opbrengen
+function harborHtml(app, live, b) {
+  const d = app.data;
+  const max = maxBoats(live); const boats = live.boats || 0; const ready = boatsReady(live);
+  const fish = live.villagers.fish || 0;
+  const per = FISH.rate * (1 + 0.1 * (age(live) - 1)) * d.world.speed * (1 + boost(live).food) * fishMult(live);
+  const farm = GATHER_RATE.food * (1 + 0.1 * (age(live) - 1)) * d.world.speed * (1 + boost(live).food);
+  const job = live.boatJob;
+  const err = checkBoat(live);
+  const boatIcons = Array.from({ length: FISH.boats[FISH.boats.length - 1] }, (_, k) => `<span class="boat-slot ${k < ready ? (k < Math.ceil(fish / FISH.crew) ? 'on' : 'idle') : k < max ? 'free' : 'locked'}" title="${k < ready ? (k < Math.ceil(fish / FISH.crew) ? 'vaart uit' : 'ligt aan de steiger: geef vissers') : k < max ? 'plaats voor een bootje' : 'meer bootjes op een hoger niveau'}">${icon('fish')}</span>`).join('');
+  return `<div class="card"><h3>${icon('fish')} Vissersbootjes <span class="right">${boats}/${max}</span></h3>
+    <div class="boat-slots">${boatIcons}</div>
+    <dl class="kv"><dt>Vissers</dt><dd>${fish}/${ready * FISH.crew} (${FISH.crew} per bootje)</dd>
+      <dt>Vangst per visser</dt><dd>${fmt(per)} voedsel/u <span class="muted">(boer: ${fmt(farm)})</span></dd>
+      <dt>Vangst in totaal</dt><dd>+${fmt(per * fish)} voedsel/u</dd></dl>
+    ${job ? `<div class="job"><span>Bootje in aanbouw</span> <span data-end="${job.end}"></span><div class="bar"><i data-start="${job.start}" data-end="${job.end}"></i></div></div>`
+      : `<div class="row small" style="margin-top:6px"><span class="grow">Nieuw bootje: ${costHtml(FISH.boatCost, live.res)} <span class="muted">${fmtDuration(FISH.boatTime * 1000 / d.world.speed)}</span></span>
+      <button class="btn small primary" data-action="buildBoat" ${app.canAct && !err ? '' : 'disabled'}>${icon('hammer')} Bootje bouwen</button></div>
+      ${err && !/grondstoffen/.test(err) ? `<p class="small muted" style="margin:4px 0 0">${err}</p>` : ''}`}
+    ${ready && fish < ready * FISH.crew ? `<p class="small" style="margin:6px 0 0">Er is nog plaats aan boord: geef dorpelingen de taak <b>Vissers</b>.</p>` : ''}
+    <div class="actions"><button class="btn" data-action="deselect">Dorpelingen verdelen</button></div>
+    <p class="small muted" style="margin:6px 0 0">Elk niveau: een bootje meer (hooguit ${FISH.boats[FISH.boats.length - 1]}) en ${Math.round(FISH.levelBonus * 100)}% sneller vissen. Niveau 3: kraan en lantaarn, 4: visafslag, 5: vuurtoren.</p></div>`;
+}
+
 function buildingInfo(app, live, b) {
   const d = app.data;
   const L = b.level;
@@ -912,6 +951,7 @@ function buildingInfo(app, live, b) {
       <dt>Uitrusting van je troepen</dt><dd>${['leer en brons', 'ijzer en maliën', 'plaatharnas'][gearOf(L)]}</dd></dl>
       <p class="small muted" style="margin:6px 0 0">Op niveau 3 krijgen je soldaten ijzeren helmen en maliën, op niveau 5 een glanzend plaatharnas.</p></div>`;
     case 'mill': return `<div class="card"><dl class="kv"><dt>Extra voedsel</dt><dd>+${5 * L}%</dd></dl></div>`;
+    case 'harbor': return harborHtml(app, live, b);
     case 'guild': { const bo = boost(live); return `<div class="card"><dl class="kv"><dt>Extra productie</dt><dd>+${3 * L}% van alles</dd>
       <dt>In totaal</dt><dd>${RES.map((r) => `${RES_NAMES[r].toLowerCase()} +${Math.round(bo[r] * 100)}%`).join(' · ')}</dd></dl></div>`; }
     case 'lodge': return `<div class="card"><dl class="kv"><dt>Bouwers</dt><dd>${maxBuilds(live)} (+${BUILDINGS.lodge.builders})</dd><dt>Sneller bouwen</dt><dd>${L * 5}%</dd></dl></div>`;
@@ -1376,11 +1416,13 @@ export function helpHtml(w, peaceEnd) {
     train je daar twee elite-eenheden die enkel jouw volk heeft:</p>
     <ul>${CIV_IDS.map((c) => `<li>${civEmblem(c, 15)} <b>${CIVS[c].name}</b>: ${CIVS[c].units.map((k) => `<b>${UNITS[k].name}</b> (${UNITS[k].desc.charAt(0).toLowerCase()}${UNITS[k].desc.slice(1).replace(/\.$/, '')})`).join(' en ')}.</li>`).join('')}</ul>
     <h3>Vijf tijdperken</h3>
-    <ul>${AGES.slice(1).map((a, i) => `<li><b>${a.name}</b>${['', ': schietbaan, stal, smidse, markt, wachttorens en de <b>molen</b>', ': het kasteel, ridders, rammen en de <b>Academie</b>', ': het monument, het <b>gildehuis</b> en de <b>bouwloods</b>', ': het <b>Adelshof</b> (edelmannen) en de <b>kathedraal</b>'][i] || ': je begint met huizen, werkplekken, een opslagplaats en een kazerne'}.</li>`).join('')}</ul>
+    <ul>${AGES.slice(1).map((a, i) => `<li><b>${a.name}</b>${['', ': schietbaan, stal, smidse, markt, wachttorens, de <b>molen</b> en het <b>havenhuis</b>', ': het kasteel, ridders, rammen en de <b>Academie</b>', ': het monument, het <b>gildehuis</b> en de <b>bouwloods</b>', ': het <b>Adelshof</b> (edelmannen) en de <b>kathedraal</b>'][i] || ': je begint met huizen, werkplekken, een opslagplaats en een kazerne'}.</li>`).join('')}</ul>
     <p><b>Verplaatsen:</b> tik op een gebouw en kies <b>Verplaatsen</b>. Tik daarna op de nieuwe plek (of sleep het gebouw)
     en kies <b>Zet hier</b>; met een muis klik je gewoon op de nieuwe plek. Dat is gratis. Het stadscentrum blijft in het midden.</p>
     <p>Gebouwen verbeter je <b>één niveau per tijdperk</b> (niveau 4 vraagt het Tijdperk van de Gilden, niveau 5 de Kroon). Hoge niveaus zie je ook: vaandels, gouden pieken, aanbouwen.</p>
     <ul><li><b>Molen</b>: +5% voedsel per niveau. <b>Gildehuis</b>: +3% van alle grondstoffen per niveau. <b>Bouwloods</b>: een bouwer extra en sneller bouwen.</li>
+    <li><b>Havenhuis</b> (vanaf het Brons): bouw het op een blauwe plek aan de vijver bij je dorp. Bouw er vissersbootjes (één per niveau, hooguit ${FISH.boats[FISH.boats.length - 1]})
+    en geef dorpelingen de taak <b>Vissers</b> (${FISH.crew} per bootje): een visser vangt ${FISH.rate} voedsel per uur, een boer haalt er ${GATHER_RATE.food}. Elk niveau vist ${Math.round(FISH.levelBonus * 100)}% sneller.</li>
     <li><b>Smidse</b>: +5% aanval en verdediging per niveau, en betere uitrusting: leer en brons, dan ijzer en maliën (niveau 3), dan plaatharnas (niveau 5).</li>
     <li><b>Academie</b>: onderzoek in vier soorten (voetvolk, schutters, ruiterij, stad), drie rijen diep. Geen ruwe kracht maar nieuwe vaardigheden:
     ${Object.values(TECHS).map((T) => `<b>${T.name}</b>`).join(', ')}. Je ziet het aan je troepen: grotere schilden, gouden pluimen, brandende pijlen, lange bogen, kleden en lansen.</li>

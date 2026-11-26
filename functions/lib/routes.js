@@ -15,12 +15,12 @@ import {
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
   townScore, totalVillagers, unitsPop, ensureTerritory, settleBuilds, doFieldSend, doFieldOrder, doFieldSplit,
-  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls,
+  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls, doBoat,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import {
-  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA,
+  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA, JOBS,
 } from '../../public/shared/rules.js';
 
 const routes = [];
@@ -403,9 +403,12 @@ route('POST', '/vassal/ransom', { auth: true, active: true }, async (ctx) => {
 route('POST', '/villagers', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   const alloc = {};
-  for (const r of RES) alloc[r] = int(body[r], -1);
+  for (const r of JOBS) if (body[r] !== undefined || r !== 'fish') alloc[r] = int(body[r], -1);
   return townAction(ctx, (s) => doAssign(s, alloc, body.rally));
 });
+
+// een vissersbootje bouwen in het havenhuis
+route('POST', '/boat', { auth: true, active: true }, async (ctx) => townAction(ctx, (s) => doBoat(s, ctx.now, ctx.world.speed)));
 
 // een dorpeling een vondst (schaap, boom, rotsen, goud) laten oogsten
 route('POST', '/harvest', { auth: true, active: true }, async (ctx) => {

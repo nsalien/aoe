@@ -48,6 +48,7 @@ const P = {
   sunmoon: `<path d="M12 3a9 9 0 0 0 0 18z" fill="#ffd23f" ${S}/><path d="M12 3a9 9 0 0 1 0 18c2.6-2 3.7-5.4 3.7-9S14.6 5 12 3z" fill="#41507a" ${S}/><circle cx="16.2" cy="9" r=".8" fill="#f2e6b8"/><circle cx="17.6" cy="14" r=".6" fill="#f2e6b8"/>`,
   hourglass: `<path d="M6 2.5h12M6 21.5h12" ${S}/><path d="M7 2.5c0 5.5 4.2 6.5 4.2 9.5S7 16 7 21.5h10c0-5.5-4.2-6.5-4.2-9.5S17 8 17 2.5z" fill="#efe0bb" ${S}/>
     <path d="M9 19.8c.8-2.2 2.2-3 3-3s2.2.8 3 3zM9.6 6.5h4.8c-.6 1.5-1.6 2.4-2.4 3-.8-.6-1.8-1.5-2.4-3z" fill="#d9a43a"/>`,
+  fish: `<path d="M2.5 12c3-5 9.5-6.5 13.5-3l4.5-3.2v12.4L16 15c-4 3.5-10.5 2-13.5-3z" fill="#7fb0d2" ${S}/><path d="M8 9.3c1.4 1.6 1.4 3.8 0 5.4" stroke="#2f5f86" stroke-width="1" fill="none"/><circle cx="5.6" cy="11" r="1.05" fill="#1d2f3f"/>`,
   chat: `<path d="M3 5.5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-5 4v-4H5a2 2 0 0 1-2-2z" fill="#f3e5c3" ${S}/><path d="M7 8.5h10M7 11.8h7" stroke="#8a6a3a" stroke-width="1.3" stroke-linecap="round"/>`,
   heart: `<path d="M12 20.5s-8-4.8-8-10.4A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 8 2.5c0 5.6-8 10.4-8 10.4z" fill="#d9483b" ${S}/><path d="M7.6 9.2a2.2 2.2 0 0 1 2.2-1.6" stroke="#ffd6cc" stroke-width="1.3" stroke-linecap="round" fill="none"/>`,
   star: `<path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z" fill="#f2c230" ${S}/>`,

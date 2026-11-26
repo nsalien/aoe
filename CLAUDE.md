@@ -56,6 +56,18 @@ Daarom:
   `attTech`/`defTech`), in de live slag via `st.tk` en `TK()` (`fieldbattle.js`; schildmuur, vuurpijlen, taxusboog, pijlenregen,
   hoefijzers `reg.sp`, lansen, flankrit, krijgsdrill `moLoss`, strijdkreet, kokende pek `pourPitch` → `g.pt`, torenkruisbogen,
   ijzerbeslag). Hoefijzers versnellen ook marsen (`slowestSpeed(units, tech)`).
+- **Havenhuis en vissers** (`harbor` in `BUILDINGS`, `FISH`/`JOBS` in `rules.js`): vanaf tijdperk 2, `shore: true` = enkel op
+  vrij land naast water (`shoreTile`: geen bos, niet gereserveerd, tot `FISH.reach` ringen voorbij je bouwgrond; `canPlaceAt`
+  gebruikt dat i.p.v. `isBuildable`; `shoreSpots` = alle plekken, `shoreSide` = waar het water ligt = variant van het 3D-model).
+  Vissen is een **vijfde taak** van dorpelingen (`s.villagers.fish`; gebruik `JOBS` i.p.v. `RES` waar het over taken gaat):
+  plaatsen = `boatsReady(s) * FISH.crew`, opbrengst voedsel in `rates()` (`FISH.rate` per visser, x `fishMult` per niveau).
+  Bootjes: `s.boats`, één tegelijk bouwen (`s.boatJob`, `doBoat`/`checkBoat`, route `/boat`, klaar in `advance()` →
+  `finishBoat`: vrije dorpelingen gaan aan boord), hooguit `FISH.boats[niveau]` (max. 4). Afbreken = bootjes weg.
+  Tekenen: `harbor` in `models3d.js` (steiger naar het water, per niveau: hut → pannen → kraan/lantaarn → visafslag →
+  vuurtoren), bootje `boat` in `propmodels.js` (v = soort * 2 + bemand), `boatsNow`/`drawBoat` in `town.js` (bemande bootjes
+  varen vaste rondes over het water van het havenhuis: `harborWater`, de rest ligt aan de steiger), `drawShoreSpots` tijdens
+  het plaatsen, `showShore` kijkt naar de dichtste plek. Paneel `harborHtml`, rij 'Vissers' bij de dorpelingen. Bots bouwen
+  (nog) geen havenhuis; `doAssign` zonder `fish` laat de vissers staan.
 - **Edelmannen en vazallen** (`functions/lib/vassal.js`, tabel `vassals`, migratie `0007`): trouw `s.loy` (ontbreekt = 100,
   herstelt in `accrue`, niet als vazal), `LOYALTY`/`VASSAL` in `rules.js`. `attackTown` roept `applyNobles` op (−25 per
   levende edelman, `nobleBlock`: al vazal, beschermd `s.loyShield`, < 45% van je punten, max. 2 vazallen); bij 0 `s.vas` +

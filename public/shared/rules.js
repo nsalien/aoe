@@ -101,6 +101,10 @@ export const BUILDINGS = {
     time: 8 * 3600, growth: 1.35, score: 1500,
     desc: 'Een wereldwonder. Elk niveau levert 1500 extra punten op. Rammen kunnen het beschadigen!',
   },
+  harbor: {
+    name: 'Havenhuis', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 260, food: 100, stone: 40 }, time: 1800, shore: true,
+    desc: 'Ligt aan het water. Bouw vissersbootjes en laat dorpelingen vissen: dat brengt sneller voedsel op dan de boerderij. Elk niveau: een bootje meer (hooguit 4) en sneller vissen.',
+  },
   mill: {
     name: 'Molen', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, stone: 60 }, time: 1500,
     boost: { food: 0.05 }, desc: '+5% voedsel per niveau.',
@@ -131,9 +135,16 @@ export const BUILDINGS = {
 };
 
 export const BUILD_ORDER = ['house', 'farm', 'lumber', 'quarry', 'goldmine', 'storage', 'barracks', 'range',
-  'stable', 'smithy', 'market', 'tower', 'mill', 'workshop', 'academy', 'guild', 'lodge', 'monument', 'court', 'cathedral'];
+  'stable', 'smithy', 'market', 'tower', 'mill', 'harbor', 'workshop', 'academy', 'guild', 'lodge', 'monument', 'court', 'cathedral'];
 
-export const TC_SLOTS = { food: 5, wood: 5, stone: 2, gold: 2 };
+export const TC_SLOTS = { food: 5, wood: 5, stone: 2, gold: 2, fish: 0 };
+// Taken van dorpelingen: de vier grondstoffen en vissen (levert voedsel op, enkel met een havenhuis en bootjes)
+export const JOBS = ['food', 'wood', 'stone', 'gold', 'fish'];
+// Vissen vanuit het havenhuis. Per bootje 'crew' vissers; elke visser vangt 'rate' voedsel per uur (de boerderij: 16),
+// +levelBonus per niveau van het havenhuis boven 1 (en zoals alles +10% per tijdperk). Hooguit boats[niveau] bootjes.
+// Een bootje kost boatCost en is na boatTime seconden klaar (spelsnelheid 1). Het havenhuis staat op een vrije tegel naast
+// water, tot reach ringen voorbij je bouwgrond (de vijver ligt net buiten het dorp).
+export const FISH = { rate: 24, crew: 2, levelBonus: 0.08, boats: [0, 1, 2, 3, 4, 4], boatCost: { wood: 120, food: 40 }, boatTime: 900, reach: 4 };
 export const TC_POP_PER_AGE = 10;
 export const TC_STORAGE_PER_AGE = 3000;
 export const BASE_PROTECT = 300;
