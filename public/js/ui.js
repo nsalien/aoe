@@ -5,7 +5,7 @@ import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   JOBS, FISH, GATHER_RATE,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
-  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf,
+  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf, REPLAY,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
@@ -567,7 +567,8 @@ function fieldCardHtml(app, live) {
     html += `<div class="field-log"><div class="small muted">Laatste gebeurtenissen</div>`;
     for (const e of log) {
       const bad = /lost/.test(e.kind);
-      html += `<div class="small log-row${bad ? ' bad' : ''}"><span class="muted">${new Date(e.t).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</span> ${esc(e.text)}</div>`;
+      const rp = e.rp && e.t + REPLAY.ms > Date.now() ? ` <button class="btn small log-replay" data-action="raidReplay" data-id="${e.id}" title="Bekijk hoe de overval verliep">${icon('play')} Replay</button>` : '';
+      html += `<div class="small log-row${bad ? ' bad' : ''}"><span class="muted">${new Date(e.t).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</span> ${esc(e.text)}${rp}</div>`;
     }
     html += '</div>';
   }
@@ -1360,6 +1361,16 @@ function unitTable(rows, teamColor) {
   return `<table class="bt"><tr><th>Eenheid</th><th>Aantal</th><th>Verloren</th></tr>${rows.map(([k, n, l]) => `<tr><td><img src="${unitThumb(k, teamColor)}" alt="">${UNITS[k].name}</td><td>${fmt(n)}</td><td class="${l ? 'lost' : ''}">${l ? fmt(l) : '0'}</td></tr>`).join('')}</table>`;
 }
 
+// knop 'Bekijk de replay' bij een automatisch verlopen slag (24 uur lang)
+function replayBtnHtml(id, at, attrs = `data-action="replay" data-id="${id}"`) {
+  if (!id) return '';
+  const left = at + REPLAY.ms - Date.now();
+  if (left <= 0) return '<p class="small muted">De replay van deze slag is niet meer beschikbaar (24 uur).</p>';
+  const h = Math.floor(left / 3600000); const m = Math.floor((left % 3600000) / 60000);
+  return `<div class="replay-row"><button class="btn primary small" ${attrs}>${icon('play')} Bekijk de replay</button>
+    <span class="small muted">De slag verliep automatisch. Nog ${h ? `${h} u ` : ''}${m} min te bekijken.</span></div>`;
+}
+
 export function reportDetailHtml(r) {
   const d = r.data;
   const when = new Date(r.created_at).toLocaleString('nl-BE');
@@ -1368,7 +1379,7 @@ export function reportDetailHtml(r) {
     const attRows = Object.keys(d.attUnits).filter((k) => d.attUnits[k]).map((k) => [k, d.attUnits[k], (d.attLost || {})[k] || 0]);
     const defRows = Object.keys(d.defUnits || {}).filter((k) => d.defUnits[k]).map((k) => [k, d.defUnits[k], (d.defLost || {})[k] || 0]);
     return `<p class="outcome ${win ? 'win' : 'lose'}">${win ? 'Overwinning!' : 'Nederlaag'}</p>
-      <p class="small muted">${when}</p>
+      <p class="small muted">${when}</p>${replayBtnHtml(d.replay, r.created_at)}
       <h3>Aanvaller: ${esc(d.attacker.name)} <span class="muted small">(${esc(d.attacker.town)})</span></h3>
       ${unitTable(attRows, '#d64545')}<p class="small">Aanvalskracht: <b>${fmt(d.A)}</b></p>
       <h3>Verdediger: ${esc(d.defender.name)} <span class="muted small">(${esc(d.defender.town)})</span></h3>

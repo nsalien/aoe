@@ -10,7 +10,7 @@ import {
 import {
   getWorld, phaseOf, worldTimes, peaceEnd, peaceBlock, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop, awayInfo,
   battleView, setBattleMode, battleOrder, myBattles, startPractice, startRaid,
-  freshCampState,
+  freshCampState, loadReplay,
 } from './game.js';
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
@@ -668,6 +668,9 @@ route('POST', '/battle/order', { auth: true, process: false }, async (ctx) => {
   return json({ now, battle: await battleOrder(db, world, int(body.id), player.id, body, now) });
 });
 
+// replay van een automatisch uitgerekende slag: het recept, de browser speelt de slag zelf na (24 uur te bekijken)
+route('GET', '/replay', { auth: true, process: false }, async ({ db, player, now, url }) => json({ now, replay: await loadReplay(db, int(url.searchParams.get('id')), player.id, now) }));
+
 // ---------- rapporten en chat ----------
 
 route('GET', '/reports', { auth: true, process: false }, async ({ db, player }) => {
@@ -748,7 +751,7 @@ route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const size = WORLD_SIZE;
   const terrain = generateTerrain(seed, size);
   const camps = generateCamps(seed, size, terrain, CAMP_EXTRA);
-  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs', 'vassals']
+  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs', 'vassals', 'replays']
     .map((tb) => db.prepare(`DELETE FROM ${tb}`));
   stmts.push(db.prepare("DELETE FROM config WHERE k LIKE 'clan:%' OR k LIKE 'prey:%'")); // notities van de bots
   stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at, bots, bot_level) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')

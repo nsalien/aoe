@@ -2557,3 +2557,171 @@ test('dorpelingen verdelen: de browser rekent met dezelfde plaatsen als de serve
   assert.doesNotMatch(src, /function slotsOf/);
   assert.match(src, /slots as townSlots/);
 });
+
+// ---------- replay van een automatisch verlopen slag ----------
+import { setFate, replayBattle, raidReplay, FATE } from '../public/shared/fieldbattle.js';
+import { fateOf } from '../public/shared/battle.js';
+
+// het stadsbeeld zoals de server het in het recept zet
+const viewOf = (s, seed) => ({
+  seed, civ: s.civ, buildings: s.buildings.map((b) => ({ id: b.id, type: b.type, x: b.x, y: b.y, level: b.level })),
+  walls: s.walls || [], gates: s.gates || [], cl: [], lots: [],
+});
+
+test('replay: de nagespeelde slag eindigt zoals de automatische (winnaar, nooit meer verliezen), deterministisch', () => {
+  const cases = [
+    [{ sword: 20, archer: 10, ram: 2 }, { spear: 12, archer: 8 }, true],
+    [{ sword: 40, archer: 20, ram: 3 }, { spear: 12, archer: 8 }, true],
+    [{ sword: 15, archer: 8, rider: 5 }, { spear: 12, archer: 8 }, false],
+    [{ spear: 30, sword: 10 }, {}, true],
+    [{ knight: 20 }, { archer: 30 }, false],
+    [{ elephant: 6, immortal: 10 }, { spear: 30, archer: 20 }, true],
+  ];
+  for (const [att, def, walls] of cases) {
+    const town = siegeTown({ walls });
+    const groups = [{ key: 'home', units: def }];
+    const rb = resolveBattle({ attUnits: att, groups, wall: effectiveWall(town), towerDef: 30, baseDef: 20 });
+    const rec = {
+      kind: 'town', att, defGroups: groups, view: viewOf(town, 7), dir: { x: -1, y: 0.2 },
+      side: { att: { name: 'A', color: '#2e6fb5' }, def: { name: 'V', color: '#c0392b' } }, fate: fateOf(rb, groups),
+    };
+    const st = replayBattle(rec);
+    let s2 = JSON.parse(JSON.stringify(replayBattle(rec)));
+    stepTo(st, FATE.end + 60000);
+    while (s2.over == null) { stepTo(s2, s2.t + 23 * FB.tick, 23); s2 = JSON.parse(JSON.stringify(s2)); }
+    const o = battleOutcome(st);
+    const tag = JSON.stringify({ att, def });
+    assert.equal(o.attWins, rb.attWins, `winnaar ${tag}`);
+    assert.deepEqual(battleOutcome(s2), o, `deterministisch ${tag}`);
+    assert.ok((st.n - st.ph1) * FB.tick <= FATE.end, `duurt niet te lang ${tag}`);
+    // de winnaar verliest nooit meer dan in het rapport, de verliezer precies zoveel (wie vlucht, wordt nog neergehaald)
+    const dl = (k) => (o.defLeft.home || {})[k] || 0;
+    if (rb.attWins) {
+      for (const k of Object.keys(att)) assert.ok((o.attLeft[k] || 0) >= (rb.attLeft[k] || 0), `${k} ${tag}`);
+      for (const k of Object.keys(def)) assert.equal(dl(k), rb.groupsLeft[0].units[k] || 0, `${k} ${tag}`);
+    } else {
+      for (const k of Object.keys(def)) assert.ok(dl(k) >= (rb.groupsLeft[0].units[k] || 0), `${k} ${tag}`);
+      for (const k of Object.keys(att)) assert.equal(o.attLeft[k] || 0, rb.attLeft[k] || 0, `${k} ${tag}`);
+    }
+  }
+  // zonder fate verandert er niets aan een gewone slag
+  const a = siege(); const b = siege();
+  setFate(b, { win: 0, left: {} }); delete b.fate;
+  stepTo(a, 30000); stepTo(b, 30000);
+  assert.deepEqual(battleOutcome(a), battleOutcome(b));
+});
+
+test('replay: een automatische aanval bewaart een recept, 24 uur te bekijken door aanvaller en verdediger', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  assert.equal((await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 1, seed: 7, bots: 0 })).status, 200);
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'egypt' });
+  const b = await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greece' });
+  const c = await call('POST', '/register', { name: 'Cees', password: 'geheim123', civ: 'persia' });
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
+  sql('UPDATE players SET created_at = ?', now - 2 * 86400000);
+  sql("UPDATE towns SET state = json_set(state, '$.units.spear', 20, '$.units.archer', 6)");
+  const bert = db.raw.prepare("SELECT t.id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = 'Bert'").get().id;
+  let r = await call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: bert, units: { spear: 15, archer: 6 } }, a.cookie);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // al lang aangekomen: geen keuze meer, meteen automatisch
+  sql("UPDATE marches SET arrive_at = ? WHERE kind = 'attack'", now - 120000);
+  await call('GET', '/state', null, c.cookie);
+  assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM marches WHERE kind = 'attack' AND status = 'out'").get().n, 0, 'verwerkt');
+  const reports = (await call('GET', '/reports', null, a.cookie)).data.reports;
+  const rep = (await call('GET', `/report?id=${reports.find((x) => x.kind === 'attack').id}`, null, a.cookie)).data.report;
+  const id = rep.data.replay;
+  assert.ok(id, 'het rapport verwijst naar de replay');
+  const ra = await call('GET', `/replay?id=${id}`, null, a.cookie);
+  assert.equal(ra.status, 200, JSON.stringify(ra.data));
+  const rec = ra.data.replay;
+  assert.equal(rec.role, 'att');
+  assert.equal(rec.kind, 'town');
+  assert.deepEqual(rec.att, { spear: 15, archer: 6 });
+  assert.equal(rec.fate.win, rep.data.attWins ? 0 : 1);
+  assert.ok(rec.view.buildings.length && rec.until - rec.at === 24 * 3600000);
+  assert.ok(JSON.stringify(rec).length < 20000, 'klein recept');
+  assert.equal((await call('GET', `/replay?id=${id}`, null, b.cookie)).data.replay.role, 'def', 'de verdediger ziet ze ook');
+  assert.equal((await call('GET', `/replay?id=${id}`, null, c.cookie)).status, 404, 'een ander niet');
+  // de browser speelt ze na en komt uit bij dezelfde winnaar
+  const st = replayBattle(rec);
+  stepTo(st, FATE.end + 60000);
+  assert.equal(battleOutcome(st).attWins, rep.data.attWins);
+  // na 24 uur niet meer
+  sql('UPDATE replays SET created_at = ?', now - 25 * 3600000);
+  const old = await call('GET', `/replay?id=${id}`, null, a.cookie);
+  assert.equal(old.status, 410);
+  assert.match(old.data.error, /24 uur/);
+});
+
+test('replay: een overval die automatisch verliep, kan je naspelen vanuit het logboek', () => {
+  const s = newTownState(0, 'greece');
+  ensureTerritory(s, 7);
+  advance(s, 0, 1);
+  s.units = { spear: 6, archer: 4 };
+  const c = s.terr.camp;
+  c.next = null;
+  c.raid = { start: 1000, at: 2000, n: 9 };
+  advance(s, 3000, 1);
+  const e = s.terr.log.find((l) => /^raid-(won|lost)$/.test(l.kind));
+  assert.ok(e && e.rp, 'recept in het logboek');
+  assert.equal(e.rp.n, 9);
+  assert.deepEqual(e.rp.home, { spear: 6, archer: 4 });
+  const rec = raidReplay(s, e, { town: 'Teststad', name: 'Anna', color: '#2e6fb5' });
+  assert.equal(rec.role, 'def');
+  const st = replayBattle(rec);
+  stepTo(st, FATE.end + 60000);
+  assert.equal(battleOutcome(st).attWins, e.kind === 'raid-lost');
+});
+
+test('replay: ook als je zelf "Automatisch" kiest (uitslagkaartje) en bij een roverskamp', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  assert.equal((await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 1, seed: 9, bots: 0 })).status, 200);
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'egypt' });
+  const b = await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greece' });
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
+  sql('UPDATE players SET created_at = ?', now - 2 * 86400000);
+  sql("UPDATE towns SET state = json_set(state, '$.units.spear', 30, '$.units.archer', 6)");
+  const bert = db.raw.prepare("SELECT t.id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = 'Bert'").get().id;
+  assert.equal((await call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: bert, units: { spear: 12 } }, a.cookie)).status, 200);
+  // Anna is online als haar leger aankomt: ze kiest 'Automatisch', Bert is er niet
+  sql("UPDATE marches SET arrive_at = ? WHERE kind = 'attack'", now - 5000);
+  sql("UPDATE players SET last_seen = 0 WHERE name = 'Bert'");
+  const st = await call('GET', '/state', null, a.cookie);
+  const bt = st.data.battles.find((x) => x.status === 'choose');
+  assert.ok(bt, 'keuze: zelf of automatisch');
+  const r = await call('POST', '/battle/mode', { id: bt.id, mode: 'auto' }, a.cookie);
+  assert.equal(r.data.battle.status, 'done');
+  assert.ok(r.data.battle.result.replay, 'het uitslagkaartje kent de replay');
+  assert.equal((await call('GET', `/replay?id=${r.data.battle.result.replay}`, null, b.cookie)).data.replay.role, 'def');
+  // roverskamp
+  const camp = db.raw.prepare('SELECT id FROM camps ORDER BY level LIMIT 1').get().id;
+  assert.equal((await call('POST', '/march', { kind: 'attack', targetKind: 'camp', targetId: camp, units: { spear: 15, archer: 6 } }, a.cookie)).status, 200);
+  sql("UPDATE marches SET arrive_at = ? WHERE kind = 'attack' AND target_kind = 'camp'", now - 120000);
+  await call('GET', '/state', null, b.cookie);
+  const reports = (await call('GET', '/reports', null, a.cookie)).data.reports;
+  const rep = (await call('GET', `/report?id=${reports.find((x) => /Roverskamp/.test(x.title)).id}`, null, a.cookie)).data.report;
+  const rec = (await call('GET', `/replay?id=${rep.data.replay}`, null, a.cookie)).data.replay;
+  assert.equal(rec.kind, 'camp');
+  assert.equal((await call('GET', `/replay?id=${rep.data.replay}`, null, b.cookie)).status, 404, 'Bert was er niet bij');
+  const s2 = replayBattle(rec);
+  stepTo(s2, FATE.end + 60000);
+  assert.equal(battleOutcome(s2).attWins, rep.data.attWins);
+});

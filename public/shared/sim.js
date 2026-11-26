@@ -10,7 +10,7 @@ import {
 import {
   territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, T_W, TILE, exDecode, exEncode, revealCircle, revealSegment,
 } from './territory.js';
-import { resolveBattle, computeLoot, carryCapacity } from './battle.js';
+import { resolveBattle, computeLoot, carryCapacity, fateOf } from './battle.js';
 import { combatants, runFight, fightEnd, survivorsByGroup } from './skirmish.js';
 
 export class GameError extends Error {
@@ -1421,11 +1421,16 @@ function raidStart(s, t) {
 
 function raidAuto(s, t) {
   const n = s.terr.camp.raid.n;
+  const groups = [{ key: 'home', units: { ...s.units } }];
+  const smithy = bLevel(s, 'smithy');
   const r = resolveBattle({
-    attUnits: { barbarian: n }, groups: [{ key: 'home', units: { ...s.units } }], defSmithy: bLevel(s, 'smithy'),
+    attUnits: { barbarian: n }, groups, defSmithy: smithy,
     wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
   });
-  applyRaid(s, t, r.attWins, r.attLeft, r.groupsLeft[0].units);
+  const loot = applyRaid(s, t, r.attWins, r.attLeft, r.groupsLeft[0].units);
+  // recept voor de replay (24 uur achteraf te bekijken in de browser, met de stad zoals ze dan is)
+  const e = s.terr.log[s.terr.log.length - 1];
+  if (e && e.t === t && /^raid-/.test(e.kind)) e.rp = { n, home: groups[0].units, smithy, fate: fateOf(r, groups), loot };
 }
 
 // Uitslag van een overval verwerken (automatisch, of na de slag die je zelf speelde: de server roept dit dan op).
