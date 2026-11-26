@@ -7,7 +7,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, fmtDuration, JOBS } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -1108,11 +1108,12 @@ function changeVillagers(res, d) {
   const live = app.live;
   const alloc = { ...(app.pendingAlloc || live.villagers) };
   const total = JOBS.reduce((a, k) => a + (live.villagers[k] || 0), live.villagers.idle);
-  const slotsNow = slotsOf(live);
+  // dezelfde plaatsen als de server (ook de vissers: 2 per bootje)
+  const slotsNow = townSlots(live);
   if (alloc[res] == null) alloc[res] = 0;
   let used = JOBS.reduce((a, k) => a + (alloc[k] || 0), 0);
   let step = d;
-  if (step > 0) step = Math.min(step, total - used, slotsNow[res] - alloc[res]);
+  if (step > 0) step = Math.min(step, total - used, (slotsNow[res] || 0) - alloc[res]);
   else step = Math.max(step, -alloc[res]);
   if (!step) return;
   alloc[res] += step;
@@ -1139,15 +1140,6 @@ async function sendAlloc() {
   allocBusy = false;
   if (seq === allocSeq || !r) app.pendingAlloc = null;
   renderPanel(true);
-}
-
-function slotsOf(live) {
-  const out = { food: 5, wood: 5, stone: 2, gold: 2 };
-  for (const b of live.buildings) {
-    const s = BUILDINGS[b.type].slots;
-    if (s && b.level > 0) for (const k of Object.keys(s)) out[k] += s[k] * b.level;
-  }
-  return out;
 }
 
 function switchView(v) {
