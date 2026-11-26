@@ -2546,3 +2546,14 @@ test('overval van de barbaren: melding vooraf, 15 minuten om zelf te verdedigen,
   // computerspelers: geen meldingen
   assert.equal(raidNotice({ bot: {}, terr: { camp: { next: 5 } } }), null);
 });
+
+test('dorpelingen verdelen: de browser rekent met dezelfde plaatsen als de server (ook vissers)', async () => {
+  const s = harborTown(2);
+  const sl = slotsOf(s);
+  for (const j of JOBS) assert.ok(Number.isFinite(sl[j]), `plaatsen voor ${j}`);
+  // main.js mag geen eigen kopie van de plaatsen hebben (die kende de vissers niet: de knop + deed dan niets)
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../public/js/main.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /function slotsOf/);
+  assert.match(src, /slots as townSlots/);
+});
