@@ -519,12 +519,20 @@ minuut een bot aan de beurt als niemand online is.
     recept (±1,5–5 kB, tabel `replays`, enkel als er een echte speler bij is); de browser speelt de slag na met de bestaande
     slagmotor (computer tegen computer, `replayBattle`) en stuurt ze bij (`setFate`), want het automatische gevecht (`resolveBattle`)
     en de live slag zijn verschillende modellen: zonder bijsturing won in de proef soms de andere kant. Nu: winnaar altijd juist,
-    verliezen van de verliezer exact (wie vlucht wordt neergehaald), van de winnaar ±80%; een slag duurt ±0:30–2:40. Knoppen:
+    verliezen van de verliezer exact (wie vlucht wordt neergehaald), van de winnaar ±80% (sinds punt 60 exact); een slag duurt ±0:30–2:40. Knoppen:
     pauze, 1×/2×/4×/8×, Einde, Opnieuw; eindscherm met de cijfers van het rapport. Ook voor roverskampen, voor 'Automatisch' gekozen
     slagen (uitslagkaartje) en voor overvallen van de barbaren (logboek). Getest: Node (determinisme na JSON, winnaar en verliezen,
     routes, 24 u-grens, rechten) en in Chromium op pc, gsm rechtop en liggend.
     Onderweg gevonden: rook boven puin van een muur op tegels met negatieve coördinaten gaf een negatieve straal (`A.smoke`), waardoor
     de rest van het beeld niet getekend werd (ook in gewone belegeringen). Opgelost.
+
+60. **Replay exact** (gemeld: "rapport zegt dat ik 2 van de 5 troepen kwijt ben, in de replay ben ik niets verloren; het moet
+    juist zijn"). De bijsturing werkte op levenspunten per soort: de winnaar verloor in de replay ±80% van zijn verliezen en
+    gewonde soldaten bleven op het scherm 'leven'. Nu telt ze gesneuvelde soldaten per soort (zoals de teller bovenaan), voor
+    beide kanten exact: de verliezer blijft overeind tot de winnaar zijn verliezen heeft en mikt dan op de soorten die nog moeten
+    vallen; vastgelopen? Dan trekken die regimenten naar de vijand, en als laatste redmiddel een gerichte klap van de dichtste
+    vijand. Het stadscentrum schiet mee (de verdediging door dorpelingen/bezetting uit het automatische gevecht). Gemeten op 350
+    willekeurige slagen: 0 fouten. Oude replays (al bewaard) spelen nu ook exact.
 
 59. **Meldingen: aanval op je stad en op een clanlid, meteen bij vertrek** (gevraagd: "extra opties om meldingen aan te zetten:
     als je aangevallen wordt, direct als de aanval geïnitieerd wordt; als je teamlid aangevallen wordt, ook direct; standaard aan").
@@ -540,8 +548,8 @@ minuut een bot aan de beurt als niemand online is.
   in een rechte lijn, ook over water.
 
 - Belegering: aanvallers hebben geen ladders of belegeringstorens; kapotte muren blijven na de slag gewoon heel in de stad.
-- Replay: de verliezen van de winnaar kloppen niet altijd per soort (schutters achteraan worden soms niet geraakt); het eindscherm
-  toont daarom de cijfers van het rapport. Een overval-replay gebruikt de stad zoals ze nu is (niet zoals tijdens de overval).
+- Replay: in ±3% van de slagen loopt het vast en vallen de laatste soldaten door een gerichte klap van de dichtste vijand (de
+  aantallen kloppen altijd). Een overval-replay gebruikt de stad zoals ze nu is (niet zoals tijdens de overval).
 - Aanvallen wachten niet tot de aanvaller online komt (zie §3); er is nu wel een melding + aftelling. Mogelijke
   uitbreiding: een wachttijd voor de stad tot de aanvaller online komt.
 - Headless Chromium meldt meldingen altijd als 'geblokkeerd': de echte inschrijving is niet in de container te testen

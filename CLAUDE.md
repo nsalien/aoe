@@ -169,12 +169,20 @@ Daarom:
   namen/kleuren) + de vaste uitslag `fate` (`fateOf` in `battle.js`: winnaar en overlevenden per pool, sleutels zoals
   `battleOutcome`) + `res` (verliezen en buit uit het rapport). `GET /replay?id=` (`loadReplay`, 404 voor anderen, 410 na 24 u).
   De browser speelt de slag na: `replayBattle(rec)` (fieldbattle.js) = `createBattle` met beide kanten AI + `setFate`.
-  **Bijsturing** (`st.fate`, `FATE`): per pool (`kant|groep|soort`) sneuvelen er nooit meer dan in het rapport (`fateCap`, ook pek en
-  vallen van de muur); enkel de echte winnaar kan winnen (`judgeFate`, geen plein); de winnaar vlucht nooit, de verliezer pas na
-  `mayRout` of 75% verlies, komt niet terug en wordt op de vlucht neergehaald tot zijn verliezen kloppen; schade bijgestuurd
-  (`f.m` per kant, `f.r` per soort van de winnaar, de winnaar sterker na `ramp`); na `routAll` vlucht de verliezer, `end` = vangnet.
-  Resultaat: winnaar altijd juist, verliezen van de verliezer exact, van de winnaar ±80% (schutters achteraan worden soms niet
-  geraakt). Het eindscherm toont de cijfers van het rapport. Overvallen van de barbaren die automatisch verliepen (`raidAuto` in
+  **Bijsturing** (`st.fate`, `FATE`): per pool (`kant|groep|soort`, `u.pk`) ligt vast hoeveel soldaten sneuvelen (`q`, `d` = al
+  gesneuveld, geteld als `aliveN`: gewonden leven, dus wat je ziet = het rapport, **voor beide kanten exact**). `fateCap`: een klap
+  die er meer zou doden, verwondt enkel (ook pek, vallen van de muur, achtervolging). `fateRoom`: de verliezer blijft overeind
+  zolang de winnaar zijn verliezen nog niet heeft (hooguit 35% voor, nooit de laatste; rammen tellen niet). Zolang de winnaar nog
+  moet bloeden (`f.ow`): de verliezer slaat/schiet niet op wie niet meer kan sneuvelen (`fateSkip` in `pickEnemy`, `pickFoe`,
+  `shoot`, `nearestFoeReg`, `regFight`, torens), slaat sneller een bres, valt na `push` zelf aan en vlucht niet; geen vooruitgang
+  na `stall` → de regimenten van de winnaar die nog moeten bloeden, trekken naar de dichtste vijand (ook torens); na `stuck`
+  elke seconde één gerichte klap/pijl van de dichtste vijand (`fateStrike`); `end` = laatste vangnet (`fateSettle`). Schade
+  bijgestuurd: `f.m` per kant (verliezen van de winnaar in het tempo van de verliezer, en binnen `pace`), `f.r` per soort van de
+  winnaar, de winnaar sterker na `ramp`. Het stadscentrum schiet mee voor de verdediger (toren met `tc: 1`, onverwoestbaar, geen
+  doelwit: de bezetting/dorpelingen uit `townBaseDef`). Enkel de echte winnaar kan winnen en pas als beide kanten klaar zijn
+  (`judgeFate`). Gemeten op 350 willekeurige slagen (stad, kamp, overval, versterking, grote legers): 0 fouten, geen eindvangnet,
+  in ±3% een paar gerichte klappen; duur mediaan ±45 s, 90% < 1:45, max ±3:30.
+  Het eindscherm toont de cijfers van het rapport. Overvallen van de barbaren die automatisch verliepen (`raidAuto` in
   `sim.js`) zetten het recept `rp` in het logboek van de stad; `raidReplay(s, e, me)` maakt er een replay van (stad zoals ze nu is).
   Browser: `BattleView.showReplay(rec)` (eigen klok `rp.t`, `clock()`, pauze/spatiebalk, 1×–8×, Einde, Opnieuw; geen peilingen,
   tikken doen niets), knoppen in het rapport (`replayBtnHtml` in `ui.js`), in het logboek (`raidReplay`-actie) en op het uitslagkaartje.
