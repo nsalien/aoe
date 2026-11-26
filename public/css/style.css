@@ -271,6 +271,7 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
 .bcard.job .t { font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink2); }
 .bcard.job .bar { width: 82%; height: 5px; margin-top: 1px; }
 .bb-sep { flex: none; width: 2px; margin: 6px 2px; border-radius: 2px; background: rgba(242, 201, 90, 0.35); }
+.bcard .cnt.newtag { z-index: 2; color: #fff; background: #3f8f3c; border-radius: 6px; padding: 0 5px; line-height: 14px; }
 .bb-note { align-self: center; display: flex; align-items: center; gap: 6px; padding: 6px 10px; color: #f3e4c0; font-size: 13px; line-height: 1.35; }
 .bb-note .ic { width: 18px; height: 18px; flex: none; }
 .bcard .cnt { position: absolute; top: 3px; right: 5px; font-size: 10px; color: var(--muted); font-weight: 700; }

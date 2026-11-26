@@ -271,7 +271,9 @@ Daarom:
 - **Tabbladen onderaan de stad** (`#buildwrap`): Bouwen, Mijn leger, Bouwadvies (`app.bbTab`, onthouden; tijdens bouwen/muren
   altijd Bouwen: `bbTabNow`). Zelfde strook (`#buildbar`), ander inhoud: `buildBarHtml`, `armyBarHtml` (`armySummary`: per soort
   thuis / in je gebied / onderweg of bij een bondgenoot / in opleiding) en `adviceBarHtml` (bouwers + `upgradeAdvice`: wat in dit
-  tijdperk nog verbeterd kan worden, per soort en niveau gebundeld, wat nu kan eerst; `adviceReady` = getal op het tabblad).
+  tijdperk nog verbeterd kan worden, per soort en niveau gebundeld, wat nu kan eerst; daarna `newBuildAdvice`: gebouwen die je in
+  dit tijdperk mag zetten maar nog helemaal niet hebt, bv. het havenhuis, label 'nieuw', tik = `place` zoals in het bouwmenu;
+  `adviceReady` = getal op het tabblad, beide samen).
   Tik op een voorstel of lopende bouw = `adviceGo` → `focusBuilding` (camera erheen, gebouw kiezen, paneel open; een gebundelde
   kaart toont bij elke tik het volgende gebouw). Smalle gsm: korte namen (Leger, Advies); met troepen gekozen enkel iconen.
 
