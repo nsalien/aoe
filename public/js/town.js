@@ -7,7 +7,7 @@ import { BUILDINGS, TOWN_GRID, RES, BONUS, RES_NAMES, WILD, UNITS, FIELD, LAND, 
 import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
-  exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidSize, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
+  exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidNow, campGrowth, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
   gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls, shoreSide, shoreSpots, boatsReady,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE, inTerr } from '../shared/territory.js';
@@ -2966,17 +2966,18 @@ export class TownView {
     });
   }
 
-  // barbaren die op weg zijn naar je stad (de laatste anderhalve minuut voor een overval)
+  // barbaren op weg naar je stad: eerst verzamelen ze voor hun kamp, de laatste anderhalve minuut trekken ze naar je stad
+  // (niet als je de slag zelf speelt: dan staan ze op het slagveld)
   raidParty(now) {
     const s = this.state;
     if (!s.terr || !this.terr.camp) return null;
-    const c = s.terr.camp;
-    if (c.next == null || !campAlive(s, now)) return null;
-    const start = c.next - WILD.raid.warnMs;
-    if (now < start || now >= c.next) return null;
-    const f = (now - start) / WILD.raid.warnMs;
-    const d = tcDoor();
-    return { x: this.terr.camp.x + (d.gx - this.terr.camp.x) * f, y: this.terr.camp.y + (d.gy - this.terr.camp.y) * f, n: raidSize(s), dir: d.gx - d.gy - (this.terr.camp.x - this.terr.camp.y) >= 0 ? 1 : -1 };
+    const raid = raidNow(s);
+    if (!raid || raid.battle || now < raid.start || now >= raid.at) return null;
+    const walk = Math.min(90000, raid.at - raid.start);
+    const ws = raid.at - walk;
+    const f = now < ws ? 0.12 : 0.12 + (0.88 * (now - ws)) / walk;
+    const d = tcDoor(); const c = this.terr.camp;
+    return { x: c.x + (d.gx - c.x) * f, y: c.y + (d.gy - c.y) * f, n: raid.n, walking: now >= ws, dir: d.gx - d.gy - (c.x - c.y) >= 0 ? 1 : -1 };
   }
 
   drawRaid(ctx, raid, t) {
@@ -2985,7 +2986,7 @@ export class TownView {
     const offs = [[0, 0], [0.35, -0.1], [-0.1, 0.35], [0.4, 0.3], [-0.35, 0.05], [0.1, -0.4], [0.5, -0.4], [-0.4, 0.4]];
     for (let i = n - 1; i >= 0; i--) {
       const q = toWorld(offs[i][0], offs[i][1]);
-      facing(ctx, p.x + q.x, raid.dir, () => A.person(ctx, p.x + q.x, p.y + q.y, { s: 1, walking: true, phase: t * 0.014 + i, body: '#5b4636', weapon: i % 2 ? 'sword' : 'spear', barb: true, skin: 1 + (i % 3) }));
+      facing(ctx, p.x + q.x, raid.dir, () => A.person(ctx, p.x + q.x, p.y + q.y, { s: 1, walking: raid.walking, phase: t * 0.014 + i, body: '#5b4636', weapon: i % 2 ? 'sword' : 'spear', barb: true, skin: 1 + (i % 3) }));
     }
     A.flag(ctx, p.x + 4, p.y - 2, 28, '#7a1b12', t, 0.9);
   }
@@ -3137,7 +3138,8 @@ export class TownView {
     if (c && this.isExplored(c.x, c.y)) {
       const p = toWorld(c.x, c.y);
       if (Math.abs(w.x - p.x) < 68 && w.y < p.y + 30 && w.y > p.y - 52) {
-        label = campAlive(s, this.now) ? `${WILD.camp.name} · ${Math.max(1, campSize(s))} barbaren` : `${WILD.camp.name} (verwoest)`;
+        const grow = campGrowth(s, this.now);
+        label = campAlive(s, this.now) ? `${WILD.camp.name} · ${Math.max(1, campSize(s))} barbaren${grow > 1.04 ? ` · ${Math.round((grow - 1) * 100)}% sterker` : ''}` : `${WILD.camp.name} (verwoest)`;
         at = p;
       }
     }

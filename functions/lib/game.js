@@ -1,16 +1,16 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
   advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
-  towerDefense, townBaseDef, effectiveWall, newTownState, townScore,
+  towerDefense, townBaseDef, effectiveWall, newTownState, townScore, raidNow, applyRaid,
 } from '../../public/shared/sim.js';
 import { applyNobles, lordCount, addVassal, liberateByAttack, processVassals } from './vassal.js';
-import { tileIndex } from '../../public/shared/territory.js';
+import { tileIndex, territory } from '../../public/shared/territory.js';
 import {
   resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits, subtractUnits,
 } from '../../public/shared/battle.js';
 import { createBattle, stepTo, queueOrder, battleOutcome, FB, FORMS } from '../../public/shared/fieldbattle.js';
 import {
-  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS, WAR, bountyOf,
+  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS, WAR, bountyOf, TC_POS, WILD,
 } from '../../public/shared/rules.js';
 
 export class ConflictError extends Error {}
@@ -70,9 +70,19 @@ export function nextBuildAt(s) {
   return m;
 }
 
+// Wanneer moet de cron deze stad bekijken voor een overval van de barbaren (notifyRaids in push.js)? Het begin van de
+// volgende overval (melding sturen), of het einde van de lopende (daarna de volgende inplannen). Niet voor bots.
+export function raidNotice(s) {
+  if (!s || s.bot || !s.terr || !s.terr.camp) return null;
+  const c = s.terr.camp;
+  const raid = c.raid;
+  if (raid) return !raid.told ? raid.start : raid.battle ? raid.bt + WILD.raid.liveMs : raid.at;
+  return c.next ?? null;
+}
+
 export async function saveTown(db, town) {
-  const r = await db.prepare('UPDATE towns SET state = ?, build_at = ?, version = version + 1 WHERE id = ? AND version = ?')
-    .bind(JSON.stringify(town.state), nextBuildAt(town.state), town.id, town.version).run();
+  const r = await db.prepare('UPDATE towns SET state = ?, build_at = ?, raid_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+    .bind(JSON.stringify(town.state), nextBuildAt(town.state), raidNotice(town.state), town.id, town.version).run();
   if (!r.meta.changes) throw new ConflictError();
   town.version++;
 }
@@ -689,6 +699,94 @@ export async function startPractice(db, world, player, role, now) {
   return publicBattle(b, role);
 }
 
+// ---------- overval van de barbaren: de slag zelf spelen (binnen de 15 minuten dat ze naar je dorp trekken) ----------
+const townView = (s, seed) => ({
+  seed, civ: s.civ || null,
+  buildings: s.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+  walls: s.walls || [], gates: s.gates || [], cl: (s.terr && s.terr.cl) || [], lots: (s.terr && s.terr.lots) || [],
+});
+
+export async function startRaid(db, world, player, now) {
+  const busy = await db.prepare("SELECT id FROM battles WHERE (att_player = ? OR def_player = ?) AND status != 'done' LIMIT 1").bind(player.id, player.id).first();
+  const me = await db.prepare('SELECT t.id, t.name, tm.color FROM towns t JOIN players p ON p.id = t.player_id LEFT JOIN teams tm ON tm.id = p.team_id WHERE t.player_id = ?').bind(player.id).first();
+  if (!me) throw new GameError('Je hebt nog geen stad.');
+  const town = await loadTown(db, me.id);
+  ensureTerritory(town.state, town.id);
+  advance(town.state, gameTime(world, now), world.speed);
+  const s = town.state;
+  const raid = raidNow(s);
+  if (!raid) throw new GameError('Er trekken geen barbaren naar je dorp.');
+  if (raid.battle) {
+    const b = await loadBattle(db, raid.battle);
+    if (b && b.status !== 'done') return publicBattle(b, 'def');
+    throw new GameError('Je verdedigde je dorp al.');
+  }
+  if (busy) throw new GameError('Je zit al in een slag. Rond die eerst af.');
+  if (now >= raid.at) throw new GameError('De barbaren zijn er al: het gevecht liep automatisch.');
+  if (!countUnits(s.units)) throw new GameError('Je hebt geen soldaten thuis. Je muur, torens en dorpelingen verdedigen je dorp dan automatisch.');
+  // de barbaren komen uit de richting van hun kamp
+  const camp = territory(s.terr.seed).camp;
+  const dir = camp ? { x: camp.x - (TC_POS.x + 1), y: camp.y - (TC_POS.y + 1) } : { x: -1, y: 0 };
+  const att = { barbarian: raid.n };
+  const home = { ...s.units };
+  const state = createBattle({
+    kind: 'town', att, defGroups: [{ key: 'home', units: home }], town: s, townId: town.id, dir,
+    aiAtt: true, aiDef: false, now, techD: s.tech || null, smithyD: bLevel(s, 'smithy'),
+  });
+  state.meta = {
+    raid: true, attInit: att, defInit: { home }, style: { civ: s.civ, age: bLevel(s, 'tc') }, level: 0, view: townView(s, town.id),
+    att: { name: 'Barbaren', color: '#6b4a2b' }, def: { name: player.name, color: me.color || '#2e6fb5' },
+  };
+  const ins = await db.prepare(
+    `INSERT INTO battles (march_id, att_player, def_player, target_kind, target_id, title, status, choose_until, att_mode, def_mode, state, created_at, updated_at)
+     VALUES (0, 0, ?, 'raid', ?, ?, 'live', ?, 'auto', 'manual', ?, ?, ?)`,
+  ).bind(player.id, town.id, me.name, now, JSON.stringify(state), now, now).run();
+  const id = ins.meta.last_row_id;
+  // de overval wacht nu op de slag (geen automatisch gevecht meer, behalve als vangnet na WILD.raid.liveMs)
+  Object.assign(raid, { battle: id, bt: now, init: home });
+  try {
+    await saveTown(db, town);
+  } catch (e) {
+    await db.prepare('DELETE FROM battles WHERE id = ?').bind(id).run();
+    if (e instanceof ConflictError) throw new GameError('Het is druk, probeer opnieuw.', 409);
+    throw e;
+  }
+  return publicBattle(await loadBattle(db, id), 'def');
+}
+
+// einde van de slag tegen de barbaren: overlevenden thuis, buit van de barbaren, logboek (zoals het automatische gevecht)
+async function finishRaid(db, world, b, state, now, abandoned) {
+  const o = battleOutcome(state);
+  let attWins = o.attWins; let attLeft = o.attLeft; let survived = (o.defLeft && o.defLeft.home) || {};
+  if (abandoned && state.over == null) {
+    // niemand keek nog: de rest van de slag automatisch
+    const rr = resolveBattle({ attUnits: attLeft, groups: [{ key: 'home', units: survived }] });
+    attWins = rr.attWins; attLeft = rr.attLeft; survived = rr.groupsLeft[0].units;
+  }
+  const init = (state.meta.defInit && state.meta.defInit.home) || {};
+  let loot = {}; let applied = false;
+  await mutateTown(db, world, b.target_id, now, (s) => {
+    const raid = raidNow(s);
+    applied = !!(raid && raid.battle === b.id);
+    if (!applied) return; // al automatisch afgehandeld (vangnet)
+    const before = raid.init || init;
+    // overlevenden van de slag + wat er intussen bij kwam (getraind) of wegging (op pad gestuurd)
+    const home = {};
+    for (const k of new Set([...Object.keys(s.units), ...Object.keys(before)])) {
+      const cur = s.units[k] || 0;
+      home[k] = Math.max(0, Math.min(cur, (survived[k] || 0) + Math.max(0, cur - (before[k] || 0))));
+    }
+    loot = applyRaid(s, now, attWins, attLeft, home);
+  });
+  b.status = 'done';
+  b.result = {
+    raid: true, auto: abandoned, attWins, attLost: subtractUnits(state.meta.attInit, attLeft), defLost: subtractUnits(init, survived),
+    loot, retreat: o.retreat, late: !applied,
+  };
+  b.state = state;
+  await saveBattle(db, b, now);
+}
+
 // eerst de slag 'claimen' (met versiecontrole), zodat ze nooit twee keer uitgerekend wordt
 async function claimBattle(db, b, now) {
   b.status = 'done';
@@ -745,6 +843,7 @@ async function finishBattle(db, world, b, now, abandoned = false) {
     await saveBattle(db, b, now);
     return;
   }
+  if (b.target_kind === 'raid') { await finishRaid(db, world, b, state, now, abandoned); return; }
   const m = await loadMarch(db, b.march_id);
   const o = battleOutcome(state);
   let r = null;

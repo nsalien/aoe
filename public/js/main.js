@@ -7,8 +7,8 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList } from '../shared/sim.js';
-import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration, JOBS } from '../shared/rules.js';
+import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow } from '../shared/sim.js';
+import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, fmtDuration, JOBS } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -386,7 +386,7 @@ function handleBattles(data, first) {
     const prev = knownBattles.get(b.id);
     knownBattles.set(b.id, b.status);
     const mine = b.role === 'att' ? b.attMode : b.defMode;
-    if (b.kind === 'practice') continue; // oefenslag: geen meldingen, die open je zelf
+    if (b.kind === 'practice' || b.kind === 'raid') continue; // oefenslag en overval: geen meldingen, die open je zelf
     if (!prev && b.status !== 'done' && b.role === 'def') toast(`${b.title} wordt aangevallen${b.attName ? ` door ${b.attName}` : ''}!`, 'err', 'swords');
     if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !(battle && battle.open)) { askedBattles.add(b.id); showAsk(b); }
     // de tegenpartij koos om zelf te besturen: bekijk of neem alsnog het bevel over
@@ -396,7 +396,7 @@ function handleBattles(data, first) {
     if (b.status === 'live' && mine === 'manual' && !(battle && battle.open) && prev !== 'live') openBattle(b.id);
   }
   const ask = $('#battleAsk');
-  if (ask && !ask.hidden) {
+  if (ask && !ask.hidden && ask.dataset.id !== 'raid') {
     const b = (data.battles || []).find((x) => x.id === Number(ask.dataset.id));
     if (!b || b.status !== 'choose') hideAsk();
   }
@@ -434,6 +434,11 @@ async function chooseBattle(id, mode) {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('#battleAsk [data-bact="choose"]');
   if (el) chooseBattle(Number(el.dataset.id), el.dataset.mode);
+  const rd = e.target.closest('#battleAsk [data-bact="raid"]');
+  if (rd && !rd.disabled) {
+    if (rd.dataset.mode === 'manual') defendRaid();
+    else { hideAsk(); toast('Je soldaten, muur en torens vechten de overval automatisch uit.', '', 'hourglass'); }
+  }
 });
 
 function activeBattle() {
@@ -470,11 +475,12 @@ function computeLive(force) {
 }
 
 // nieuwe gebeurtenissen in je gebied (everzwijn gevangen, overval, ...) als melding tonen
-const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star' };
+const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-warn': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star' };
 function announceLog(terr) {
   if (app.lastLid == null || terr.lid < app.lastLid) { app.lastLid = terr.lid; return; }
   if (terr.lid === app.lastLid) return;
-  for (const e of terr.log) if (e.id > app.lastLid) toast(e.text, /lost/.test(e.kind) ? 'err' : 'ok', LOG_ICON[e.kind] || 'star');
+  // 'raid-warn': daarvoor verschijnt het keuzevenster (offerRaid)
+  for (const e of terr.log) if (e.id > app.lastLid && e.kind !== 'raid-warn') toast(e.text, /lost/.test(e.kind) ? 'err' : 'ok', LOG_ICON[e.kind] || 'star');
   app.lastLid = terr.lid;
 }
 
@@ -529,7 +535,11 @@ function tick() {
     w.phase = 'x';
     refresh();
   }
+  // de barbaren trekken naar je dorp: één keer vanzelf het keuzevenster (daarna via de balk bovenaan)
+  const rd = raidIncoming();
+  if (rd && app.raidAsked !== rd.start) offerRaid(rd);
   const ask = $('#battleAsk');
+  if (ask && !ask.hidden && ask.dataset.id === 'raid' && !rd) hideAsk();
   if (ask && !ask.hidden) {
     const until = Number(ask.dataset.until);
     const sec = Math.max(0, Math.ceil((until - now) / 1000));
@@ -610,11 +620,12 @@ function renderAlert() {
     return;
   }
   const hostile = app.data.marches.filter((m) => !m.ally && m.status === 'out' && m.arriveAt > app.now()).sort((a, b) => a.arriveAt - b.arriveAt);
+  // overval van de barbaren: eerst kiezen (zelf verdedigen of automatisch), dat kan maar 15 minuten
   const raid = raidIncoming();
-  if (!hostile.length && raid) {
+  if (raid) {
     el.hidden = false;
-    el.dataset.action = 'raidGo';
-    setHTML(el, `${UI.icon('bell')} Barbaren op weg naar je dorp! Aankomst over <span data-end="${raid}">${fmtDuration(raid - app.now())}</span>`);
+    el.dataset.action = 'raidAsk';
+    setHTML(el, `${UI.icon('swords')} ${raid.n} barbaren vallen aan! Kies binnen <span data-end="${raid.at}">${fmtDuration(raid.at - app.now())}</span>`);
     return;
   }
   if (!hostile.length) { el.hidden = true; return; }
@@ -625,13 +636,36 @@ function renderAlert() {
   setHTML(el, `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`);
 }
 
-// komt er een overval van het barbarenkamp aan? (tijdstip van aankomst of null)
+// trekken de barbaren naar je dorp (en heb je nog niet gekozen om zelf te verdedigen)? { start, at, n } of null
 function raidIncoming() {
-  const s = app.live;
-  if (!s || !s.terr || s.terr.camp.next == null) return null;
-  const now = app.now();
-  const at = s.terr.camp.next;
-  return campAlive(s, now) && now >= at - WILD.raid.warnMs && now < at ? at : null;
+  const r = raidNow(app.live);
+  return r && !r.battle && app.now() < r.at ? r : null;
+}
+
+// keuzevenster bij een overval: zelf verdedigen (een slag in je eigen stad) of automatisch
+function offerRaid(raid) {
+  if (battle && battle.open) return;
+  let el = $('#battleAsk');
+  if (el && !el.hidden && el.dataset.id !== 'raid') return; // eerst de andere keuze
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'battleAsk'; el.className = 'bt-ask';
+    document.body.appendChild(el);
+  }
+  app.raidAsked = raid.start;
+  el.dataset.id = 'raid';
+  el.dataset.until = raid.at;
+  el.innerHTML = UI.raidAskHtml(app.live, raid, app.now());
+  el.hidden = false;
+}
+
+async function defendRaid() {
+  try {
+    const r = await post('/raid/defend', {});
+    knownBattles.set(r.battle.id, 'live');
+    openBattle(r.battle.id, r.battle);
+    refresh();
+  } catch (e) { toast(e.message, 'err', 'swords'); }
 }
 
 // uitleg bovenaan als je een dorpeling, soldaat of groep gekozen hebt
@@ -1454,11 +1488,9 @@ const actions = {
     const d = tcDoor();
     fieldOrder({ action: 'send', spec: { units }, to: { x: d.gx + 0.8, y: d.gy + 1.8 } }).then((r) => { if (r) openPanelMobile(false); });
   },
-  raidGo() {
-    if (app.view !== 'town') switchView('town');
-    const c = app.live.terr && app.live.terr.camp;
-    town.centerOn(app.live.buildings.find((b) => b.type === 'tc'));
-    if (c) toast('Hoe sterker je muur, torens en leger thuis, hoe beter je de barbaren afslaat.', '', 'shield');
+  raidAsk() {
+    const raid = raidIncoming();
+    if (raid) offerRaid(raid);
   },
   harvest(el) { harvestNode(Number(el.dataset.id), null); },
   vill(el) { changeVillagers(el.dataset.res, Number(el.dataset.d)); },

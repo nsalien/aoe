@@ -381,13 +381,23 @@ test('barbarenkamp verwoesten stopt de overvallen even', () => {
   assert.ok(s.terr.camp.next >= s.terr.camp.down, 'geen overval zolang het kamp plat ligt');
 });
 
-test('barbaren overvallen een onverdedigde stad', () => {
+test('barbaren overvallen een onverdedigde stad (na 15 minuten waarschuwing)', () => {
   const s = terrTown();
   s.units = {};
-  advance(s, s.terr.camp.next + 1, 1);
+  const at = s.terr.camp.next;
+  assert.ok(at >= WILD.raid.firstHours * 3600000, 'niet in de eerste uren van een nieuwe stad (gemaakt op t = 0)');
+  advance(s, at + 1, 1);
+  const raid = s.terr.camp.raid;
+  assert.ok(raid && raid.at === at + WILD.raid.warnMs, 'ze trekken naar je dorp');
+  assert.ok(s.terr.log.some((l) => l.kind === 'raid-warn'), 'melding in je logboek');
+  assert.ok(!s.terr.log.some((l) => l.kind === 'raid-lost' || l.kind === 'raid-won'), 'nog niet aangevallen');
+  assert.equal(s.terr.camp.next, null, 'geen tweede overval tegelijk');
+  advance(s, raid.at + 1, 1);
   const log = s.terr.log.find((l) => l.kind === 'raid-lost' || l.kind === 'raid-won');
   assert.ok(log, 'er was een overval');
   assert.equal(s.terr.camp.raids, 1);
+  assert.equal(s.terr.camp.raid, null);
+  assert.ok(s.terr.camp.next >= raid.at + WILD.raid.quietHours * 3600000, 'daarna even rust');
   assert.ok(raidSize(s) >= 3 && campSize(s) >= 4);
 });
 
@@ -403,7 +413,8 @@ test('alles blijft gelijk tussen browser en server (stapsgewijs rekenen)', () =>
   advance(a, 80 * 3600000, 1);
   for (let t = 3600000; t <= 80 * 3600000; t += 3600000) advance(b, t, 1);
   assert.deepEqual(a.terr, b.terr);
-  assert.deepEqual(a.res, b.res);
+  // grondstoffen: optellen in andere stukken geeft hooguit een afrondingsverschil in de laatste decimaal
+  for (const k of Object.keys(a.res)) assert.ok(Math.abs(a.res[k] - b.res[k]) < 1e-6, `${k}: ${a.res[k]} ~ ${b.res[k]}`);
 });
 
 // ---------- volkeren ----------
@@ -490,7 +501,7 @@ test('het barbarenkamp rond je stad is vrij makkelijk te verslaan', () => {
   assert.ok(r.b.every((u) => u.hp <= 0), 'de barbaren zijn verslagen');
   assert.ok(r.a.filter((u) => u.hp > 0).length >= n - 2, 'en je verliest bijna niemand');
   s.terr.camp.raids = 30;
-  assert.ok(campSize(s) <= n + 3, 'overvallen maken het kamp maar een beetje sterker');
+  assert.equal(campSize(s), n, 'overvallen alleen maken het kamp niet sterker, de tijd wel');
 });
 
 test('barbaren vallen meteen aan wie hun kamp nadert, ook een dorpeling', () => {
@@ -2352,4 +2363,186 @@ test('havenhuis: geen oorlogsmist in een vierkant van FISH.sight tegels rond het
   const ex = exploredNow(s, s.t);
   const k = tileIndex(far.i + r, far.j + r);
   assert.ok(ex[k >> 3] & (1 << (k & 7)), 'ontdekt');
+});
+
+// ---------- barbaren: het kamp groeit, overvallen worden groter en vaker, 15 minuten om zelf te verdedigen ----------
+import { campGrowth, raidChance, applyRaid, raidNow } from '../public/shared/sim.js';
+
+test('barbarenkamp groeit elke dag dat je het met rust laat (tot 3x), overvallen worden groter en vaker', () => {
+  const s = terrTown();
+  const D = 86400000;
+  const c = s.terr.camp;
+  assert.equal(campGrowth(s, c.since), 1);
+  assert.ok(campGrowth(s, c.since + 2 * D) > 1.6 && campGrowth(s, c.since + 2 * D) < 1.8);
+  assert.equal(campGrowth(s, c.since + 30 * D), WILD.camp.growMax, 'niet eindeloos');
+  assert.ok(campSize(s, c.since + 4 * D) > campSize(s, c.since) * 2, 'het kamp zelf');
+  assert.ok(raidSize(s, c.since + 4 * D) > raidSize(s, c.since) * 2, 'en de overvallen');
+  assert.ok(raidChance(s, c.since + 4 * D) > raidChance(s, c.since + D) * 2, 'meer kans op een overval');
+  assert.equal(raidChance(s, c.since + 30 * D), WILD.raid.maxChance);
+  // lang laten begaan: de overvallen komen steeds sneller na elkaar (tijd tussen twee overvallen, gemiddeld over steden)
+  const gaps = { early: [], late: [] };
+  for (let seed = 1; seed <= 12; seed++) {
+    const t = terrTown(seed);
+    t.units = { sword: 500 }; // ze winnen altijd: het kamp blijft staan
+    let prev = null;
+    for (let k = 0; k < 12; k++) {
+      const at = t.terr.camp.next;
+      advance(t, at + WILD.raid.warnMs + 1, 1);
+      t.units = { sword: 500 };
+      if (prev != null) (at - t.terr.camp.since < 3 * D ? gaps.early : gaps.late).push(at - prev);
+      prev = at;
+    }
+  }
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  assert.ok(gaps.early.length && gaps.late.length);
+  assert.ok(avg(gaps.late) < avg(gaps.early), `later vaker: ${(avg(gaps.early) / 3600000).toFixed(1)} u → ${(avg(gaps.late) / 3600000).toFixed(1)} u`);
+  assert.ok(Math.min(...gaps.early, ...gaps.late) >= WILD.raid.quietHours * 3600000, 'nooit vlak na elkaar');
+});
+
+test('barbarenkamp verwoesten: opnieuw klein, meer buit als het lang kon groeien', () => {
+  const s = terrTown();
+  s.units = { sword: 200 };
+  advance(s, s.t + 4 * 86400000, 1); // vier dagen groeien (overvallen worden afgeslagen)
+  s.units = { sword: 200 };
+  const grown = campGrowth(s);
+  assert.ok(grown > 2);
+  const food = s.res.food;
+  s.res.food = 0;
+  const camp = territory(s.terr.seed).camp;
+  const g = doFieldSend(s, { units: { sword: 200 } }, null, { x: camp.x, y: camp.y }, null, s.t);
+  arrive(s, g);
+  fightOver(s);
+  const c = s.terr.camp;
+  assert.ok(c.down > s.t, 'verwoest');
+  assert.ok(s.res.food >= Math.round(WILD.camp.loot.food * grown) - 1, `buit x${grown}: ${s.res.food} (was ${food})`);
+  assert.equal(c.since, c.down, 'het nieuwe kamp begint weer klein');
+  assert.equal(campGrowth(s, c.down), 1);
+  assert.ok(c.next >= c.down + WILD.raid.quietHours * 3600000, 'geen overval zolang het kamp plat ligt');
+});
+
+test('overval: zelf verdedigen (de server zet c.raid.battle) houdt het automatische gevecht tegen; uitslag via applyRaid', () => {
+  const s = terrTown();
+  s.units = { spear: 5 };
+  advance(s, s.terr.camp.next + 1, 1);
+  const raid = raidNow(s);
+  assert.ok(raid);
+  raid.battle = 77; raid.bt = s.t; raid.init = { spear: 5 };
+  advance(s, raid.at + 60000, 1);
+  assert.ok(raidNow(s), 'de slag loopt nog: niets automatisch');
+  assert.deepEqual(s.units, { spear: 5 });
+  const res = { ...s.res };
+  const loot = applyRaid(s, s.t, true, { barbarian: 4 }, { spear: 1 });
+  assert.deepEqual(s.units, { spear: 1 });
+  assert.ok(Object.values(loot).some((v) => v > 0), 'geplunderd');
+  for (const k of Object.keys(loot)) assert.equal(s.res[k], res[k] - loot[k]);
+  assert.equal(raidNow(s), null);
+  assert.equal(s.terr.camp.raids, 1);
+  assert.ok(s.terr.log.some((l) => l.kind === 'raid-lost'));
+  // vangnet: een slag die nooit afgerond werd, gaat na liveMs automatisch
+  const t = terrTown();
+  advance(t, t.terr.camp.next + 1, 1);
+  Object.assign(raidNow(t), { battle: 5, bt: t.t, init: {} });
+  advance(t, t.t + WILD.raid.liveMs + 1000, 1);
+  assert.equal(raidNow(t), null);
+  assert.ok(t.terr.log.some((l) => l.kind === 'raid-lost' || l.kind === 'raid-won'));
+});
+
+test('oude steden (van voor het groeiende kamp) krijgen een nieuw schema en starten klein', () => {
+  const s = terrTown();
+  const c = s.terr.camp;
+  delete c.since; delete c.sch; delete c.day;
+  c.next = s.t + 3600000; c.raids = 4;
+  advance(s, s.t + 1000, 1);
+  assert.equal(c.since, s.t - 1000);
+  assert.ok(c.next >= s.t + WILD.raid.quietHours * 3600000 - 1000, 'eerst rust');
+  assert.equal(campGrowth(s), 1);
+});
+
+import { notifyRaids } from '../functions/lib/push.js';
+import { processDue as processDue2, raidNotice } from '../functions/lib/game.js';
+import { wrapDb as wrapDb2 } from '../functions/lib/http.js';
+
+test('overval van de barbaren: melding vooraf, 15 minuten om zelf te verdedigen, uitslag in je stad', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const later = [];
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env, waitUntil: (p) => later.push(p) });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  const settle = async () => { while (later.length) await later.shift(); };
+  await call('POST', '/admin/reset', { teamSize: 1, seed: 7, bots: 0 });
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
+  const now = Date.now();
+  const sql = (q, ...v) => db.raw.prepare(q).run(...v);
+  sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
+  sql('UPDATE players SET created_at = ?, last_seen = ?', now - 2 * 86400000, now - 600000);
+  sql('UPDATE world SET cron_at = ?', now); // de cron-worker draait (die stuurt de meldingen, niet het verzoek zelf)
+  await settle();
+  const world = await getWorld(db);
+  const tid = db.raw.prepare('SELECT id FROM towns').get().id;
+  // de volgende overval begint zo meteen; Anna heeft 12 speerdragers thuis
+  const town = await loadTown(db, tid);
+  ensureTerritory(town.state, tid);
+  advance(town.state, now, world.speed);
+  assert.ok(town.state.terr.camp.since != null, 'het kamp groeit');
+  const T0 = now + 500;
+  town.state.terr.camp.next = T0;
+  town.state.units = { spear: 12 };
+  await saveTown(db, town);
+  assert.equal(db.raw.prepare('SELECT raid_at FROM towns WHERE id = ?').get(tid).raid_at, T0, 'saveTown onthoudt de volgende overval');
+  assert.equal(await notifyRaids(db, world, now), 0, 'nog niet');
+  const [p1, k1] = await fakeDevice();
+  const ep = 'https://fcm.googleapis.com/fcm/send/anna-gsm';
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { sent.push(String(url)); return new Response(null, { status: 201 }); };
+  try {
+    await call('POST', '/push/subscribe', { endpoint: ep, keys: { p256dh: p1, auth: k1 } }, a.cookie);
+    await settle(); sent.length = 0;
+    assert.equal(await notifyRaids(db, world, now + 1000), 1, 'melding: de barbaren komen');
+    assert.deepEqual(sent, [ep]);
+    assert.equal(await notifyRaids(db, world, now + 2000), 0, 'nooit dubbel');
+    const st = (await loadTown(db, tid)).state;
+    const raid = st.terr.camp.raid;
+    assert.ok(raid && raid.told && raid.at === T0 + WILD.raid.warnMs);
+    assert.equal(db.raw.prepare('SELECT raid_at FROM towns WHERE id = ?').get(tid).raid_at, raid.at, 'daarna: bij het einde van de overval');
+  } finally { globalThis.fetch = realFetch; }
+  // zelf verdedigen: een live slag in je eigen stad tegen de barbaren
+  let r = await call('POST', '/raid/defend', {}, a.cookie);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const b = r.data.battle;
+  assert.equal(b.kind, 'raid'); assert.equal(b.role, 'def'); assert.equal(b.status, 'live');
+  let st = (await loadTown(db, tid)).state;
+  assert.equal(st.terr.camp.raid.battle, b.id);
+  r = await call('POST', '/raid/defend', {}, a.cookie);
+  assert.equal(r.data.battle.id, b.id, 'nog eens tikken: dezelfde slag');
+  // de 15 minuten zijn om, maar de slag loopt: geen automatisch gevecht
+  advance(st, now + WILD.raid.warnMs + 1000, world.speed);
+  assert.ok(st.terr.camp.raid, 'wacht op de slag');
+  // niemand kijkt nog: de server rondt de slag af en verwerkt de uitslag in de stad
+  sql('UPDATE battles SET updated_at = 0 WHERE id = ?', b.id);
+  await processDue2(wrapDb2(db), world, now + 5000);
+  const done = db.raw.prepare('SELECT status, result FROM battles WHERE id = ?').get(b.id);
+  assert.equal(done.status, 'done');
+  const res = JSON.parse(done.result);
+  assert.ok(res.raid && !res.late);
+  st = (await loadTown(db, tid)).state;
+  assert.equal(st.terr.camp.raid, null);
+  assert.equal(st.terr.camp.raids, 1);
+  assert.ok(st.terr.log.some((l) => l.kind === (res.attWins ? 'raid-lost' : 'raid-won')));
+  assert.ok((st.units.spear || 0) <= 12);
+  assert.equal(raidNotice(st), st.terr.camp.next, 'de volgende overval');
+  // geen soldaten thuis: zelf verdedigen kan niet
+  const t2 = await loadTown(db, tid);
+  Object.assign(t2.state.terr.camp, { next: null, raid: { start: t2.state.t, at: Date.now() + 600000, n: 5 } });
+  t2.state.units = {};
+  await saveTown(db, t2);
+  r = await call('POST', '/raid/defend', {}, a.cookie);
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /geen soldaten/);
+  // computerspelers: geen meldingen
+  assert.equal(raidNotice({ bot: {}, terr: { camp: { next: 5 } } }), null);
 });
