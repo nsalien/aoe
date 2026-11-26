@@ -1565,7 +1565,7 @@ function cathedral(s, st, L) {
 
 // versiering voor niveau 4 en 5: vaandels voor de deur, op niveau 5 ook een gouden piek op het dak
 function dressHigh(s, st, L, type) {
-  if (L < 4 || ['farm', 'quarry', 'goldmine', 'market', 'tower', 'monument', 'tc', 'mill', 'lodge'].includes(type)) return;
+  if (L < 4 || ['farm', 'quarry', 'goldmine', 'market', 'tower', 'monument', 'tc', 'mill', 'lodge', 'harbor'].includes(type)) return;
   let bx = -1e9; let by = -1e9; let bz = 0; let cx = 0; let cy = 0; let n = 0;
   for (const p of s.prims) { const b = p.bb; if (!b) continue; bx = Math.max(bx, b[3]); by = Math.max(by, b[4]); bz = Math.max(bz, b[5]); cx += (b[0] + b[3]) / 2; cy += (b[1] + b[4]) / 2; n++; }
   bx = Math.min(0.44, bx + 0.04); by = Math.min(0.44, by + 0.04);
@@ -1623,6 +1623,90 @@ export function wallScene(p) {
     s.win('x', hx, -0.02, 0.02, h * 0.5, h * 0.5 + 0.12, mat.plain('#1d1a16'));
   }
   return s;
+}
+
+// ---------- havenhuis (aan het water) ----------
+// variant = aan welke kant het water ligt (0 = +x, 1 = +y, 2 = -x, 3 = -y): daar loopt de steiger het water in.
+// 1 vissershut van planken met rieten dak, netten te drogen, korte steiger
+// 2 groter, stenen voet, pannendak, langere steiger met meerpalen, viskisten
+// 3 stenen boothuis met leien, een hijskraan op de steiger, lantaarnpaal
+// 4 + een visafslag met luifel ernaast (en de vaandels van dressHigh)
+// 5 + een vuurtoren met brandend licht en een gouden windvaan
+function harbor(s, st, L, civ, variant = 0) {
+  const side = ((variant % 4) + 4) % 4;
+  const dx = [1, 0, -1, 0][side]; const dy = [0, 1, 0, -1][side];
+  // langs de steiger: u = naar het water, v = opzij
+  const U = (u, v) => [dx * u - dy * v, dy * u + dx * v];
+  const BX = (u0, v0, z0, u1, v1, z1, m) => { const [a, b] = U(u0, v0); const [c, d] = U(u1, v1); s.box(Math.min(a, c), Math.min(b, d), z0, Math.max(a, c), Math.max(b, d), z1, m); };
+  const CY = (u, v, r, z0, z1, m) => { const [x, y] = U(u, v); s.cyl(x, y, r, z0, z1, m); };
+  const CP = (a, b, r, m) => { const [x0, y0] = U(a[0], a[1]); const [x1, y1] = U(b[0], b[1]); s.cap([x0, y0, a[2]], [x1, y1, b[2]], r, m); };
+  const plank = mat.wood('#8a6038'); const post = mat.logs('#5e4027');
+  // het huis zelf staat iets van het water af (naar het land)
+  const bu = -0.1;
+  const hx0 = bu - 0.28; const hx1 = bu + 0.24; // langs u
+  const hw = L >= 3 ? 0.3 : 0.26; // half langs v
+  const [ax, ay] = U(hx0, -hw); const [bx, by] = U(hx1, hw);
+  const x0 = Math.min(ax, bx); const x1 = Math.max(ax, bx); const y0 = Math.min(ay, by); const y1 = Math.max(ay, by);
+  const H = L <= 1 ? 0.3 : L === 2 ? 0.36 : 0.42;
+  if (L >= 2) s.box(x0 - 0.03, y0 - 0.03, 0, x1 + 0.03, y1 + 0.03, 0.07, mat.stone(st.base || '#a39b8c'));
+  if (L <= 1) s.box(x0, y0, 0, x1, y1, H, mat.wood('#8a5f33'));
+  else walls(s, st, x0, y0, x1, y1, 0.07, H);
+  const along = x1 - x0 >= y1 - y0 ? 'x' : 'y';
+  roof(s, st, x0 - 0.02, y0 - 0.02, x1 + 0.02, y1 + 0.02, H, L <= 1 ? 0.2 : 0.24, along, { level: L });
+  // deur en raam op de zichtbare kanten (voor: +y, rechts: +x)
+  door(s, 'y', y1, (x0 + x1) / 2 - 0.06, (x0 + x1) / 2 + 0.06, 0.07, Math.min(H - 0.04, 0.29), st);
+  window2(s, 'x', x1, (y0 + y1) / 2 - 0.05, H * 0.55, 0.1, 0.11);
+  // steiger het water in: plankenvloer op palen, langer per niveau
+  const jl = L <= 1 ? 0.95 : L === 2 ? 1.2 : 1.35; const jw = L >= 3 ? 0.14 : 0.11; const dz = 0.1;
+  BX(hx1 - 0.02, -jw, dz - 0.025, hx1 + jl, jw, dz, plank);
+  for (let u = hx1 + 0.12; u <= hx1 + jl; u += 0.24) for (const v of [-jw + 0.02, jw - 0.02]) CY(u, v, 0.022, -0.12, dz - 0.02, post);
+  // meerpalen en touw
+  for (const [u, v] of [[hx1 + jl - 0.04, -jw - 0.03], [hx1 + jl - 0.04, jw + 0.03]].slice(0, L >= 2 ? 2 : 1)) { CY(u, v, 0.026, -0.1, dz + 0.12, post); CY(u, v, 0.03, dz + 0.04, dz + 0.07, mat.plain('#c9b48a')); }
+  // netten te drogen op een rek naast het huis (aan de landkant)
+  const nv = -hw - 0.11;
+  for (const u of [bu - 0.24, bu + 0.12]) CP([u, nv, 0], [u, nv, 0.3], 0.012, post);
+  CP([bu - 0.24, nv, 0.29], [bu + 0.12, nv, 0.29], 0.01, post);
+  BX(bu - 0.22, nv - 0.004, 0.08, bu + 0.1, nv + 0.004, 0.28, mat.cloth('#6f6a55', '#56523f'));
+  // tonnen en manden met vis
+  const [tx, ty] = U(hx1 - 0.04, hw + 0.12); s.cyl(tx, ty, 0.055, 0, 0.13, mat.wood('#7d5128'));
+  const [cx2, cy2] = U(hx1 + 0.12, jw + 0.1);
+  if (L >= 2) { s.box(cx2 - 0.06, cy2 - 0.045, 0, cx2 + 0.06, cy2 + 0.045, 0.07, mat.wood('#9c6b3c')); for (let k = 0; k < 4; k++) s.ell(cx2 - 0.03 + k * 0.02, cy2, 0.08, 0.03, 0.012, 0.012, mat.metal('#a9b4bd')); }
+  if (L >= 3) {
+    // hijskraan op de steiger: paal, arm, touw en een mand
+    const ku = hx1 + 0.45; const kv = -jw + 0.03;
+    CP([ku, kv, dz], [ku, kv, 0.7], 0.022, mat.wood('#6b4523'));
+    CP([ku, kv, 0.66], [ku + 0.32, kv + 0.05, 0.72], 0.016, mat.wood('#6b4523'));
+    CP([ku + 0.02, kv, 0.4], [ku + 0.2, kv + 0.03, 0.68], 0.01, mat.wood('#6b4523'));
+    CP([ku + 0.3, kv + 0.05, 0.71], [ku + 0.3, kv + 0.05, 0.36], 0.004, mat.plain('#c9b48a'));
+    const [mx, my] = U(ku + 0.3, kv + 0.05); s.cyl(mx, my, 0.045, 0.28, 0.36, mat.wood('#a8743f'));
+    // lantaarnpaal op het einde van de steiger
+    const lu = hx1 + jl - 0.1; const lv = jw - 0.02;
+    CP([lu, lv, dz], [lu, lv, 0.62], 0.012, mat.metal('#34302c'));
+    const [lx, ly] = U(lu, lv); s.box(lx - 0.03, ly - 0.03, 0.56, lx + 0.03, ly + 0.03, 0.66, mat.plain('#ffd477'));
+    s.cone(lx, ly, 0.045, 0.66, 0.72, mat.metal('#2e2926'));
+  }
+  if (L >= 4) {
+    // visafslag: open kraam met een gestreepte luifel en kisten vis
+    const su = bu - 0.02; const sv = hw + 0.28;
+    for (const [du, dv] of [[-0.16, -0.12], [0.16, -0.12], [-0.16, 0.12], [0.16, 0.12]]) CP([su + du, sv + dv, 0], [su + du, sv + dv, 0.32], 0.012, mat.wood('#6b4523'));
+    BX(su - 0.2, sv - 0.16, 0.32, su + 0.2, sv + 0.16, 0.34, mat.cloth('#b8322a', '#efe6d2', true));
+    BX(su - 0.15, sv - 0.1, 0.1, su + 0.15, sv + 0.1, 0.14, mat.wood('#9c6b3c'));
+    for (let k = 0; k < 5; k++) { const [fx, fy] = U(su - 0.11 + k * 0.055, sv); s.ell(fx, fy, 0.155, 0.022, 0.012, 0.012, mat.metal(k % 2 ? '#a9b4bd' : '#c0c8ce')); }
+  }
+  if (L >= 5) {
+    // vuurtoren met brandend licht
+    const ru = bu - 0.2; const rv = -hw - 0.02;
+    const [rx, ry] = U(ru, rv);
+    s.cyl(rx, ry, 0.11, 0, 0.12, mat.stone(st.base || '#a39b8c'));
+    s.cyl(rx, ry, 0.085, 0.12, 0.92, mat.plaster('#efe9dc', 0.12, 0.92));
+    for (const z of [0.36, 0.64]) s.cyl(rx, ry, 0.088, z, z + 0.05, mat.plaster('#b8322a', z, z + 0.05));
+    s.cyl(rx, ry, 0.11, 0.92, 0.95, mat.stone('#8a8378'));
+    s.cyl(rx, ry, 0.06, 0.95, 1.07, mat.plain('#ffd477'));
+    s.cone(rx, ry, 0.09, 1.07, 1.2, mat.metal('#2e2926'));
+    goldVane(s, rx, ry, 1.2, 0.12);
+    return { glow: [rx, ry, 1.0] };
+  }
+  return {};
 }
 
 // ---------- poortgebouw (2 tegels breed, in de muur) ----------
@@ -1783,7 +1867,7 @@ export function gateScene(p) {
   return s;
 }
 
-const BUILD = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral };
+const BUILD = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral, harbor };
 export const HAS_3D = new Set(Object.keys(BUILD));
 const SIZE = { tc: 2, monument: 2 };
 

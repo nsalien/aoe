@@ -361,6 +361,46 @@ const MODELS = {
     for (let k = 0; k < 12; k++) { const a = R() * TAU * 0.55 - 0.5; const z = 0.06 + R() * 0.14; const r = 0.1 - Math.abs(z - 0.12) * 0.3; s.ell(Math.cos(a) * r, Math.sin(a) * r, z, 0.014, 0.014, 0.014, plain('#d6324a', true)); }
   },
 };
+// vissersbootje (havenhuis): v = soort * 2 + bemand. Soort 0 roeiboot, 1 met mast en zeil, 2 groter met kajuit en lantaarn.
+// Langs x (de boeg naar +x); het spel spiegelt het beeld voor de andere richting.
+MODELS.boat = (s, v) => {
+  const kind = Math.min(2, Math.floor(v / 2)); const crew = v % 2 === 1;
+  const len = kind === 2 ? 0.34 : 0.27; const w = kind === 2 ? 0.11 : 0.09;
+  const hull = wood(kind === 0 ? '#7a4a24' : kind === 1 ? '#6b4224' : '#5e3a1e');
+  s.ell(0, 0, 0.06, len, w, 0.07, hull, 0); // romp
+  s.ell(0, 0, 0.1, len * 0.86, w * 0.78, 0.012, plain('#3a2614')); // binnenkant
+  s.ell(len * 0.62, 0, 0.1, len * 0.42, w * 0.5, 0.03, hull, 0.08); // boeg iets hoger
+  s.box(-len * 0.75, -w * 0.9, 0.1, len * 0.75, -w * 0.82, 0.118, wood('#c9a26a')); // dolboord
+  s.box(-len * 0.75, w * 0.82, 0.1, len * 0.75, w * 0.9, 0.118, wood('#c9a26a'));
+  // net in de boeg
+  s.ell(len * 0.45, 0, 0.12, 0.06, 0.05, 0.025, { k: 'cloth', c: [0.42, 0.4, 0.32] });
+  if (kind === 0) { // riemen
+    for (const sg of [-1, 1]) s.cap([-0.02, sg * w * 0.7, 0.12], [0.06, sg * (w + 0.14), 0.02], 0.007, wood('#a8743f'));
+  } else {
+    const mh = kind === 2 ? 0.52 : 0.42;
+    s.cap([0.04, 0, 0.1], [0.04, 0, mh], 0.008, wood('#5a3a1e'));
+    s.cap([0.04, 0, mh - 0.3], [-0.16, 0, mh - 0.3], 0.006, wood('#5a3a1e')); // giek
+    s.box(-0.15, -0.004, mh - 0.29, 0.03, 0.004, mh - 0.03, cloth(kind === 2 ? '#e8dcc0' : '#d9c9a3'));
+    s.box(0.045, -0.003, mh - 0.06, 0.12, 0.003, mh - 0.02, cloth('#b8322a')); // wimpel
+  }
+  if (kind === 2) { // kajuit achteraan met een lantaarn
+    s.box(-len * 0.72, -w * 0.6, 0.1, -len * 0.3, w * 0.6, 0.2, wood('#8a5f33'));
+    s.box(-len * 0.76, -w * 0.68, 0.2, -len * 0.26, w * 0.68, 0.215, wood('#5a3a1e'));
+    s.cap([-len * 0.5, w * 0.6, 0.2], [-len * 0.5, w * 0.6, 0.3], 0.004, metal('#2e2926'));
+    s.box(-len * 0.5 - 0.016, w * 0.6 - 0.016, 0.28, -len * 0.5 + 0.016, w * 0.6 + 0.016, 0.32, plain('#ffd477', true));
+  }
+  if (crew) { // twee vissers: een met een hengel, een die het net binnenhaalt
+    const man = (x, y, c, hat) => {
+      s.cap([x, y, 0.11], [x, y, 0.2], 0.026, cloth(c));
+      s.ell(x, y, 0.235, 0.022, 0.022, 0.025, plain('#e0b48a'));
+      s.cone(x, y, 0.04, 0.25, 0.29, hat ? { k: 'hay' } : cloth('#5a4a3a'));
+    };
+    man(-0.08, 0.02, '#4f6a7a', true);
+    s.cap([-0.06, 0.03, 0.18], [0.1, w + 0.18, 0.38], 0.004, wood('#8a6038')); // hengel
+    man(0.08, -0.02, '#8a3a3a', false);
+  }
+};
+
 MODELS.fencex = (s) => MODELS.fence(s, 0);
 MODELS.fencey = (s) => MODELS.fence(s, 1);
 

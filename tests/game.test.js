@@ -2206,3 +2206,114 @@ test('chat: /state telt ongelezen berichten van anderen per kanaal (max. 9) en g
   st = (await call('GET', '/state?cw=0&ct=0', null, a.cookie)).data.chat;
   assert.equal(st.newWorld, 9, 'hooguit 9 geteld (9+)');
 });
+
+// ---------- havenhuis: vissen ----------
+import { FISH, JOBS, BUILDINGS as BLD2, levelCost as lvlCost } from '../public/shared/rules.js';
+import {
+  shoreSpots, shoreTile, checkBoat, doBoat, maxBoats, boatsReady, doAssign as assign, rates as rateNow, slots as slotsOf,
+  doBuild as build1, doUpgrade as upgrade1, doDemolish as demolish1, canPlaceAt as placeOk, checkBuild as cBuild,
+} from '../public/shared/sim.js';
+
+function harborTown(age = 2) {
+  const s = newTownState(0, 'greek');
+  ensureTerritory(s, 5);
+  s.buildings[0].level = age;
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  s.buildings.push({ id: 50, type: 'storage', x: 1, y: 1, level: 3 });
+  return s;
+}
+
+test('havenhuis: vanaf het Bronstijdperk, enkel op vrij land naast het water', () => {
+  const s1 = harborTown(1);
+  assert.match(cBuild(s1, 'harbor'), /Brons/);
+  const s = harborTown(2);
+  assert.equal(cBuild(s, 'harbor'), null);
+  const spots = shoreSpots(s);
+  assert.ok(spots.length >= 2, `plekken aan de vijver: ${spots.length}`);
+  for (const [i, j] of spots) assert.ok(shoreTile(s, i, j));
+  assert.ok(!placeOk(s, 'harbor', 5, 5), 'niet midden in het dorp');
+  assert.ok(!placeOk(s, 'harbor', 2, 2), 'niet op gewone bouwgrond zonder water');
+  assert.throws(() => build1(s, 'harbor', 2, 2, 0, 1), /naast het water/);
+  const [i, j] = spots[0];
+  assert.ok(!placeOk(s, 'farm', i, j) || ringOf(i, j) <= 1, 'een gewoon gebouw mag daar niet (buiten je bouwgrond)');
+  const b = build1(s, 'harbor', i, j, 0, 1);
+  advance(s, 3 * 3600000, 1);
+  assert.equal(b.level, 1);
+});
+
+test('havenhuis: bootjes bouwen (een per niveau, hooguit 4), 2 vissers per bootje, sneller voedsel dan de boerderij', () => {
+  const s = harborTown(2);
+  const [i, j] = shoreSpots(s)[0];
+  const b = build1(s, 'harbor', i, j, 0, 1);
+  assert.match(checkBoat(s), /havenhuis/);
+  advance(s, 3600000, 1);
+  assert.equal(maxBoats(s), 1);
+  assert.equal(slotsOf(s).fish, 0, 'nog geen bootje: geen vissers');
+  // vrije dorpelingen gaan meteen aan boord als het bootje klaar is
+  s.villagers.food -= 2; s.villagers.idle += 2;
+  const wood = s.res.wood;
+  doBoat(s, s.t, 1);
+  assert.equal(s.res.wood, wood - FISH.boatCost.wood);
+  assert.match(checkBoat(s), /al een bootje/);
+  advance(s, s.t + FISH.boatTime * 1000 + 1, 1);
+  assert.equal(s.boats, 1);
+  assert.equal(s.villagers.fish, FISH.crew);
+  assert.match(checkBoat(s), /Verbeter/, 'niveau 1: één bootje');
+  // een visser brengt meer op dan een boer
+  const farmer = rateNow({ ...s, villagers: { ...s.villagers, fish: 0, food: 1, wood: 0, stone: 0, gold: 0 } }, 1).food;
+  const fisher = rateNow({ ...s, villagers: { ...s.villagers, fish: 1, food: 0, wood: 0, stone: 0, gold: 0 } }, 1).food;
+  assert.ok(fisher >= farmer * 1.4, `visser ${fisher.toFixed(1)}/u tegen boer ${farmer.toFixed(1)}/u`);
+  // hogere niveaus: meer bootjes en sneller vissen, nooit meer dan 4
+  for (let L = 2; L <= 5; L++) { s.buildings[0].level = Math.max(2, L); b.level = L; }
+  assert.equal(maxBoats(s), 4);
+  const fisher5 = rateNow({ ...s, villagers: { ...s.villagers, fish: 1, food: 0, wood: 0, stone: 0, gold: 0 } }, 1).food;
+  assert.ok(fisher5 > fisher * 1.3, 'niveau 5 vist sneller (en het latere tijdperk telt mee)');
+  // verdelen: vissers kunnen niet meer zijn dan de plaatsen op de bootjes
+  const tot = s.villagers.food + s.villagers.wood + s.villagers.stone + s.villagers.gold + s.villagers.fish + s.villagers.idle;
+  assert.throws(() => assign(s, { food: 0, wood: 0, stone: 0, gold: 0, fish: 3 }, 'auto'), /bootjes/);
+  assign(s, { food: 0, wood: 0, stone: 0, gold: 0, fish: 2 }, 'fish');
+  assert.equal(s.villagers.fish, 2);
+  assert.equal(s.rally, 'fish');
+  assign(s, { food: 1, wood: 0, stone: 0, gold: 0 }, 'auto'); // zonder 'fish' (oude browser, bots): vissers blijven
+  assert.equal(s.villagers.fish, 2);
+  assert.equal(s.villagers.food + s.villagers.wood + s.villagers.stone + s.villagers.gold + s.villagers.fish + s.villagers.idle, tot);
+  // afbreken: bootjes weg, vissers vrij
+  demolish1(s, b.id);
+  assert.equal(boatsReady(s), 0);
+  assert.equal(s.villagers.fish, 0);
+  // deterministisch na JSON heen en terug
+  const c = JSON.parse(JSON.stringify(s)); advance(c, s.t + 7200000, 1); advance(s, s.t + 7200000, 1);
+  assert.deepEqual(c, s);
+});
+
+test('havenhuis: via de server (bouwen aan het water, bootje, vissers verdelen)', async () => {
+  const db = await memoryD1();
+  const env = { DB: db, ADMIN_KEY: 'k' };
+  const call = async (method, path, body, cookie) => {
+    const headers = { 'content-type': 'application/json', 'x-admin-key': 'k' };
+    if (cookie) headers.cookie = cookie;
+    const res = await handle({ request: new Request(`http://x/api${path}`, { method, headers, body: body && JSON.stringify(body) }), env });
+    return { status: res.status, data: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  };
+  await call('POST', '/admin/reset', { peaceHours: 24, seasonDays: 28, teamSize: 1, seed: 9 });
+  db.raw.prepare('UPDATE world SET start_at = ?').run(Date.now() - 3600000);
+  const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'greek' });
+  const town = db.raw.prepare("SELECT t.id, t.state FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = 'Anna'").get();
+  const st = JSON.parse(town.state); ensureTerritory(st, town.id);
+  st.buildings[0].level = 2; st.res = { food: 5000, wood: 5000, stone: 5000, gold: 5000 };
+  db.raw.prepare('UPDATE towns SET state = ? WHERE id = ?').run(JSON.stringify(st), town.id);
+  assert.equal((await call('POST', '/build', { type: 'harbor', x: 2, y: 2 }, a.cookie)).status, 400, 'niet zonder water');
+  const [i, j] = shoreSpots(st)[0];
+  const r = await call('POST', '/build', { type: 'harbor', x: i, y: j }, a.cookie);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  db.raw.prepare("UPDATE towns SET state = json_set(state, '$.builds', json('[]'), '$.buildings[#]', json(?)) WHERE id = ?").run('{}', town.id);
+  // bouw meteen klaar laten zijn
+  const s2 = JSON.parse(db.raw.prepare('SELECT state FROM towns WHERE id = ?').get(town.id).state);
+  s2.buildings = s2.buildings.filter((x) => x.type);
+  s2.buildings.find((x) => x.type === 'harbor').level = 1;
+  db.raw.prepare('UPDATE towns SET state = ? WHERE id = ?').run(JSON.stringify(s2), town.id);
+  const bt = await call('POST', '/boat', {}, a.cookie);
+  assert.equal(bt.status, 200, JSON.stringify(bt.data));
+  assert.ok(bt.data.state.boatJob);
+  assert.equal((await call('POST', '/boat', {}, a.cookie)).status, 400, 'één tegelijk');
+});

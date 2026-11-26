@@ -36,7 +36,8 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
 
 **Economie**
 - Grondstoffen: voedsel, hout, steen, goud. Start: 300/300/150/100, 6 dorpelingen (3 voedsel, 3 hout).
-- Dorpelingen werken op **werkplekken** (stadscentrum + boerderij/houthakkerskamp/steengroeve/goudmijn per niveau).
+- Dorpelingen werken op **werkplekken** (stadscentrum + boerderij/houthakkerskamp/steengroeve/goudmijn per niveau), of als
+  **vissers** op de bootjes van het havenhuis (vanaf het Brons, aan de vijver; sneller voedsel dan de boerderij).
   Opslag (stadscentrum + opslagplaats) begrenst je voorraad; een deel is verborgen voor plunderaars.
 - **5 tijdperken** (gevraagd: "5 tijdperken met namen, upgrades per tijdperk en een paar nieuwe gebouwen"):
   Vuursteen → Brons → IJzer → **Gilden** → **Kroon** (stadscentrum verbeteren; IJzer = kasteel). Vroeger was Kroon het 4e;
@@ -478,6 +479,15 @@ minuut een bot aan de beurt als niemand online is.
     muurtorens met een vlakke getekende balk en platte bruine deuren. Nu een 3D-poortgebouw dat per muurniveau beter wordt
     (houten torens met loopbrug → stenen voet en dakjes → stenen poortgebouw met boog en valhek → vaandels en wapenschild →
     torenspitsen en goud), met deuren en valhek die echt opengaan (4 standen) en fakkels die 's nachts gloeien.
+
+56. **Havenhuis en vissersbootjes** (gevraagd: "vanaf de tweede tijd een Havenhuis aan een meertje of rivier in het dorp;
+    vissersbootjes bemand met dorpelingen, max. 4; vissen gaat sneller dan de boerderij; heel mooi en upgradebaar"). Vanaf het
+    Bronstijdperk op een vrije tegel naast water (blauwe plekken bij het plaatsen; de vijver ligt net buiten het dorp, dus het mag
+    tot 4 ringen voorbij je bouwgrond). Eén bootje per niveau (max. 4, 120 hout + 40 voedsel, 15 min), 2 vissers per bootje,
+    24 voedsel/u per visser (boer 16) en +8% per niveau. Nieuwe taak 'Vissers' bij de dorpelingen en 'Vissen' als bestemming
+    voor nieuwe dorpelingen. 3D: steiger naar het water; 1 vissershut met netten, 2 stenen voet en pannen, 3 kraan en lantaarn,
+    4 visafslag met luifel, 5 vuurtoren; per volk eigen muren en daken. Bootjes (roeiboot → zeil → kajuit en lantaarn) varen
+    rondes op de vijver en vissen (kringen, kielzog, springende vis); lege bootjes liggen aan de steiger.
 
 ## 8. Bekende beperkingen en ideeën
 

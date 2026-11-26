@@ -1725,7 +1725,25 @@ function cathedral(ctx, L) {
   const [cx, cy] = P(0.27, 0, th + 34 + L * 6); ctx.fillStyle = C.gold; ctx.fillRect(cx - 0.6, cy - 7, 1.2, 7); ctx.fillRect(cx - 2.5, cy - 5, 5, 1.2);
 }
 
-const DRAW = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral };
+// havenhuis (getekende versie, o.a. voor het kaartje in het bouwmenu): water, een steiger, een vissershuisje en een bootje
+function harbor(ctx, L) {
+  poly(ctx, [P(0.1, -0.5, 0), P(0.75, -0.5, 0), P(0.75, 0.5, 0), P(0.1, 0.5, 0)], '#4f8fc0', null);
+  ctx.strokeStyle = 'rgba(230,245,255,0.6)'; ctx.lineWidth = 0.8;
+  for (const [u, v] of [[0.45, -0.3], [0.6, 0.25]]) { const [x, y] = P(u, v, 0); ctx.beginPath(); ctx.ellipse(x, y, 5, 1.6, 0, 0, Math.PI * 2); ctx.stroke(); }
+  box(ctx, 0.05, -0.08, 0.62, 0.06, 0, 3, C.wood); // steiger
+  shadow(ctx, 0.3);
+  box(ctx, -0.36, -0.26, 0.06, 0.2, 0, 14 + L * 2, L >= 2 ? C.plaster : C.wood);
+  doorL(ctx, 0.06, -0.06, 0.1, 9);
+  const h = 14 + L * 2;
+  poly(ctx, [P(-0.4, -0.3, h), P(0.1, -0.3, h), P(0.1, 0.24, h), P(-0.4, 0.24, h), P(-0.15, -0.03, h + 14)], L >= 2 ? '#a9502f' : C.thatch, EDGE);
+  // bootje naast de steiger
+  const [bx, by] = P(0.45, 0.25, 0);
+  ctx.fillStyle = '#7a4a24'; ctx.beginPath(); ctx.ellipse(bx, by, 7, 2.6, -0.45, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx, by - 1); ctx.lineTo(bx, by - 11); ctx.stroke();
+  ctx.fillStyle = '#e8dcc0'; ctx.beginPath(); ctx.moveTo(bx + 0.6, by - 10); ctx.lineTo(bx + 6, by - 3); ctx.lineTo(bx + 0.6, by - 3); ctx.closePath(); ctx.fill();
+}
+
+const DRAW = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral, harbor };
 const SIZES = { tc: 2, monument: 2 };
 
 const cache = new Map();

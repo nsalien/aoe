@@ -402,6 +402,15 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
 .toast.err { border-left-color: #e0553f; }
 .toast.ok { border-left-color: #6db35a; }
 @keyframes tin { from { opacity: 0; transform: translateY(-8px); } }
+/* havenhuis: plaatsen voor bootjes */
+.boat-slots { display: flex; gap: 6px; margin: 4px 0 8px; }
+.boat-slot { display: inline-grid; place-items: center; width: 36px; height: 30px; border-radius: 8px; border: 1px solid #c9b48a; background: #f6ecd4; }
+.boat-slot svg { width: 22px; height: 22px; }
+.boat-slot.on { background: #d7ebf7; border-color: #4f8fbd; box-shadow: inset 0 0 0 1px #8fc0e0; }
+.boat-slot.idle { background: #efe2c3; }
+.boat-slot.free { opacity: 0.55; border-style: dashed; }
+.boat-slot.locked { opacity: 0.25; filter: grayscale(1); }
+.boat-slot.free svg, .boat-slot.locked svg { opacity: 0.6; }
 /* chat: melding van een nieuw bericht (tik = naar de chat) */
 .toast.chatmsg { border-left-color: #4fa3e0; }
 .toasts .toast.tap { pointer-events: auto; cursor: pointer; }
