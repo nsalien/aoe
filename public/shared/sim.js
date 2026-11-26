@@ -812,7 +812,8 @@ let sightCache = null;
 export function homeSight(s) {
   const k = ringForAge(age(s));
   const tr = s.terr;
-  const key = tr ? `${k}|${tr.seed}|${tr.cl.join()}|${JSON.stringify(tr.lots || [])}|${(s.walls || []).join()}|${(s.gates || []).join()}` : `${k}`;
+  const harbors = findType(s, 'harbor');
+  const key = tr ? `${k}|${tr.seed}|${tr.cl.join()}|${JSON.stringify(tr.lots || [])}|${(s.walls || []).join()}|${(s.gates || []).join()}|${harbors.map((h) => `${h.x},${h.y}`).join()}` : `${k}`;
   if (sightCache && sightCache.key === key) return sightCache.vis;
   const src = new Uint8Array(T_W * T_W);
   for (let j = T_MIN; j < T_MAX; j++) for (let i = T_MIN; i < T_MAX; i++) if (ringOf(i, j) <= k) src[tileIndex(i, j)] = 1;
@@ -833,6 +834,13 @@ export function homeSight(s) {
     if (!src[idx]) continue;
     const i = (idx % T_W) + T_MIN; const j = Math.floor(idx / T_W) + T_MIN;
     for (const [dx, dy] of SIGHT_OFF) if (inTerr(i + dx, j + dy)) vis[tileIndex(i + dx, j + dy)] = 1;
+  }
+  // rond het havenhuis (dat aan de rand van je gebied kan liggen) is er ook nooit mist: een vierkant van FISH.sight tegels
+  if (tr) {
+    const r = FISH.sight;
+    for (const h of harbors) {
+      for (let j = h.y - r; j <= h.y + r; j++) for (let i = h.x - r; i <= h.x + r; i++) if (inTerr(i, j)) vis[tileIndex(i, j)] = 1;
+    }
   }
   sightCache = { key, vis };
   return vis;

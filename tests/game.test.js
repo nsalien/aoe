@@ -2336,3 +2336,20 @@ test('havenhuis: via de server (bouwen aan het water, bootje, vissers verdelen)'
   assert.ok(bt.data.state.boatJob);
   assert.equal((await call('POST', '/boat', {}, a.cookie)).status, 400, 'één tegelijk');
 });
+
+test('havenhuis: geen oorlogsmist in een vierkant van FISH.sight tegels rond het havenhuis', () => {
+  const s = harborTown(2);
+  const before = homeSight(s);
+  // de verste plek aan het water (daar was er nog mist rond)
+  const far = shoreSpots(s).map(([i, j]) => ({ i, j, dark: [[3, 3], [-3, 3], [3, -3], [-3, -3], [3, 0], [-3, 0], [0, 3], [0, -3]].filter(([dx, dy]) => before[tileIndex(i + dx, j + dy)] !== 1).length }))
+    .sort((a, b) => b.dark - a.dark)[0];
+  assert.ok(far.dark > 0, 'er is een plek aan het water met mist in de buurt');
+  build1(s, 'harbor', far.i, far.j, 0, 1);
+  const vis = homeSight(s);
+  const r = FISH.sight;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) assert.equal(vis[tileIndex(far.i + dx, far.j + dy)], 1, `tegel ${dx},${dy} rond het havenhuis`);
+  // ook wat de server als ontdekt telt
+  const ex = exploredNow(s, s.t);
+  const k = tileIndex(far.i + r, far.j + r);
+  assert.ok(ex[k >> 3] & (1 << (k & 7)), 'ontdekt');
+});

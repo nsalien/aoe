@@ -144,7 +144,8 @@ export const JOBS = ['food', 'wood', 'stone', 'gold', 'fish'];
 // +levelBonus per niveau van het havenhuis boven 1 (en zoals alles +10% per tijdperk). Hooguit boats[niveau] bootjes.
 // Een bootje kost boatCost en is na boatTime seconden klaar (spelsnelheid 1). Het havenhuis staat op een vrije tegel naast
 // water, tot reach ringen voorbij je bouwgrond (de vijver ligt net buiten het dorp).
-export const FISH = { rate: 24, crew: 2, levelBonus: 0.08, boats: [0, 1, 2, 3, 4, 4], boatCost: { wood: 120, food: 40 }, boatTime: 900, reach: 4 };
+// sight = zoveel tegels rond het havenhuis (een vierkant) is er nooit mist
+export const FISH = { rate: 24, crew: 2, levelBonus: 0.08, boats: [0, 1, 2, 3, 4, 4], boatCost: { wood: 120, food: 40 }, boatTime: 900, reach: 4, sight: 3 };
 export const TC_POP_PER_AGE = 10;
 export const TC_STORAGE_PER_AGE = 3000;
 export const BASE_PROTECT = 300;
