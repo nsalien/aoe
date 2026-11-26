@@ -117,6 +117,19 @@ Daarom:
   (route `/walls/move`, tegels + verschuiving dx, dy): enkel op vrije bouwgrond, poorten in hun geheel en daarna nog in een
   recht stuk muur (`gateFits`); een poort alleen verplaatsen maakt van de oude opening muur; nooit dicht zonder poort.
   In de stad: `startWallMove` (zelfde `moveB`, met `kind: 'walls'`), `drawWallGhost`, `main.js` `moveWalls`.
+- **Barbarenkamp en overvallen** (`WILD.camp`/`WILD.raid` in `rules.js`, `sim.js`): het kamp groeit per speldag sinds het
+  (her)opbouwen (`camp.since`, `camp.day` = speldag in ms, `campGrowth` tot `growMax`; `campSize`/`raidSize` × de groei;
+  verwoesten = buit × groei en opnieuw klein). `scheduleRaid` zoekt na `quietHours` om de `checkHours` met `wildRand`
+  (deterministisch) een controle waar de kans `raidChance` (groeit mee) raak is → `camp.next`. Daar begint de overval
+  (`raidStart`: `camp.raid = { start, at, n }`, `at` = +15 min echte tijd, logboek 'raid-warn'); op `raid.at` vechten ze
+  automatisch (`raidAuto` → `applyRaid`), tenzij de speler zelf verdedigt: `/raid/defend` → `startRaid` (game.js) maakt een
+  live slag (`battles.target_kind = 'raid'`, `att_player = 0`, barbaren via `aiAttack`) en zet `raid.battle`/`bt`/`init`;
+  `finishRaid` verwerkt de uitslag met `applyRaid` (vangnet: na `WILD.raid.liveMs` toch automatisch). Melding:
+  `towns.raid_at` (migratie `0010`, `raidNotice` in `saveTown`); `notifyRaids` (push.js) rekent de stad door, meldt het begin
+  (soort 'attack', `raid.told`) en zet de volgende `raid_at`; hooguit één stad per beurt en enkel als er die beurt niets
+  anders verstuurd werd; spelers die een week weg zijn niet. Browser: `raidIncoming`/`offerRaid`/`defendRaid` in `main.js`,
+  `raidAskHtml` in `ui.js` (in `#battleAsk` met `data-id="raid"`), rode balk (actie `raidAsk`), `raidParty` in `town.js`
+  (verzamelen bij het kamp, de laatste 90 s optrekken), uitslag in `battleview.js` (`kind === 'raid'`, geen rapport).
 - Gevechten in het eigen gebied: `public/shared/skirmish.js` speelt ze mannetje per mannetje af (hp, dmg, rate per eenheid
   in `rules.js`), deterministisch. Lopende gevechten staan in `state.terr.fights`; `advance()` verwerkt hinderlagen
   (binnen `FIELD.aggro` van het barbarenkamp) en het einde van een gevecht. De browser tekent het verloop met `runFight(f, nu)`.

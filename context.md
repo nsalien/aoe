@@ -94,9 +94,16 @@ registratie; oude spelers kregen een vast willekeurig volk.
   Daarbuiten begint de mist; meestal dus net voorbij je muur.
 - **Bouwgrond**: een vierkant van 12×12 dat met elk tijdperk een ring groeit, plus **gekochte loten** van 4×4
   (max. 12, steeds duurder) en gekapte tegels. Een stippellijn toont de rand van al je bouwgrond.
-- **Barbarenkamp**: 4 barbaren in tijdperk 1, 6/8/10 later, hooguit +3 na veel overvallen. Barbaren vallen meteen
-  aan wie binnen 3,4 tegels komt. Ongeveer evenveel soldaten als barbaren winnen. Het kamp overvalt je stad
-  af en toe (afgehandeld met `resolveBattle`). Na verwoesten: buit en een pauze. Het aantal staat boven het kamp.
+- **Barbarenkamp**: 4 barbaren in tijdperk 1, 6/8/10 later, en het **groeit elke speldag** dat je het met rust laat
+  (+35% per dag, tot 3×). Barbaren vallen meteen aan wie binnen 3,4 tegels komt. Ongeveer evenveel soldaten als
+  barbaren winnen. Na verwoesten: buit (× de groei) en 36 u geen kamp; daarna begint het weer klein. Het aantal staat
+  boven het kamp, de groei en de kans op een overval in het stadsoverzicht.
+- **Overvallen op je dorp**: om de 2 u een kans (2% + 6% per dag dat het kamp groeit, hooguit 40%), nooit binnen 10 u
+  na de vorige; in een nieuwe stad pas na 30 u. Grootte 3 + 2,5 per tijdperk, × de groei (max. 60). Bij het begin een
+  melding (gsm: 'aanval op je stad') en **15 minuten** (echte tijd) om te kiezen: zelf verdedigen (live slag in je stad,
+  enkel met soldaten thuis) of automatisch (`resolveBattle` met muur, torens en dorpelingen). Niets kiezen = automatisch.
+  Gemeten (tijdperk 3, kamp nooit aangevallen): 1e overval rond dag 1,8 met ±17 barbaren, daarna om de ±19 u, na een
+  week om de ±13 u met 32 barbaren.
 - Gevechten in je gebied mannetje per mannetje (`skirmish.js`): eerst 1,5 s stormloop, tempo ×1,5, telkens met
   minstens twee op dezelfde vijand.
 
@@ -493,6 +500,15 @@ minuut een bot aan de beurt als niemand online is.
     rondes op de vijver en vissen (kringen, kielzog, springende vis); lege bootjes liggen aan de steiger.
     Later gevraagd: "als een speler een haven heeft gebouwd, zorg dat de fog of war met 3x3 daarrond weg gaat": nu nooit mist
     in een vierkant van 3 tegels rond het havenhuis (7×7 tegels, `FISH.sight`), ook al ligt het aan de rand van je gebied.
+
+57. **Barbaren worden sterker en vallen je dorp aan** (gevraagd: "hoe langer de speler wacht op het dorp te raiden, hoe
+    sterker ze worden en hoe groter de kans dat ze je dorp eens aanvallen. Als dat het geval is, krijgt de speler een
+    melding dat hij 15 minuten de tijd heeft om het gevecht zelf te spelen. Indien niet, gebeurt het automatisch.").
+    Er bestonden al overvallen (om de 20–40 u, automatisch, 90 s waarschuwing). Nu: het kamp groeit per dag (tot 3×),
+    de kans op een overval groeit mee, en een overval kondigt zich 15 minuten aan: keuzevenster 'Zelf verdedigen' /
+    'Automatisch', rode balk bovenaan met aftelling, pushmelding. Zelf verdedigen = een live belegering in je eigen stad
+    tegen de barbaren (de computer leidt hen, ze komen uit de richting van hun kamp). Een groot kamp verwoesten geeft
+    meer buit. Getest op pc en gsm (venster en balk passen op 390 breed).
 
 ## 8. Bekende beperkingen en ideeën
 

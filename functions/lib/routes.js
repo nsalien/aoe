@@ -9,7 +9,7 @@ import {
 } from './auth.js';
 import {
   getWorld, phaseOf, worldTimes, peaceEnd, peaceBlock, gameTime, loadTown, mutateTown, processDue, travelMs, awayPop, awayInfo,
-  battleView, setBattleMode, battleOrder, myBattles, startPractice,
+  battleView, setBattleMode, battleOrder, myBattles, startPractice, startRaid,
   freshCampState,
 } from './game.js';
 import {
@@ -67,7 +67,7 @@ export async function handle(context) {
       } else {
         await processDue(db, ctx.world, now);
         // meldingen 'leger komt bijna aan' en 'bouwer vrij' (vangnet als de cron-worker niet draait)
-        if (context.waitUntil) context.waitUntil(notifyAll(wrapDb(env.DB), now, 2).catch((e) => console.error('notify', e && e.message)));
+        if (context.waitUntil) context.waitUntil(notifyAll(wrapDb(env.DB), now, 2, ctx.world).catch((e) => console.error('notify', e && e.message)));
       }
     }
     if (r.active) {
@@ -654,6 +654,12 @@ route('POST', '/battle/practice', { auth: true, process: false }, async (ctx) =>
   const { db, world, player, now } = ctx;
   const body = await readJson(ctx.request);
   return json({ now, battle: await startPractice(db, world, player, String(body.role || ''), now) });
+});
+
+// overval van de barbaren: de slag zelf spelen (binnen de 15 minuten dat ze naar je dorp trekken)
+route('POST', '/raid/defend', { auth: true, process: false }, async (ctx) => {
+  const { db, world, player, now } = ctx;
+  return json({ now, battle: await startRaid(db, world, player, now) });
 });
 
 route('POST', '/battle/order', { auth: true, process: false }, async (ctx) => {

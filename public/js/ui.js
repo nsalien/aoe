@@ -10,7 +10,7 @@ import {
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
   canAfford, protectAmount, totalVillagers, marketRate, maxBuilds, checkHarvest, homeVillagers,
-  depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed,
+  depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed, campGrowth, raidChance, raidNow,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
   isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
   maxBoats, boatsReady, checkBoat, fishMult,
@@ -480,7 +480,38 @@ function campText(live, now) {
   if (!c) return 'geen';
   if (!exHas(exploredNow(live, now), Math.floor(c.x), Math.floor(c.y))) return 'nog niet gevonden';
   if (!campAlive(live, now)) return `verwoest (herbouwd over <span data-end="${live.terr.camp.down}"></span>)`;
-  return `ongeveer ${Math.max(1, campSize(live))} barbaren`;
+  const raid = raidNow(live);
+  const grow = campGrowth(live, now);
+  const more = grow > 1.04 ? `, ${Math.round((grow - 1) * 100)}% sterker dan eerst` : '';
+  if (raid && !raid.battle) return `ongeveer ${Math.max(1, campSize(live))} barbaren${more}. <b>${raid.n} van hen trekken naar je dorp!</b>`;
+  return `ongeveer ${Math.max(1, campSize(live))} barbaren${more}. Kans op een overval: ${raidRisk(live, now)}`;
+}
+
+// hoe groot is de kans dat de barbaren binnenkort je dorp overvallen? (groeit zolang je hun kamp met rust laat)
+export function raidRisk(live, now) {
+  const p = raidChance(live, now);
+  return p >= 0.3 ? 'groot' : p >= 0.12 ? 'gemiddeld' : 'klein';
+}
+
+// keuzevenster: de barbaren trekken naar je dorp (15 minuten om de slag zelf te spelen)
+export function raidAskHtml(live, raid, now) {
+  const left = Math.max(0, Math.ceil((raid.at - now) / 1000));
+  const soldiers = Object.values(live.units || {}).reduce((a, b) => a + b, 0);
+  const wall = bLevel(live, 'wall'); const towers = findType(live, 'tower').length;
+  const def = [soldiers ? `${soldiers} soldaten thuis` : 'geen soldaten thuis', wall ? `muur niveau ${wall}` : 'geen muur', towers ? `${towers} ${towers === 1 ? 'toren' : 'torens'}` : ''].filter(Boolean).join(' · ');
+  return `<div class="bt-ask-card" role="dialog" aria-modal="true">
+    <div class="bt-ask-crest">${icon('swords')}</div>
+    <h2>${raid.n} barbaren vallen je dorp aan!</h2>
+    <p>Ze verzamelen bij hun kamp en trekken dan naar je stad. Verdedig je dorp zelf: zet je schutters op de muur en je soldaten
+    voor de poort. Of laat je soldaten, muur en torens het gevecht automatisch uitvechten.</p>
+    <p class="small"><b>Jouw verdediging:</b> ${def}</p>
+    <div class="bt-ask-btns">
+      <button class="btn primary big" data-bact="raid" data-mode="manual"${soldiers ? '' : ' disabled'}>${icon('flag')} Zelf verdedigen</button>
+      <button class="btn big" data-bact="raid" data-mode="auto">${icon('hourglass')} Automatisch</button>
+    </div>
+    ${soldiers ? '' : '<p class="small muted">Zelf verdedigen kan enkel met soldaten thuis.</p>'}
+    <p class="small muted">Nog <b data-askend="${raid.at}">${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</b> om te kiezen, daarna verloopt het gevecht automatisch.</p>
+  </div>`;
 }
 
 // waar is een groep in het veld mee bezig?
@@ -1473,7 +1504,14 @@ export function helpHtml(w, peaceEnd) {
     Barbaren vallen <b>meteen aan</b> wie hun dorp nadert, ook dorpelingen. Geef een vechtende groep een andere opdracht om te vluchten.
     Gewonde eenheden genezen zodra ze terug thuis zijn.</p>
     <p>Zodra je het barbarenkamp ontdekt hebt, staat erboven hoeveel barbaren er wonen: een handvol, iets meer in een later tijdperk.
-    Ongeveer evenveel soldaten volstaan om het te verwoesten. Stuur je leger liefst samen: wie alleen aankomt, vecht alleen.</p>
+    Ongeveer evenveel soldaten volstaan om het te verwoesten. Stuur je leger liefst samen: wie alleen aankomt, vecht alleen.
+    Wacht niet te lang: <b>het kamp groeit elke dag</b> dat je het met rust laat (tot drie keer zo sterk), en hoe groter het wordt,
+    hoe groter en vaker de overvallen op je dorp. Een groot kamp verwoesten levert wel meer buit op.</p>
+    <h3>Overvallen op je dorp</h3>
+    <p>Komen de barbaren je dorp overvallen, dan krijg je een melding (ook op je gsm, bij 'aanval op je stad'). Je hebt dan
+    <b>${Math.round(WILD.raid.warnMs / 60000)} minuten</b> om te kiezen: <b>zelf verdedigen</b> (een veldslag in je eigen stad, met je
+    soldaten die thuis zijn) of het gevecht <b>automatisch</b> laten verlopen. Kies je niets, dan gaat het automatisch. Winnen de
+    barbaren, dan stelen ze grondstoffen (tot wat je opslagplaats beschermt).</p>
     <h3>Je eigen gebied verkennen</h3>
     <p>Rond je stad ligt een stuk wildernis dat enkel van jou is, verborgen in de mist. Kies troepen en tik daarna op de grond:
     ze lopen er meteen naartoe en de mist verdwijnt waar ze komen. Tik op het stadscentrum of op <b>Naar huis</b> om ze terug te roepen.</p>
@@ -1484,7 +1522,8 @@ export function helpHtml(w, peaceEnd) {
     <li><b>Bronnen</b>: in de wildernis liggen goudaders, rotswanden, oude eikenbossen en bessenstruiken. Stuur er een dorpeling heen om ze leeg te halen.</li>
     <li><b>Everzwijnen</b>: stuur een paar soldaten (twee à drie speerdragers volstaan) en tik op het beest voor extra voedsel.</li>
     <li><b>Barbarenkamp</b>: ergens in je gebied woont een bende barbaren die af en toe je stad overvalt en grondstoffen steelt.
-    Vind hun kamp en val het aan met een paar soldaten (ongeveer evenveel als er barbaren zijn): dat levert buit op en de overvallen stoppen een tijd. Muren en torens helpen ook tegen overvallen.</li></ul>
+    Vind hun kamp en val het aan met een paar soldaten (ongeveer evenveel als er barbaren zijn): dat levert buit op en de overvallen stoppen een tijd.
+    Hoe langer je wacht, hoe sterker het kamp en hoe vaker ze komen. Muren en torens helpen ook tegen overvallen.</li></ul>
     <h3>Vondsten</h3>
     <p>Af en toe duikt er rond je stad iets op: een <b>verdwaald schaap</b>, een <b>eik vol brandhout</b>, <b>losse rotsblokken</b> of een <b>goudader</b>
     (ze gloeien en hebben een icoontje). Klik op een dorpeling en daarna op de vondst — of tik gewoon op de vondst. De dorpeling legt even zijn werk neer,

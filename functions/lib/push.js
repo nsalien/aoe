@@ -5,7 +5,8 @@
 // per toestel (NOTIFY_KINDS). notifyAll() draait elke minuut in de cron-worker (cron/worker.js) en ook 'lui' bij gewone verzoeken.
 
 import { BUILDINGS, AGES } from '../../public/shared/rules.js';
-import { maxBuilds } from '../../public/shared/sim.js';
+import { maxBuilds, ensureTerritory, advance, raidNow } from '../../public/shared/sim.js';
+import { loadTown, saveTown, gameTime, raidNotice, ConflictError } from './game.js';
 
 const enc = new TextEncoder();
 
@@ -208,7 +209,51 @@ export async function notifyBuilds(db, now, max = 4) {
   return sent;
 }
 
+// Overvallen van de barbaren: towns.raid_at = wanneer de stad bekeken moet worden (raidNotice in game.js). De overvallen
+// volgen uit de stad zelf (sim.js), dus de stad wordt hier tot nu doorgerekend en bewaard; begint er een overval, dan
+// krijgt de speler een melding: 15 minuten om de slag zelf te spelen, anders verloopt ze automatisch.
+// Spelers die al een week weg zijn, slaan we over (hun raid_at komt terug zodra hun stad weer bewaard wordt).
+export const RAID_IDLE = 7 * 86400000;
+export async function notifyRaids(db, world, now, max = 2) {
+  if (!world) return 0;
+  const rows = (await db.prepare(
+    `SELECT t.id, t.name, t.player_id, t.raid_at, p.last_seen FROM towns t JOIN players p ON p.id = t.player_id
+     WHERE t.raid_at IS NOT NULL AND t.raid_at <= ? ORDER BY t.raid_at LIMIT ?`,
+  ).bind(now, max).all()).results;
+  let keys = null;
+  let sent = 0;
+  for (const r of rows) {
+    if (r.last_seen < now - RAID_IDLE) {
+      await db.prepare('UPDATE towns SET raid_at = NULL WHERE id = ? AND raid_at = ?').bind(r.id, r.raid_at).run();
+      continue;
+    }
+    const town = await loadTown(db, r.id);
+    if (!town) continue;
+    ensureTerritory(town.state, town.id);
+    advance(town.state, gameTime(world, now), world.speed);
+    const raid = raidNow(town.state);
+    const tell = !!(raid && !raid.told && !raid.battle && now < raid.at);
+    if (raid) raid.told = 1;
+    try { await saveTown(db, town); } catch (e) { if (e instanceof ConflictError) continue; throw e; }
+    // het seizoen is voorbij (de tijd staat stil): niet elke minuut opnieuw
+    const nx = raidNotice(town.state);
+    if (nx != null && nx <= now) await db.prepare('UPDATE towns SET raid_at = NULL WHERE id = ?').bind(r.id).run();
+    if (!tell) continue;
+    if (!keys) keys = await vapidKeys(db);
+    sent += await notifyPlayer(db, keys, r.player_id, {
+      tag: `raid-${r.id}`, url: '/?raid=1', at: raid.at,
+      title: `Barbaren vallen ${r.name} aan!`,
+      body: `${raid.n} barbaren trekken naar je dorp. Je hebt nog {left} om het gevecht zelf te spelen, daarna verloopt het automatisch.`,
+    }, Math.max(60, (raid.at - now) / 1000), 'attack');
+  }
+  return sent;
+}
+
 // alles wat op tijd moet uitgaan (cron elke minuut, en als vangnet na gewone verzoeken)
-export async function notifyAll(db, now, max = 6) {
-  return (await notifyDue(db, now, max)) + (await notifyBuilds(db, now, max));
+// Een overval bekijken = een stad doorrekenen (±1 ms, hooguit ±5 ms): hooguit één per beurt, en enkel als er nog niets
+// versleuteld werd (CPU-limiet). Overvallen komen hooguit een paar keer per dag per stad: één per minuut volstaat ruim.
+export async function notifyAll(db, now, max = 6, world = null) {
+  const sent = (await notifyDue(db, now, max)) + (await notifyBuilds(db, now, max));
+  if (sent) return sent;
+  return notifyRaids(db, world, now, 1);
 }

@@ -352,7 +352,14 @@ export function advance(s, t, speed = 1) {
   ensureBonus(s, speed);
   if (s.terr) {
     if (!s.field) s.field = [];
-    if (s.terr.camp.next == null) s.terr.camp.next = s.t + Math.round((WILD.raid.firstHours * 3600000) / speed);
+    const c = s.terr.camp;
+    c.day = Math.round(86400000 / speed); // één speldag in ms (het kamp groeit per speldag)
+    if (c.since == null) {
+      // nieuwe stad: de eerste overval pas na firstHours; een oudere stad (van voor het groeiende kamp): het groeit vanaf nu
+      const fresh = c.next == null && !c.raids;
+      c.since = Math.max(s.t, c.down || 0);
+      if (!c.raid) scheduleRaid(s, fresh ? s.t + Math.round((c.day * (WILD.raid.firstHours - WILD.raid.quietHours)) / 24) : s.t);
+    }
     autoReveal(s);
   }
   for (let guard = 0; guard < 20000; guard++) {
@@ -936,8 +943,24 @@ function gatherAccrue(s, dt, speed) {
 }
 
 // Het barbarenkamp rond je stad is bedoeld als vrij makkelijke buit: ongeveer evenveel soldaten als barbaren volstaat.
-export const campSize = (s) => 2 + 2 * age(s) + Math.min(3, Math.floor(s.terr.camp.raids / 3)) - (s.terr.camp.loss || 0);
-export const raidSize = (s) => Math.min(40, Math.round(3 + age(s) * 2.5 + s.terr.camp.raids * 1.2));
+// Maar het groeit elke dag dat je het met rust laat (x1 bij het (her)opbouwen, tot WILD.camp.growMax), en dan worden ook
+// de overvallen op je dorp groter en vaker.
+const campDays = (s, t) => {
+  const c = s.terr.camp;
+  return c.since == null ? 0 : Math.max(0, t - c.since) / (c.day || 86400000);
+};
+export function campGrowth(s, t = s.t) {
+  return Math.round((1 + Math.min(WILD.camp.growMax - 1, WILD.camp.growPerDay * campDays(s, t))) * 100) / 100;
+}
+// kans op een overval bij elke controle (om de WILD.raid.checkHours)
+export function raidChance(s, t = s.t) {
+  const R = WILD.raid;
+  return Math.min(R.maxChance, R.chance + R.chancePerDay * campDays(s, t));
+}
+export const campSize = (s, t = s.t) => Math.round((2 + 2 * age(s)) * campGrowth(s, t)) - (s.terr.camp.loss || 0);
+export const raidSize = (s, t = s.t) => Math.min(WILD.raid.max, Math.round((3 + age(s) * 2.5) * campGrowth(s, t)));
+// de overval die nu naar je dorp trekt (of die je zelf aan het uitvechten bent)
+export const raidNow = (s) => (s && s.terr && s.terr.camp.raid) || null;
 export const boarAlive = (s, id, t) => (s.terr.boar[id] || 0) <= t;
 export const campAlive = (s, t) => s.terr.camp.down <= t;
 
@@ -963,7 +986,9 @@ function nextWildEvent(s, speed) {
       take(s.t + Math.ceil((depLeft(s, d) / rate) * 3600000), { kind: 'depleted', id });
     }
   }
-  if (s.terr.camp.next != null) take(s.terr.camp.next, { kind: 'raid' });
+  const c = s.terr.camp;
+  if (c.raid) take(c.raid.battle ? c.raid.bt + WILD.raid.liveMs : c.raid.at, { kind: 'raidHit' });
+  else if (c.next != null) take(c.next, { kind: 'raid' });
   return ev;
 }
 
@@ -973,7 +998,8 @@ function applyWildEvent(s, ev, speed) {
   else if (ev.kind === 'fight') finishFight(s, ev.f, ev.t, speed);
   else if (ev.kind === 'chopped') chopDone(s, ev.g, ev.t);
   else if (ev.kind === 'depleted') depleted(s, ev.id, ev.t);
-  else if (ev.kind === 'raid') barbarianRaid(s, ev.t, speed);
+  else if (ev.kind === 'raid') raidStart(s, ev.t);
+  else if (ev.kind === 'raidHit') raidAuto(s, ev.t);
 }
 
 // pace = optioneel trager tempo (tegels/s), zodat een heel leger samen aankomt
@@ -1252,7 +1278,7 @@ function ambush(s, g, t) {
   engage(s, g, { type: 'camp', id: 0 }, t);
 }
 
-const foeSide = (s, foe) => (foe.type === 'boar' ? combatants({ boar: 1 }) : combatants({ barbarian: Math.max(1, campSize(s)) }));
+const foeSide = (s, foe, t) => (foe.type === 'boar' ? combatants({ boar: 1 }) : combatants({ barbarian: Math.max(1, campSize(s, t)) }));
 
 // gevecht beginnen, of aansluiten bij een lopend gevecht tegen dezelfde vijand
 function engage(s, g, foe, t) {
@@ -1268,7 +1294,7 @@ function engage(s, g, foe, t) {
     f.b = now.b.filter((u) => u.hp > 0).map(({ died, ...u }) => u);
   } else {
     terr.fid = (terr.fid || 0) + 1;
-    f = { id: terr.fid, foe, t0: t, a: mine, b: foeSide(s, foe), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') };
+    f = { id: terr.fid, foe, t0: t, a: mine, b: foeSide(s, foe, t), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') };
     terr.fights.push(f);
   }
   f.end = fightEnd(f);
@@ -1345,10 +1371,13 @@ function finishFight(s, f, t, speed) {
   }
   const c = s.terr.camp;
   if (won) {
+    // een kamp dat lang kon groeien, geeft ook meer buit
+    const grow = campGrowth(s, t);
+    const loot = scaleRes(WILD.camp.loot, ageMult(s) * grow);
     c.down = t + Math.round((WILD.camp.respawnHours * 3600000) / speed);
     c.loss = 0;
-    if (c.next < c.down) c.next = c.down + Math.round(((WILD.raid.minHours * 3600000) / speed) / 2);
-    const loot = scaleRes(WILD.camp.loot, ageMult(s));
+    c.since = c.down; // het nieuwe kamp begint weer klein
+    if (!c.raid) scheduleRaid(s, c.down);
     addRes(s, loot);
     pushLog(s, t, 'camp', `Barbarenkamp verwoest! Buit: ${resText(loot)}. De overvallen stoppen voorlopig.`);
   } else {
@@ -1368,29 +1397,59 @@ export function townBaseDef(s) {
   return COMBAT.ageDef * age(s) + COMBAT.villagerDef * totalVillagers(s);
 }
 
-function barbarianRaid(s, t, speed) {
+// Wanneer komt de volgende overval? Om de checkHours een kans die groeit met het kamp (raidChance), vast uit het zaad van
+// je gebied (browser en server zien hetzelfde), nooit binnen quietHours na 'from'.
+function scheduleRaid(s, from) {
+  const c = s.terr.camp; const R = WILD.raid; const day = c.day || 86400000;
+  const step = Math.round((day * R.checkHours) / 24);
+  let t = Math.max(from, c.down || 0) + Math.round((day * R.quietHours) / 24);
+  c.sch = (c.sch || 0) + 1;
+  for (let k = 0; k < 300; k++, t += step) if (wildRand(s, 7000 + c.sch * 300 + k) < raidChance(s, t)) break;
+  c.next = t;
+}
+
+// De barbaren trekken naar je dorp. Ze komen pas na WILD.raid.warnMs (echte tijd) aan: tot dan kan je kiezen om de slag
+// zelf te spelen (de server zet dan c.raid.battle), anders vallen ze automatisch aan (raidAuto).
+function raidStart(s, t) {
   const c = s.terr.camp;
-  const iv = Math.round(((WILD.raid.minHours + (WILD.raid.maxHours - WILD.raid.minHours) * wildRand(s, 100 + c.raids)) * 3600000) / speed);
-  if (!campAlive(s, t)) { c.next = c.down + iv; return; }
-  const n = raidSize(s);
-  c.raids++;
-  c.next = t + iv;
+  c.next = null;
+  if (!campAlive(s, t)) { scheduleRaid(s, t); return; }
+  const n = raidSize(s, t);
+  c.raid = { start: t, at: t + WILD.raid.warnMs, n };
+  pushLog(s, t, 'raid-warn', `${n} barbaren trekken naar je dorp! Verdedig het zelf of laat de slag automatisch verlopen.`);
+}
+
+function raidAuto(s, t) {
+  const n = s.terr.camp.raid.n;
   const r = resolveBattle({
     attUnits: { barbarian: n }, groups: [{ key: 'home', units: { ...s.units } }], defSmithy: bLevel(s, 'smithy'),
     wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
   });
+  applyRaid(s, t, r.attWins, r.attLeft, r.groupsLeft[0].units);
+}
+
+// Uitslag van een overval verwerken (automatisch, of na de slag die je zelf speelde: de server roept dit dan op).
+// home = de soldaten die thuis overblijven. Geeft de buit van de barbaren terug.
+export function applyRaid(s, t, attWins, attLeft, home) {
+  const c = s.terr.camp;
+  const n = c.raid ? c.raid.n : 0;
   s.units = {};
-  for (const [k, v] of Object.entries(r.groupsLeft[0].units)) if (v > 0) s.units[k] = v;
-  if (r.attWins) {
+  for (const [k, v] of Object.entries(home || {})) if (v > 0) s.units[k] = v;
+  let loot = {};
+  if (attWins) {
     const prot = protectAmount(s);
     const avail = {};
     for (const k of RES) avail[k] = Math.max(0, s.res[k] - prot);
-    const loot = computeLoot(avail, (r.attLeft.barbarian || 0) * WILD.raid.carry);
+    loot = computeLoot(avail, ((attLeft && attLeft.barbarian) || 0) * WILD.raid.carry);
     for (const k of RES) s.res[k] -= loot[k];
     pushLog(s, t, 'raid-lost', `${n} barbaren overvielen je stad en stalen ${resText(loot) || 'niets'}. Verwoest hun kamp of bouw je verdediging uit!`);
   } else {
     pushLog(s, t, 'raid-won', `Je stad sloeg een overval van ${n} barbaren af!`);
   }
+  c.raids++;
+  c.raid = null;
+  scheduleRaid(s, t);
+  return loot;
 }
 
 // ---------- acties in het veld ----------

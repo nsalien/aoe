@@ -544,15 +544,19 @@ export class BattleView {
     const loot = resPills(r.loot);
     const bounty = won ? resPills(r.bounty) : '';
     const practice = this.b.kind === 'practice' || r.practice;
+    const raid = this.b.kind === 'raid' || r.raid;
+    const text = raid
+      ? (r.late ? 'De overval was intussen al automatisch afgehandeld.' : won ? `Je dorp hield stand tegen de barbaren!${r.retreat ? ' Ze slopen terug naar hun kamp.' : ''}` : 'De barbaren braken door en plunderden je dorp.')
+      : `${r.retreat ? 'Je troepen trokken zich terug. ' : ''}${this.b.role === 'att' ? (won ? 'De stad is ingenomen.' : 'De aanval is afgeslagen.') : (won ? 'Je stad hield stand!' : 'De vijand brak door je verdediging.')}`;
     this.resultEl.innerHTML = `<div class="bt-res-card ${won ? 'won' : 'lost'}">
       <div class="bt-ask-crest">${icon(won ? 'trophy' : 'shield')}</div>
       <h2>${won ? 'Overwinning!' : 'Nederlaag'}</h2>
       ${practice ? '<p class="small muted" style="margin:0">Oefenslag: je stad en je leger blijven zoals ze waren.</p>' : ''}
-      <p>${r.retreat ? 'Je troepen trokken zich terug. ' : ''}${this.b.role === 'att' ? (won ? 'De stad is ingenomen.' : 'De aanval is afgeslagen.') : (won ? 'Je stad hield stand!' : 'De vijand brak door je verdediging.')}</p>
+      <p>${text}</p>
       <dl class="kv"><dt>Jouw verliezen</dt><dd>${list(lost)}</dd><dt>Vijanden verslagen</dt><dd>${list(kill)}</dd>
       ${loot ? `<dt>${this.b.role === 'att' ? 'Buit' : 'Geplunderd'}</dt><dd>${loot}</dd>` : ''}
       ${bounty ? `<dt>Krijgsbuit</dt><dd>${bounty}</dd>` : ''}</dl>
-      <div class="bt-ask-btns">${practice ? `<button class="btn primary" data-bact="again">${icon('swords')} Nog eens</button>` : `<button class="btn primary" data-bact="reports">${icon('scroll')} Rapport</button>`}<button class="btn" data-bact="close">Sluiten</button></div></div>`;
+      <div class="bt-ask-btns">${practice ? `<button class="btn primary" data-bact="again">${icon('swords')} Nog eens</button>` : raid ? '' : `<button class="btn primary" data-bact="reports">${icon('scroll')} Rapport</button>`}<button class="btn${raid ? ' primary' : ''}" data-bact="close">Sluiten</button></div></div>`;
     this.resultEl.hidden = false;
     if (won && this.view.cam) { const c = this.view.cam; for (let i = 0; i < 4; i++) setTimeout(() => this.view.particles.confetti(c.x + (i - 1.5) * 80, c.y - 60, 40), i * 250); }
   }

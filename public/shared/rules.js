@@ -343,8 +343,14 @@ export const FIELD = {
 // De wildernis: everzwijnen, een barbarenkamp en wilde bronnen.
 export const WILD = {
   boar: { name: 'Everzwijn', loot: { food: 200 }, respawnHours: 10 },
-  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 320, wood: 320, stone: 180, gold: 180 } },
-  raid: { firstHours: 30, minHours: 20, maxHours: 40, warnMs: 90000, carry: 25 },
+  // het kamp groeit elke dag dat je het met rust laat (growPerDay, tot growMax keer zo sterk); verwoesten = opnieuw klein
+  // (en een groter kamp geeft ook meer buit)
+  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 320, wood: 320, stone: 180, gold: 180 }, growPerDay: 0.35, growMax: 3 },
+  // Overvallen op je dorp: om de checkHours een kans (chance + chancePerDay per dag dat het kamp groeit, hooguit maxChance),
+  // nooit binnen quietHours na de vorige overval of het heropbouwen van het kamp; in een nieuwe stad pas na firstHours.
+  // warnMs = zo lang (echte tijd) trekken de barbaren naar je dorp: zolang kan je kiezen om de slag zelf te spelen,
+  // daarna gaat ze automatisch. liveMs = vangnet: een zelf gespeelde slag die nooit afgerond werd, gaat daarna automatisch.
+  raid: { firstHours: 30, quietHours: 10, checkHours: 2, chance: 0.02, chancePerDay: 0.06, maxChance: 0.4, warnMs: 15 * 60000, liveMs: 30 * 60000, carry: 25, max: 60 },
   deposits: {
     gold: { name: 'Goudader', res: 'gold', amount: 500 },
     stone: { name: 'Rotswand', res: 'stone', amount: 600 },
