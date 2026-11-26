@@ -162,6 +162,23 @@ Daarom:
   Het einde (`finishBattle`) gebruikt de gewone `attackTown`/`attackCamp` met een `override` (zelfde buit, rapporten en punten).
   **Oefenslag** (`/battle/practice`, `startPractice`, `target_kind = 'practice'`): meteen 30 tegen 30 tegen de computer, in een
   ommuurd oefendorp of in je eigen stad; `finishBattle` toont enkel de uitslag (geen verliezen, buit of rapport).
+- **Replay van een automatische slag** (24 uur, `REPLAY.ms` in `rules.js`): `attackTown`/`attackCamp` zonder `override` (dus
+  automatisch uitgerekend) bewaren met `saveReplay` een klein recept in de tabel `replays` (migratie `0011`; `who` = wie het mag
+  zien: aanvaller, verdediger, versterkers; enkel als er een echte speler bij is) en zetten `replay` (id) in het rapport en in
+  `battles.result`. Recept = wat `createBattle` nodig heeft (legers, `defGroups`, smidse, onderzoek, `dir`, stadsbeeld `view`,
+  namen/kleuren) + de vaste uitslag `fate` (`fateOf` in `battle.js`: winnaar en overlevenden per pool, sleutels zoals
+  `battleOutcome`) + `res` (verliezen en buit uit het rapport). `GET /replay?id=` (`loadReplay`, 404 voor anderen, 410 na 24 u).
+  De browser speelt de slag na: `replayBattle(rec)` (fieldbattle.js) = `createBattle` met beide kanten AI + `setFate`.
+  **Bijsturing** (`st.fate`, `FATE`): per pool (`kant|groep|soort`) sneuvelen er nooit meer dan in het rapport (`fateCap`, ook pek en
+  vallen van de muur); enkel de echte winnaar kan winnen (`judgeFate`, geen plein); de winnaar vlucht nooit, de verliezer pas na
+  `mayRout` of 75% verlies, komt niet terug en wordt op de vlucht neergehaald tot zijn verliezen kloppen; schade bijgestuurd
+  (`f.m` per kant, `f.r` per soort van de winnaar, de winnaar sterker na `ramp`); na `routAll` vlucht de verliezer, `end` = vangnet.
+  Resultaat: winnaar altijd juist, verliezen van de verliezer exact, van de winnaar ±80% (schutters achteraan worden soms niet
+  geraakt). Het eindscherm toont de cijfers van het rapport. Overvallen van de barbaren die automatisch verliepen (`raidAuto` in
+  `sim.js`) zetten het recept `rp` in het logboek van de stad; `raidReplay(s, e, me)` maakt er een replay van (stad zoals ze nu is).
+  Browser: `BattleView.showReplay(rec)` (eigen klok `rp.t`, `clock()`, pauze/spatiebalk, 1×–8×, Einde, Opnieuw; geen peilingen,
+  tikken doen niets), knoppen in het rapport (`replayBtnHtml` in `ui.js`), in het logboek (`raidReplay`-actie) en op het uitslagkaartje.
+  Een echte aanval die binnenkomt verschijnt boven een replay (`inLiveBattle()` in `main.js`).
 - **Computerspelers (bots)**: gewone spelers met `players.bot = 1` en een eigen stad, in eigen clans (teams met enkel bots;
   `/register` zet een mens nooit in een botclan). Aantal en niveau staan in `world.bots` / `world.bot_level` (beheer).
   Na een gewoon verzoek komt telkens één bot aan de beurt (`botTick` in `functions/lib/bots.js`, via `waitUntil`, enkel als het
