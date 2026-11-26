@@ -447,7 +447,7 @@ minuut een bot aan de beurt als niemand online is.
     en laat het gekozen gebouw/stad/kamp los. Getest op gsm, liggend (915 en 844 breed), tablet, wereldkaart; pc ongewijzigd.
 
 48. **Meldingen: bouwer vrij en aanval op je stad, apart aan/uit** (gevraagd: "notifications voor wanneer er een bouwer vrij
-    is gekomen, en voor een binnenkomende aanval; beiden apart aan/uit"). Per toestel drie schakelaars in 'Meldingen op je gsm'
+    is gekomen, en voor een binnenkomende aanval; beiden apart aan/uit"). Per toestel drie (sinds punt 59 vijf) schakelaars in 'Meldingen op je gsm'
     (stadsoverzicht en wereldkaart): aanval op je stad (meteen bij vertrek + ±2 min vooraf), een bouwer is vrij, je leger komt
     bijna aan. Getest met de echte routes (twee toestellen, één met aanval uit) en in de browser (pc en gsm).
     De gebruiker gaf het Cloudflare-token daarna het recht 'Account · Workers Scripts · Edit': sinds 25/11 staat de cron-worker
@@ -525,6 +525,14 @@ minuut een bot aan de beurt als niemand online is.
     routes, 24 u-grens, rechten) en in Chromium op pc, gsm rechtop en liggend.
     Onderweg gevonden: rook boven puin van een muur op tegels met negatieve coördinaten gaf een negatieve straal (`A.smoke`), waardoor
     de rest van het beeld niet getekend werd (ook in gewone belegeringen). Opgelost.
+
+59. **Meldingen: aanval op je stad en op een clanlid, meteen bij vertrek** (gevraagd: "extra opties om meldingen aan te zetten:
+    als je aangevallen wordt, direct als de aanval geïnitieerd wordt; als je teamlid aangevallen wordt, ook direct; standaard aan").
+    'Meteen bij vertrek' bestond al, maar zat met de ±2 min-melding en de barbaren onder één schakelaar. Nu vijf schakelaars per
+    toestel: Aanval op je stad (meteen), Aanval op een clanlid (meteen, "stuur versterking"), Aanval komt bijna aan (±2 min +
+    barbaren), Een bouwer is vrij, Je leger komt bijna aan. Nieuwe soorten staan standaard aan; wie vroeger 'aanval op je stad'
+    uitzette, houdt 'meteen bij vertrek' uit (migratie `0012`). Getest met de echte routes (twee spelers in een clan, elk twee
+    toestellen, één met de schakelaar uit; een speler van een andere clan krijgt niets) en het kaartje in de browser.
 
 ## 8. Bekende beperkingen en ideeën
 
