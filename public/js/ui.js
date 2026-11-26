@@ -1214,7 +1214,9 @@ function marchCargo(m) {
 
 // soorten meldingen, elk apart aan/uit op dit toestel (zelfde namen als NOTIFY_KINDS op de server)
 const PUSH_KINDS = [
-  ['attack', 'shield', 'Aanval op je stad', 'meteen als iemand je aanvalt, en nog eens ±2 minuten voor aankomst'],
+  ['now', 'shield', 'Aanval op je stad', 'meteen als iemand een leger naar je stad stuurt'],
+  ['ally', 'team', 'Aanval op een clanlid', 'meteen als iemand een leger naar de stad van een clanlid stuurt: tijd om versterking te sturen'],
+  ['attack', 'hourglass', 'Aanval komt bijna aan', '±2 minuten voor een aanval op je stad aankomt, en bij een overval van de barbaren'],
   ['build', 'hammer', 'Een bouwer is vrij', 'als een bouwwerk klaar is (niet als je het spel open hebt)'],
   ['march', 'swords', 'Je leger komt bijna aan', '±2 minuten vooraf, om zelf te kiezen: zelf besturen of automatisch'],
 ];
@@ -1228,7 +1230,7 @@ function pushPrefsHtml(app) {
     </button>`).join('')}</div>`;
 }
 
-// meldingen op je gsm: aanval op je stad, bouwer vrij, je leger komt aan (elk apart aan/uit)
+// meldingen op je gsm: aanval op je stad of op een clanlid, bouwer vrij, je leger komt aan (elk apart aan/uit)
 export function pushCardHtml(app) {
   const st = app.pushState;
   if (st === 'unsupported') return '';
@@ -1256,7 +1258,7 @@ export function pushCardHtml(app) {
     return `<div class="card push-card err">${head}${note('Meldingen zijn geblokkeerd voor dit spel.', 'err')}<p class="small muted" style="margin:0">${how} Kom daarna terug en tik op <b>Opnieuw proberen</b>.</p>
       <div class="actions"><button class="btn small" data-action="pushOn">${icon('bell')} Opnieuw proberen</button></div></div>`;
   }
-  return `<div class="card push-card${app.pushErr ? ' err' : ''}">${head}${note(app.pushErr, 'err')}<p class="small muted" style="margin:0">Krijg een melding op je gsm bij een aanval op je stad, als een bouwer vrij is en als je leger bijna aankomt. Daarna kies je zelf welke.</p>
+  return `<div class="card push-card${app.pushErr ? ' err' : ''}">${head}${note(app.pushErr, 'err')}<p class="small muted" style="margin:0">Krijg een melding op je gsm bij een aanval op je stad of op een clanlid, als een bouwer vrij is en als je leger bijna aankomt. Daarna kies je zelf welke.</p>
     <div class="actions"><button class="btn primary small" data-action="pushOn">${icon('bell')} ${app.pushErr ? 'Opnieuw proberen' : 'Meldingen aanzetten'}</button></div></div>`;
 }
 

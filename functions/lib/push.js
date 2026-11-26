@@ -1,7 +1,7 @@
 // Meldingen op je gsm (Web Push), zonder externe bibliotheek: VAPID-handtekening (ES256) en
 // versleuteling van de inhoud (aes128gcm, RFC 8291), allebei met de WebCrypto van Cloudflare Workers.
 // notifyDue() stuurt ±2 minuten voor een aanval aankomt een melding naar de aanvaller (en de verdediger), notifyBuilds()
-// als een bouwwerk klaar is, notifyAttack() meteen als iemand een aanval op je stad stuurt. Elke soort staat apart aan/uit
+// als een bouwwerk klaar is, notifyAttack() meteen als iemand een aanval op je stad (of die van een clanlid) stuurt. Elke soort staat apart aan/uit
 // per toestel (NOTIFY_KINDS). notifyAll() draait elke minuut in de cron-worker (cron/worker.js) en ook 'lui' bij gewone verzoeken.
 
 import { BUILDINGS, AGES } from '../../public/shared/rules.js';
@@ -97,8 +97,10 @@ async function sendOne(keys, sub, payload, ttl) {
   return res.status;
 }
 
-// soorten meldingen, elk apart aan/uit per toestel (kolommen in push_subs, migratie 0008)
-export const NOTIFY_KINDS = { attack: 'n_attack', build: 'n_build', march: 'n_march' };
+// soorten meldingen, elk apart aan/uit per toestel (kolommen in push_subs, migraties 0008 en 0012; standaard aan):
+//   now = aanval op je stad, meteen bij vertrek · ally = aanval op een clanlid, meteen bij vertrek
+//   attack = aanval op je stad ±2 min voor aankomst, en een overval van de barbaren · build = bouwer vrij · march = je leger komt aan
+export const NOTIFY_KINDS = { now: 'n_now', ally: 'n_ally', attack: 'n_attack', build: 'n_build', march: 'n_march' };
 
 // stuur een melding naar alle toestellen van een speler; vervallen inschrijvingen worden opgeruimd.
 // kind: enkel naar de toestellen waar die soort aan staat (zonder kind: naar alle, bv. de proefmelding)
@@ -157,20 +159,38 @@ export async function notifyDue(db, now, max = 6) {
   return sent;
 }
 
-// Meteen bij het vertrek van een aanval op een stad: de verdediger weet dat er iets aankomt (zonder de troepen).
-// Zelfde tag als de melding ±2 min vooraf, die deze later vervangt. Wordt opgeroepen na /march en na een aanval van een bot.
+// Meteen bij het vertrek van een aanval op een stad: de verdediger weet dat er iets aankomt (zonder de troepen, soort 'now';
+// zelfde tag als de melding ±2 min vooraf, die deze later vervangt), en zijn clanleden ook (soort 'ally': ze kunnen
+// versterking sturen). Wordt opgeroepen na /march en na een aanval van een bot.
 export async function notifyAttack(db, marchId, now) {
   const m = await db.prepare(
-    `SELECT m.id, m.kind, m.arrive_at, t.name AS town, t.player_id AS def_player, p.name AS att_name
+    `SELECT m.id, m.kind, m.arrive_at, t.name AS town, t.player_id AS def_player, d.name AS def_name, d.team_id AS def_team, p.name AS att_name
      FROM marches m JOIN towns t ON t.id = m.target_id AND m.target_kind = 'town' JOIN players p ON p.id = m.player_id
+     JOIN players d ON d.id = t.player_id
      WHERE m.id = ?`,
   ).bind(marchId).first();
   if (!m || m.kind !== 'attack' || m.arrive_at <= now) return 0;
-  return notifyPlayer(db, await vapidKeys(db), m.def_player, {
+  const keys = await vapidKeys(db);
+  const ttl = Math.max(60, (m.arrive_at - now) / 1000);
+  let sent = await notifyPlayer(db, keys, m.def_player, {
     tag: `march-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at,
     title: `Aanval op ${m.town}!`,
     body: `${m.att_name} stuurt een leger naar je stad. Aankomst om {clock} (over {left}).`,
-  }, Math.max(60, (m.arrive_at - now) / 1000), 'attack');
+  }, ttl, 'now');
+  if (m.def_team == null) return sent;
+  // clanleden (echte spelers; enkel wie die melding aan heeft, krijgt ze)
+  const mates = (await db.prepare(
+    `SELECT DISTINCT p.id FROM players p JOIN push_subs s ON s.player_id = p.id
+     WHERE p.team_id = ? AND p.id != ? AND p.bot = 0 AND s.n_ally = 1 LIMIT 8`,
+  ).bind(m.def_team, m.def_player).all()).results;
+  for (const r of mates) {
+    sent += await notifyPlayer(db, keys, r.id, {
+      tag: `ally-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at,
+      title: `Je clanlid ${m.def_name} wordt aangevallen!`,
+      body: `${m.att_name} stuurt een leger naar ${m.town}. Aankomst om {clock} (over {left}). Stuur versterking!`,
+    }, ttl, 'ally');
+  }
+  return sent;
 }
 
 // Bouwwerken die klaar zijn: 'een bouwer is vrij'. towns.build_at = het eerstvolgende einde (saveTown houdt het bij).

@@ -131,7 +131,7 @@ async function enablePush() {
   }
 }
 
-// één soort melding aan of uit op dit toestel (aanval op je stad, bouwer vrij, je leger komt aan)
+// één soort melding aan of uit op dit toestel (aanval op je stad of een clanlid, bouwer vrij, je leger komt aan)
 async function setPushPref(k) {
   if (!app.pushPrefs || !app.pushEndpoint || !(k in app.pushPrefs)) return;
   const before = { ...app.pushPrefs };
