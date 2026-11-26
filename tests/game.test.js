@@ -2592,7 +2592,7 @@ test('dorpelingen verdelen: de browser rekent met dezelfde plaatsen als de serve
 });
 
 // ---------- replay van een automatisch verlopen slag ----------
-import { setFate, replayBattle, raidReplay, FATE } from '../public/shared/fieldbattle.js';
+import { setFate, replayBattle, raidReplay, FATE, aliveN } from '../public/shared/fieldbattle.js';
 import { fateOf } from '../public/shared/battle.js';
 
 // het stadsbeeld zoals de server het in het recept zet
@@ -2601,7 +2601,7 @@ const viewOf = (s, seed) => ({
   walls: s.walls || [], gates: s.gates || [], cl: [], lots: [],
 });
 
-test('replay: de nagespeelde slag eindigt zoals de automatische (winnaar, nooit meer verliezen), deterministisch', () => {
+test('replay: de nagespeelde slag eindigt exact zoals het rapport (winnaar en gesneuvelden per soort, beide kanten), deterministisch', () => {
   const cases = [
     [{ sword: 20, archer: 10, ram: 2 }, { spear: 12, archer: 8 }, true],
     [{ sword: 40, archer: 20, ram: 3 }, { spear: 12, archer: 8 }, true],
@@ -2609,6 +2609,9 @@ test('replay: de nagespeelde slag eindigt zoals de automatische (winnaar, nooit 
     [{ spear: 30, sword: 10 }, {}, true],
     [{ knight: 20 }, { archer: 30 }, false],
     [{ elephant: 6, immortal: 10 }, { spear: 30, archer: 20 }, true],
+    [{ barbarian: 9 }, { spear: 3, archer: 2 }, false],
+    [{ spear: 8, knight: 10 }, { spear: 7, sword: 9, archer: 4 }, true],
+    [{ sword: 100, archer: 60, knight: 30, ram: 6 }, { spear: 60, archer: 50, sword: 30 }, true],
   ];
   for (const [att, def, walls] of cases) {
     const town = siegeTown({ walls });
@@ -2622,24 +2625,20 @@ test('replay: de nagespeelde slag eindigt zoals de automatische (winnaar, nooit 
     let s2 = JSON.parse(JSON.stringify(replayBattle(rec)));
     stepTo(st, FATE.end + 60000);
     while (s2.over == null) { stepTo(s2, s2.t + 23 * FB.tick, 23); s2 = JSON.parse(JSON.stringify(s2)); }
-    const o = battleOutcome(st);
     const tag = JSON.stringify({ att, def });
-    assert.equal(o.attWins, rb.attWins, `winnaar ${tag}`);
-    assert.deepEqual(battleOutcome(s2), o, `deterministisch ${tag}`);
-    assert.ok((st.n - st.ph1) * FB.tick <= FATE.end, `duurt niet te lang ${tag}`);
-    // de winnaar verliest nooit meer dan in het rapport, de verliezer precies zoveel (wie vlucht, wordt nog neergehaald)
-    const dl = (k) => (o.defLeft.home || {})[k] || 0;
-    if (rb.attWins) {
-      for (const k of Object.keys(att)) assert.ok((o.attLeft[k] || 0) >= (rb.attLeft[k] || 0), `${k} ${tag}`);
-      for (const k of Object.keys(def)) assert.equal(dl(k), rb.groupsLeft[0].units[k] || 0, `${k} ${tag}`);
-    } else {
-      for (const k of Object.keys(def)) assert.ok(dl(k) >= (rb.groupsLeft[0].units[k] || 0), `${k} ${tag}`);
-      for (const k of Object.keys(att)) assert.equal(o.attLeft[k] || 0, rb.attLeft[k] || 0, `${k} ${tag}`);
-    }
+    assert.equal(battleOutcome(st).attWins, rb.attWins, `winnaar ${tag}`);
+    assert.deepEqual(battleOutcome(s2), battleOutcome(st), `deterministisch ${tag}`);
+    assert.ok((st.n - st.ph1) * FB.tick < FATE.end, `zonder het laatste vangnet ${tag}`);
+    // wat je op het scherm ziet (levende soldaten, gewonden tellen mee) = wat het rapport zegt
+    const seen = (side) => { const o = {}; for (const u of st.units) if (u.s === side && u.k !== 'tower' && u.hp > 0) o[u.k] = (o[u.k] || 0) + aliveN(u); return o; };
+    const sa = seen(0); const sd = seen(1);
+    for (const k of Object.keys(att)) assert.equal(sa[k] || 0, rb.attLeft[k] || 0, `aanvaller ${k} ${tag}`);
+    for (const k of Object.keys(def)) assert.equal(sd[k] || 0, rb.groupsLeft[0].units[k] || 0, `verdediger ${k} ${tag}`);
   }
   // zonder fate verandert er niets aan een gewone slag
   const a = siege(); const b = siege();
   setFate(b, { win: 0, left: {} }); delete b.fate;
+  for (const u of b.units) delete u.pk;
   stepTo(a, 30000); stepTo(b, 30000);
   assert.deepEqual(battleOutcome(a), battleOutcome(b));
 });
@@ -2684,10 +2683,13 @@ test('replay: een automatische aanval bewaart een recept, 24 uur te bekijken doo
   assert.ok(JSON.stringify(rec).length < 20000, 'klein recept');
   assert.equal((await call('GET', `/replay?id=${id}`, null, b.cookie)).data.replay.role, 'def', 'de verdediger ziet ze ook');
   assert.equal((await call('GET', `/replay?id=${id}`, null, c.cookie)).status, 404, 'een ander niet');
-  // de browser speelt ze na en komt uit bij dezelfde winnaar
+  // de browser speelt ze na en komt uit bij dezelfde winnaar, met dezelfde verliezen als in het rapport
   const st = replayBattle(rec);
   stepTo(st, FATE.end + 60000);
   assert.equal(battleOutcome(st).attWins, rep.data.attWins);
+  const lost = (side, init) => { const o = {}; for (const k of Object.keys(init)) o[k] = init[k] - st.units.filter((u) => u.s === side && u.k === k && u.hp > 0).reduce((a, u) => a + aliveN(u), 0); return o; };
+  assert.deepEqual(lost(0, rec.att), Object.fromEntries(Object.keys(rec.att).map((k) => [k, rep.data.attLost[k] || 0])));
+  assert.deepEqual(lost(1, rep.data.defUnits), Object.fromEntries(Object.keys(rep.data.defUnits).map((k) => [k, rep.data.defLost[k] || 0])));
   // na 24 uur niet meer
   sql('UPDATE replays SET created_at = ?', now - 25 * 3600000);
   const old = await call('GET', `/replay?id=${id}`, null, a.cookie);
@@ -2713,6 +2715,11 @@ test('replay: een overval die automatisch verliep, kan je naspelen vanuit het lo
   const st = replayBattle(rec);
   stepTo(st, FATE.end + 60000);
   assert.equal(battleOutcome(st).attWins, e.kind === 'raid-lost');
+  // de verliezen van je dorp in de replay = die van de overval
+  for (const k of Object.keys(e.rp.home)) {
+    const alive = st.units.filter((u) => u.s === 1 && u.k === k && u.hp > 0).reduce((a, u) => a + aliveN(u), 0);
+    assert.equal(e.rp.home[k] - alive, rec.res.defLost[k] || 0, k);
+  }
 });
 
 test('replay: ook als je zelf "Automatisch" kiest (uitslagkaartje) en bij een roverskamp', async () => {
