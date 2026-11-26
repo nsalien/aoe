@@ -1785,6 +1785,25 @@ test('tabblad Bouwadvies: wat nog verbeterd kan worden, gebundeld per soort en n
   assert.doesNotMatch(h, /NaN|undefined/);
 });
 
+test('tabblad Bouwadvies: gebouwen die je nog niet hebt (bv. het havenhuis in tijdperk 2) staan er ook in', async () => {
+  const { newBuildAdvice, adviceReady, adviceBarHtml } = await import('../public/js/ui.js');
+  const s = newTownState(0, 'greek');
+  s.res = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+  assert.ok(!newBuildAdvice(s).some((g) => g.type === 'harbor'), 'tijdperk 1: nog geen havenhuis');
+  s.buildings.find((b) => b.type === 'tc').level = 2;
+  const fresh = newBuildAdvice(s);
+  const harbor = fresh.find((g) => g.type === 'harbor');
+  assert.ok(harbor && !harbor.err, 'tijdperk 2: havenhuis kan nu');
+  const have = new Set(s.buildings.map((b) => b.type));
+  assert.ok(!fresh.some((g) => have.has(g.type) || g.type === 'wall'), 'enkel wat je nog helemaal niet hebt');
+  assert.ok(adviceReady(s) >= fresh.filter((g) => !g.err).length);
+  const h = adviceBarHtml({ data: { team: { color: '#c0392b' } }, now: () => 0 }, s);
+  assert.match(h, /data-action="place" data-type="harbor"/, 'tik = meteen plaatsen');
+  assert.doesNotMatch(h, /NaN|undefined/);
+  s.buildings.push({ id: 900, type: 'harbor', x: 0, y: 0, level: 1 });
+  assert.ok(!newBuildAdvice(s).some((g) => g.type === 'harbor'), 'gebouwd: niet meer bij de nieuwe');
+});
+
 // ---------- meldingen per soort: aanval op je stad, bouwer vrij, je leger komt aan ----------
 import { notifyBuilds } from '../functions/lib/push.js';
 import { saveTown, loadTown, nextBuildAt } from '../functions/lib/game.js';

@@ -326,8 +326,24 @@ export function upgradeAdvice(live) {
   return [...groups.values()].sort((x, y) => (!!x.err - !!y.err) || ((y.type === 'tc') - (x.type === 'tc')) || (x.short - y.short) || (costSum(x.cost) - costSum(y.cost)));
 }
 
-// hoeveel gebouwen je nu meteen kan verbeteren (voor het bolletje op het tabblad)
-export const adviceReady = (live) => upgradeAdvice(live).reduce((n, g) => n + (g.err ? 0 : g.ids.length), 0);
+// gebouwen die je in dit tijdperk kan zetten maar nog helemaal niet hebt (bv. een nieuw gebouw van een nieuw tijdperk)
+export function newBuildAdvice(live) {
+  const a = age(live);
+  const out = [];
+  for (const type of BUILD_ORDER) {
+    const def = BUILDINGS[type];
+    if (!def || def.placeable === false || a < def.age || findType(live, type).length) continue;
+    const cost = levelCost(type, 1);
+    let short = 0;
+    for (const r of RES) short += Math.max(0, (cost[r] || 0) - (live.res[r] || 0));
+    out.push({ type, cost, short, err: checkBuild(live, type) });
+  }
+  return out.sort((x, y) => (!!x.err - !!y.err) || (x.short - y.short));
+}
+
+// hoeveel gebouwen je nu meteen kan verbeteren of nieuw zetten (voor het bolletje op het tabblad)
+export const adviceReady = (live) => upgradeAdvice(live).reduce((n, g) => n + (g.err ? 0 : g.ids.length), 0)
+  + newBuildAdvice(live).filter((g) => !g.err).length;
 
 const upName = (type, to) => (type === 'tc' ? `${AGES[to].short}tijd` : BUILDINGS[type].name);
 
@@ -353,7 +369,20 @@ export function adviceBarHtml(app, live) {
   }
   html += '<span class="bb-sep" aria-hidden="true"></span>';
   const list = upgradeAdvice(live);
-  if (!list.length) return `${html}<div class="bb-note">${icon('star')} Alles staat op het hoogste niveau dat dit tijdperk toelaat.${age(live) < MAX_AGE ? ' Verbeter je stadscentrum voor een nieuw tijdperk.' : ''}</div>`;
+  // nieuwe gebouwen die je nog niet hebt (tik = meteen plaatsen, zoals in het bouwmenu)
+  const fresh = newBuildAdvice(live);
+  const freshHtml = fresh.length ? `<span class="bb-sep" aria-hidden="true"></span>${fresh.map((g) => {
+    const def = BUILDINGS[g.type];
+    const title = g.err ? `${def.name}: ${g.err}` : `${def.name} (nieuw): ${def.desc} Tik om het te plaatsen.`;
+    return `<button class="bcard adv new ${g.err ? 'poor' : 'ready'}" data-action="place" data-type="${g.type}" title="${esc(title)}">
+      <span class="cnt newtag">nieuw</span>
+      <img src="${buildingThumb(g.type, 1, team)}" alt="">
+      <span class="bn">${def.name}</span>
+      <span class="lv">nog te bouwen</span>
+      <span class="bc">${RES.filter((r) => g.cost[r]).map((r) => `<span class="${(live.res[r] || 0) + 1e-6 < g.cost[r] ? 'no' : ''}">${resImg(r, '')}${fmt(g.cost[r])}</span>`).join('')}</span>
+    </button>`;
+  }).join('')}` : '';
+  if (!list.length) return `${html}<div class="bb-note">${icon('star')} Alles staat op het hoogste niveau dat dit tijdperk toelaat.${age(live) < MAX_AGE ? ' Verbeter je stadscentrum voor een nieuw tijdperk.' : ''}</div>${freshHtml}`;
   return html + list.map((g) => {
     const n = g.ids.length;
     const title = `${BUILDINGS[g.type].name} van niveau ${g.level} naar ${g.to}${n > 1 ? ` (${n} gebouwen)` : ''}: ${g.err || 'kan nu!'} Tik om er naartoe te gaan.`;
@@ -364,7 +393,7 @@ export function adviceBarHtml(app, live) {
       <span class="lv">${g.type === 'tc' ? 'nieuw tijdperk' : `niveau ${g.level} → ${g.to}`}</span>
       <span class="bc">${RES.filter((r) => g.cost[r]).map((r) => `<span class="${(live.res[r] || 0) + 1e-6 < g.cost[r] ? 'no' : ''}">${resImg(r, '')}${fmt(g.cost[r])}</span>`).join('')}</span>
     </button>`;
-  }).join('');
+  }).join('') + freshHtml;
 }
 
 // ---------- stadsoverzicht ----------

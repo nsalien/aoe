@@ -426,6 +426,9 @@ minuut een bot aan de beurt als niemand online is.
     soort (thuis, in je gebied, onderweg/elders, +n in opleiding); Bouwadvies = bouwers (bezig/vrij, elke lopende bouw met
     aftelling) en de gebouwen die je in dit tijdperk nog kan verbeteren (groen omrand = kan nu; ×n = zoveel gelijke gebouwen,
     elke tik toont het volgende). Getest op pc, gsm (390 en 360 breed, ook met troepen gekozen) en liggend.
+    Later (gevraagd: "waarom verschijnt [het havenhuis] nog niet in mijn advies"): het advies toonde enkel verbeteringen van
+    gebouwen die je al had. Nu staan daarna ook de gebouwen die je in dit tijdperk mag zetten maar nog niet hebt (label
+    'nieuw', 'nog te bouwen'); tik = meteen plaatsen (bij het havenhuis verschijnen dan de plekken aan het water).
 
 47. **Paneel sluiten op de gsm** (gevraagd met een screenshot: "zorg dat deze menu's gesloten kunnen worden; bovenaan een breed
     pijltje naar beneden als knop, ter vervanging van de horizontale balk"). Het balkje was enkel versiering. Nu een brede knop
