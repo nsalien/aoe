@@ -737,6 +737,14 @@ body.in-battle .chat-pill { display: none; }
 .bt-res-card .kv dd { text-align: right; display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .bt-res-card .pill { background: #8b6a3a; }
 body.in-battle #toasts { top: 74px; }
+/* replay van een automatisch verlopen slag */
+.replay-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 4px 0 8px; padding: 8px 10px; border: 1px solid #d3bb8a; border-radius: 10px; background: rgba(255, 246, 214, 0.75); }
+.replay-row .btn { display: inline-flex; gap: 5px; align-items: center; }
+.replay-row .btn .ic { width: 15px; height: 15px; }
+.log-replay { padding: 1px 7px; font-size: 11px; margin-left: 4px; display: inline-flex; gap: 3px; align-items: center; vertical-align: 1px; }
+.log-replay .ic { width: 12px; height: 12px; }
+.bt-replay .btn { display: inline-flex; gap: 4px; align-items: center; }
+.bt-replay .bt-fbtn { min-width: 34px; justify-content: center; font-weight: 700; }
 @media (max-width: 700px) {
   .bt-top { grid-template-columns: 1fr 1fr; padding: 6px 8px; gap: 4px 8px; }
   .bt-mid { grid-column: 1 / -1; grid-row: 1; }

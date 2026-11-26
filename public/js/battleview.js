@@ -3,7 +3,7 @@
 // Je eigen bevelen gaan meteen in, met het tijdstip (tik) waarop je tikte; de server voert ze op dezelfde tik uit.
 // Je bestuurt regimenten (zoals in Rome: Total War): een kaartje of een tik op een soldaat kiest zijn hele eenheid.
 import { UNITS } from '../shared/rules.js';
-import { stepTo, queueOrder, FB, FORMS, formsFor, mobile, aliveN, battleTime, deployLeft, nav, cellOf, inZone } from '../shared/fieldbattle.js';
+import { stepTo, queueOrder, FB, FORMS, formsFor, mobile, aliveN, battleTime, deployLeft, nav, cellOf, inZone, replayBattle, raidReplay } from '../shared/fieldbattle.js';
 import { SiegeView, toWorld } from './siegeview.js';
 import { icon } from './icons.js';
 import { setHTML } from './dom.js';
@@ -38,6 +38,12 @@ export function askHtml(b, now) {
   </div>`;
 }
 
+// ---------- replay van een automatisch uitgerekende slag ----------
+// rec = het recept van de server (/replay, zie saveReplay in game.js) of van een overval (raidReplay in fieldbattle.js).
+// De browser speelt de slag na (replayBattle in fieldbattle.js): de computer leidt beide kanten, setFate laat ze
+// uitkomen zoals het rapport zegt.
+const SPEEDS = [1, 2, 4, 8];
+
 export class BattleView {
   // opts: { now(), get(path), post(path, body), toast(msg, type, icon), onClose(), unitThumb(k, color), openReports() }
   constructor(opts) {
@@ -71,6 +77,7 @@ export class BattleView {
   get manual() { return !!this.b && (this.b.role === 'att' ? this.b.attMode : this.b.defMode) === 'manual'; }
 
   show(id, battle = null) {
+    if (this.rp) { this.rp = null; this.root.classList.remove('replay'); }
     if (this.id !== id) {
       this.routs = new Map();
       this.id = id; this.b = null; this.state = null; this.srv = null; this.fixed = null; this.sel.clear(); this.prev.clear(); this.offs.clear(); this.pending = [];
@@ -85,7 +92,39 @@ export class BattleView {
     if (!this.raf) this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
+  // een replay bekijken: geen server meer nodig, de browser speelt de slag zelf na (eigen klok, pauze, sneller)
+  showReplay(rec) {
+    clearInterval(this.pollTimer); this.pollTimer = null;
+    this.routs = new Map(); this.sel.clear(); this.prev.clear(); this.offs.clear(); this.pending = [];
+    this.resultShown = false; this.resultEl.hidden = true; this.view.key = null; this.setLine(false);
+    this.id = `replay:${rec.id ?? rec.at}`; this.fixed = null; this.srv = null;
+    const speed = this.rp ? this.rp.speed : (this.rpSpeed || 2);
+    this.rp = { rec, t: 0, speed, paused: false, endAt: 0 };
+    this.state = replayBattle(rec);
+    this.b = { id: this.id, title: rec.title, status: 'live', role: rec.role, kind: rec.kind, attMode: 'auto', defMode: 'auto', replay: true };
+    this.root.classList.add('replay');
+    this.root.hidden = false;
+    document.body.classList.add('in-battle');
+    this.view.setBattle(this.state);
+    this.flashHint(`Replay: zo verliep de slag. De computer leidde beide legers; de uitslag is die van het rapport.`);
+    if (!this.raf) this.raf = requestAnimationFrame((t) => this.frame(t));
+    this.renderBars(true);
+  }
+
+  // de klok van de slag: in een replay die van de speler (pauze, sneller), anders die van de server
+  clock() { return this.rp && this.state ? this.state.t0 + this.rp.t : this.o.now(); }
+
+  replayAct(a, el) {
+    const rp = this.rp;
+    if (!rp) return;
+    if (a === 'rpPause') rp.paused = !rp.paused;
+    else if (a === 'rpSpeed') { rp.speed = Number(el.dataset.speed) || 1; this.rpSpeed = rp.speed; }
+    else if (a === 'rpAgain') this.showReplay(rp.rec);
+    else if (a === 'rpEnd') { rp.skip = true; rp.paused = false; } // snel naar het einde (per beeld een stuk, de gsm blijft vlot)
+  }
+
   close() {
+    if (this.rp) { this.rp.paused = true; this.root.classList.remove('replay'); }
     this.root.hidden = true;
     document.body.classList.remove('in-battle');
     clearInterval(this.pollTimer); this.pollTimer = null;
@@ -257,6 +296,7 @@ export class BattleView {
     const el = e.target.closest('[data-bact]');
     if (!el || !this.root.contains(el)) return;
     const a = el.dataset.bact;
+    if (a.startsWith('rp')) { this.replayAct(a, el); this.renderBars(true); return; }
     if (a === 'close') this.close();
     else if (a === 'all') this.selectAll();
     else if (a === 'none') { this.sel.clear(); this.setLine(false); }
@@ -272,6 +312,7 @@ export class BattleView {
     else if (a === 'auto') this.setMode('auto');
     else if (a === 'focus') { if (this.state) this.view.focus(this.state); }
     else if (a === 'reports') { this.close(); this.o.openReports(); }
+    else if (a === 'replay') { if (this.o.openReplay) this.o.openReplay(Number(el.dataset.id)); }
     else if (a === 'again') { const role = this.b.role; this.close(); if (this.o.practice) this.o.practice(role); }
     this.renderBars(true);
   }
@@ -279,6 +320,14 @@ export class BattleView {
   onKey(e) {
     if (!this.open || e.target.closest('input, textarea')) return;
     const forms = { 1: 'line', 2: 'block', 3: 'wedge', 4: 'loose', 5: 'ring' };
+    if (this.rp) {
+      if (e.key === 'Escape') this.close();
+      else if (e.key === ' ') this.replayAct('rpPause');
+      else return;
+      this.renderBars(true);
+      e.preventDefault();
+      return;
+    }
     if (e.key === 'Escape') { if (this.drag) this.drag = null; else if (this.sel.size) this.sel.clear(); else this.close(); }
     else if (e.key === 'a' || e.key === 'A') this.selectAll();
     else if (e.key === 's' || e.key === 'S') this.order({ stop: true });
@@ -349,6 +398,7 @@ export class BattleView {
 
   click(sx, sy, e) {
     if (!this.state) return;
+    if (this.rp) { this.flashHint('Dit is een replay: je kijkt enkel. Sleep om rond te kijken, knijp of scroll om te zoomen.'); return; }
     const now = performance.now();
     // Muis: links klikken op een eigen soldaat kiest zijn regiment (zoals in Rome: Total War), rechts klikken = bevel.
     // Aanraakscherm: met troepen gekozen is een tik een bevel; een ander regiment kies je met een kaartje, door op
@@ -429,7 +479,7 @@ export class BattleView {
   }
 
   longPress() {
-    if (!this.manual || !this.state) return;
+    if (!this.manual || !this.state || this.rp) return;
     this.selectAll();
     this.flashHint(`Je hele leger is gekozen (${this.sel.size} regimenten).`);
     this.renderBars(true);
@@ -458,7 +508,10 @@ export class BattleView {
         <span class="bt-count">${icon('people')} ${n}</span></div>`;
     };
     let mid;
-    if (b.status === 'choose' || !st) mid = `<b>${esc(b.title)}</b><span class="bt-clock">Wachten op de tegenstander… <b data-askend="${b.chooseUntil}">${mmss(b.chooseUntil - this.o.now())}</b></span>`;
+    if (this.rp && st) {
+      mid = `<b>Replay · ${esc(b.title)}</b><span class="bt-clock">${icon('hourglass')} ${mmss(battleTime(st))}${st.over != null ? ' · voorbij' : ''}</span>
+        <span class="bt-mode">${this.rp.paused ? 'Gepauzeerd' : `Automatisch verlopen · ${this.rp.speed}×`}</span>`;
+    } else if (b.status === 'choose' || !st) mid = `<b>${esc(b.title)}</b><span class="bt-clock">Wachten op de tegenstander… <b data-askend="${b.chooseUntil}">${mmss(b.chooseUntil - this.o.now())}</b></span>`;
     else if (st.phase === 'deploy' && b.status !== 'done') {
       const waiting = st.ready[this.side] && !st.ready[1 - this.side];
       mid = `<b>${esc(b.title)}</b><span class="bt-clock">${icon('flag')} Opstelling ${mmss(deployLeft(st))}</span>
@@ -472,7 +525,15 @@ export class BattleView {
 
     // onderbalk: een kaartje per regiment, de formaties en de bevelen
     let html = '';
-    if (b.status === 'live' && st) {
+    if (this.rp && st) {
+      const rp = this.rp;
+      html += `<div class="bt-cmds bt-replay">
+        <button class="btn small primary" data-bact="rpPause" ${st.over != null ? 'disabled' : ''} title="Pauze (spatiebalk)">${icon(rp.paused ? 'play' : 'pause')} ${rp.paused ? 'Verder' : 'Pauze'}</button>
+        <div class="bt-forms" role="group" aria-label="Snelheid">${SPEEDS.map((v) => `<button class="btn small bt-fbtn${v === rp.speed ? ' on' : ''}" data-bact="rpSpeed" data-speed="${v}" title="${v}× zo snel">${v}×</button>`).join('')}</div>
+        <button class="btn small" data-bact="rpEnd" ${st.over != null ? 'disabled' : ''} title="Meteen naar het einde">${icon('next')} Einde</button>
+        <button class="btn small" data-bact="rpAgain" title="Van bij het begin">${icon('replay')} Opnieuw</button>
+        <button class="btn small ghost" data-bact="close">${icon('close')} Sluiten</button></div>`;
+    } else if (b.status === 'live' && st) {
       if (this.manual) {
         const color = this.side ? (meta.def || {}).color : (meta.att || {}).color;
         const regs = this.myRegs();
@@ -556,9 +617,40 @@ export class BattleView {
       <dl class="kv"><dt>Jouw verliezen</dt><dd>${list(lost)}</dd><dt>Vijanden verslagen</dt><dd>${list(kill)}</dd>
       ${loot ? `<dt>${this.b.role === 'att' ? 'Buit' : 'Geplunderd'}</dt><dd>${loot}</dd>` : ''}
       ${bounty ? `<dt>Krijgsbuit</dt><dd>${bounty}</dd>` : ''}</dl>
-      <div class="bt-ask-btns">${practice ? `<button class="btn primary" data-bact="again">${icon('swords')} Nog eens</button>` : raid ? '' : `<button class="btn primary" data-bact="reports">${icon('scroll')} Rapport</button>`}<button class="btn${raid ? ' primary' : ''}" data-bact="close">Sluiten</button></div></div>`;
+      <div class="bt-ask-btns">${r.replay ? `<button class="btn primary" data-bact="replay" data-id="${r.replay}">${icon('play')} Bekijk de replay</button>` : ''}${practice ? `<button class="btn primary" data-bact="again">${icon('swords')} Nog eens</button>` : raid ? '' : `<button class="btn${r.replay ? '' : ' primary'}" data-bact="reports">${icon('scroll')} Rapport</button>`}<button class="btn${raid ? ' primary' : ''}" data-bact="close">Sluiten</button></div></div>`;
     this.resultEl.hidden = false;
     if (won && this.view.cam) { const c = this.view.cam; for (let i = 0; i < 4; i++) setTimeout(() => this.view.particles.confetti(c.x + (i - 1.5) * 80, c.y - 60, 40), i * 250); }
+  }
+
+  // einde van een replay: de uitslag zoals in het rapport (de replay toont hoe het ongeveer verliep)
+  showReplayEnd() {
+    this.resultShown = true;
+    const rec = this.rp.rec; const r = rec.res || {};
+    const att = rec.role === 'att';
+    const won = att ? r.attWins : !r.attWins;
+    const lost = att ? r.attLost : r.defLost;
+    const kill = att ? r.defLost : r.attLost;
+    const list = (o) => Object.entries(o || {}).filter(([, n]) => n > 0).map(([k, n]) => `<span class="pill">${n}× ${esc(UNITS[k] ? UNITS[k].name : k)}</span>`).join(' ') || '<span class="muted">geen</span>';
+    const RN = { food: 'voedsel', wood: 'hout', stone: 'steen', gold: 'goud' };
+    const resPills = (o) => Object.entries(o || {}).filter(([, n]) => n > 0).map(([k, n]) => `<span class="pill">${n} ${RN[k] || k}</span>`).join(' ');
+    const loot = resPills(r.loot);
+    const bounty = won ? resPills(r.bounty) : '';
+    const raid = rec.kind === 'raid'; const camp = rec.kind === 'camp';
+    const text = raid ? (won ? 'Je dorp hield stand tegen de barbaren!' : 'De barbaren braken door en plunderden je dorp.')
+      : att ? (won ? (camp ? 'Het kamp is verslagen.' : 'De stad is ingenomen.') : 'De aanval is afgeslagen.')
+        : (won ? 'Je stad hield stand!' : 'De vijand brak door je verdediging.');
+    const hours = rec.until ? Math.max(0, Math.ceil((rec.until - Date.now()) / 3600000)) : 0;
+    this.resultEl.innerHTML = `<div class="bt-res-card ${won ? 'won' : 'lost'}">
+      <div class="bt-ask-crest">${icon(won ? 'trophy' : 'shield')}</div>
+      <h2>${won ? 'Overwinning!' : 'Nederlaag'}</h2>
+      <p class="small muted" style="margin:0">Replay van een automatisch verlopen slag${hours ? ` · nog ${hours} u te bekijken` : ''}</p>
+      <p>${text}</p>
+      <dl class="kv"><dt>Jouw verliezen</dt><dd>${list(lost)}</dd><dt>Vijanden verslagen</dt><dd>${list(kill)}</dd>
+      ${loot ? `<dt>${att ? 'Buit' : 'Geplunderd'}</dt><dd>${loot}</dd>` : ''}
+      ${bounty ? `<dt>Krijgsbuit</dt><dd>${bounty}</dd>` : ''}</dl>
+      <p class="small muted" style="margin:0">De aantallen zijn die van het rapport.</p>
+      <div class="bt-ask-btns"><button class="btn primary" data-bact="rpAgain">${icon('replay')} Opnieuw bekijken</button><button class="btn" data-bact="close">Sluiten</button></div></div>`;
+    this.resultEl.hidden = false;
   }
 
   // ---------- tekenen ----------
@@ -569,7 +661,15 @@ export class BattleView {
     const dt = Math.min(100, t - (this.lastT || t));
     this.lastT = t;
     const st = this.state;
-    const now = this.o.now();
+    // replay: de klok loopt zo snel als gekozen (en staat stil bij pauze)
+    if (this.rp && st && !this.rp.paused && st.over == null) {
+      if (this.rp.skip) {
+        let k = 0;
+        while (st.over == null && k < 150) { stepTo(st, st.t + FB.tick, 1); k++; }
+        this.rp.t = st.t - st.t0; this.prev.clear();
+      } else this.rp.t += dt * this.rp.speed;
+    }
+    const now = this.clock();
     if (st && this.b.status === 'live' && st.over == null) {
       // verder rekenen tot nu, tik per tik (de server stuurt elke peiling de echte toestand)
       let k = 0;
@@ -581,6 +681,10 @@ export class BattleView {
       if (k >= 40) this.prev.clear();
     }
     if (st) this.alpha = Math.max(0, Math.min(1, (now - st.t) / FB.tick));
+    // replay voorbij: nog even het slagveld tonen, dan de uitslag (die van het rapport)
+    if (this.rp && st && st.over != null && !this.resultShown) {
+      if (!this.rp.endAt) { this.rp.endAt = performance.now(); this.renderBars(true); } else if (performance.now() - this.rp.endAt > 1500) this.showReplayEnd();
+    }
     // correcties van de server zacht laten verdwijnen
     // (exponentieel, maar nooit sneller dan ±2,5 tegels per seconde: zo glijdt een troep bij in plaats van te springen)
     if (this.offs.size) {
@@ -624,4 +728,4 @@ export class BattleView {
   }
 }
 
-export { nav };
+export { nav, raidReplay };

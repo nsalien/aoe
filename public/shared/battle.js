@@ -135,6 +135,15 @@ export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, 
   };
 }
 
+// De vaste uitslag van een automatisch uitgerekende slag, voor de replay (setFate in fieldbattle.js): wie wint en hoeveel er
+// per soort overleven, met dezelfde sleutels als battleOutcome (aanvaller '0||soort', verdediger '1|groep|soort').
+export function fateOf(b, groups) {
+  const left = {};
+  for (const [k, n] of Object.entries(b.attLeft || {})) left[`0||${k}`] = n;
+  groups.forEach((g, i) => { for (const [k, n] of Object.entries((b.groupsLeft[i] && b.groupsLeft[i].units) || {})) left[`1|${g.key}|${k}`] = n; });
+  return { win: b.attWins ? 0 : 1, left };
+}
+
 export function resolveScouting(attScouts, defScouts) {
   if (attScouts > defScouts) {
     const loss = defScouts > 0 ? Math.pow(defScouts / attScouts, COMBAT.lossExponent) : 0;

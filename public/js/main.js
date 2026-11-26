@@ -6,7 +6,7 @@ import { WorldView } from './world.js';
 import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
-import { BattleView, askHtml } from './battleview.js';
+import { BattleView, askHtml, raidReplay } from './battleview.js';
 import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, fmtDuration, JOBS } from '../shared/rules.js';
 
@@ -353,13 +353,15 @@ function applyState(data, first = false) {
 
 // ---------- veldslagen ----------
 const knownBattles = new Map();
+// zit je in een echte slag? (een replay bekijken telt niet: een aanval die binnenkomt, verschijnt er gewoon boven)
+const inLiveBattle = () => !!(battle && battle.open && !battle.rp);
 const askedBattles = new Set();
 
 function battleView() {
   if (!battle) {
     battle = new BattleView({
       now: () => app.now(), get, post, toast, unitThumb: UI.unitThumb, practice: (role) => startPractice(role),
-      openReports: () => openModal('reports'),
+      openReports: () => openModal('reports'), openReplay: (id) => openReplay(id),
       onClose: () => { renderAlert(); setTimeout(refresh, 400); },
     });
     window.__battle = battle; // handig bij het debuggen in de console
@@ -376,6 +378,24 @@ async function startPractice(role) {
   } catch (e) { toast(e.message, 'err', 'swords'); }
 }
 
+// replay van een automatisch verlopen slag (24 uur): het recept van de server, de browser speelt de slag na
+async function openReplay(id) {
+  try {
+    const { replay } = await get(`/replay?id=${id}`);
+    closeModal(); hideAsk();
+    battleView().showReplay(replay);
+  } catch (e) { toast(e.message, 'err', 'swords'); }
+}
+
+// replay van een overval van de barbaren (het recept staat in het logboek van je stad)
+function openRaidReplay(lid) {
+  const s = app.live;
+  const e = s && s.terr && (s.terr.log || []).find((x) => x.id === lid);
+  if (!e || !e.rp) { toast('Deze replay is niet meer beschikbaar.', 'err', 'swords'); return; }
+  closeModal(); hideAsk();
+  battleView().showReplay(raidReplay(s, e, { town: app.data.town.name, name: app.data.me.name, color: app.data.team.color }));
+}
+
 function openBattle(id, b = null) {
   hideAsk();
   battleView().show(id, b);
@@ -388,12 +408,12 @@ function handleBattles(data, first) {
     const mine = b.role === 'att' ? b.attMode : b.defMode;
     if (b.kind === 'practice' || b.kind === 'raid') continue; // oefenslag en overval: geen meldingen, die open je zelf
     if (!prev && b.status !== 'done' && b.role === 'def') toast(`${b.title} wordt aangevallen${b.attName ? ` door ${b.attName}` : ''}!`, 'err', 'swords');
-    if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !(battle && battle.open)) { askedBattles.add(b.id); showAsk(b); }
+    if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !inLiveBattle()) { askedBattles.add(b.id); showAsk(b); }
     // de tegenpartij koos om zelf te besturen: bekijk of neem alsnog het bevel over
-    if (b.status === 'live' && prev && prev !== 'live' && mine !== 'manual' && !(battle && battle.open)) {
+    if (b.status === 'live' && prev && prev !== 'live' && mine !== 'manual' && !inLiveBattle()) {
       toast(`De slag bij ${b.title} is begonnen. Klik bovenaan om mee te kijken.`, '', 'swords');
     }
-    if (b.status === 'live' && mine === 'manual' && !(battle && battle.open) && prev !== 'live') openBattle(b.id);
+    if (b.status === 'live' && mine === 'manual' && !inLiveBattle() && prev !== 'live') openBattle(b.id);
   }
   const ask = $('#battleAsk');
   if (ask && !ask.hidden && ask.dataset.id !== 'raid') {
@@ -546,7 +566,7 @@ function tick() {
     for (const el of ask.querySelectorAll('[data-askend]')) el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
     if (now > until + 1500) { hideAsk(); refresh(); }
   }
-  if (tickN % 5 === 0 && (app.data.battles || []).some((b) => b.status !== 'done') && !(battle && battle.open)) poll();
+  if (tickN % 5 === 0 && (app.data.battles || []).some((b) => b.status !== 'done') && !inLiveBattle()) poll();
   // legers die net aankwamen: even later opnieuw ophalen
   if (app.data.marches.some((m) => m.arriveAt <= now && m.arriveAt > now - 1000)) setTimeout(refresh, 1500);
 }
@@ -644,7 +664,7 @@ function raidIncoming() {
 
 // keuzevenster bij een overval: zelf verdedigen (een slag in je eigen stad) of automatisch
 function offerRaid(raid) {
-  if (battle && battle.open) return;
+  if (inLiveBattle()) return;
   let el = $('#battleAsk');
   if (el && !el.hidden && el.dataset.id !== 'raid') return; // eerst de andere keuze
   if (!el) {
@@ -1568,6 +1588,8 @@ const actions = {
     }
   },
   openReport(el) { showReport(Number(el.dataset.id)); },
+  replay(el) { openReplay(Number(el.dataset.id)); },
+  raidReplay(el) { openRaidReplay(Number(el.dataset.id)); },
   async readAll() {
     await post('/reports/read-all').catch(() => {});
     app.data.unseenReports = 0; app.seenReports = 0;

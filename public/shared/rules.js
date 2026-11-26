@@ -516,6 +516,8 @@ export function costValue(cost) {
 //   killPts gevechtspunten: 1 punt per zoveel (kostprijs) gedode vijanden; campKillPts idem bij roverskampen
 //   lootPts 1 punt per zoveel grondstoffen die je bij een speler buitmaakt
 export const WAR = { carry: [1, 2, 2.5, 3, 3.5, 4], bounty: 0.3, killPts: 25, campKillPts: 50, lootPts: 250 };
+// Replay van een automatisch uitgerekende slag (achteraf bekijken, zonder zelf te besturen): zo lang na de slag te zien
+export const REPLAY = { ms: 24 * 3600000 };
 export const carryMult = (age) => WAR.carry[Math.max(1, Math.min(WAR.carry.length - 1, Math.floor(age) || 1))];
 
 // krijgsbuit: frac van de kosten van deze (gesneuvelde) troepen, per grondstof
