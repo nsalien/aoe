@@ -66,7 +66,8 @@ Daarom:
   Tekenen: `harbor` in `models3d.js` (steiger naar het water, per niveau: hut → pannen → kraan/lantaarn → visafslag →
   vuurtoren), bootje `boat` in `propmodels.js` (v = soort * 2 + bemand), `boatsNow`/`drawBoat` in `town.js` (bemande bootjes
   varen vaste rondes over het water van het havenhuis: `harborWater`, de rest ligt aan de steiger), `drawShoreSpots` tijdens
-  het plaatsen, `showShore` kijkt naar de dichtste plek. Paneel `harborHtml`, rij 'Vissers' bij de dorpelingen. Bots bouwen
+  het plaatsen, `showShore` kijkt naar de dichtste plek. Paneel `harborHtml`, rij 'Vissers' bij de dorpelingen. Geen mist in een
+  vierkant van `FISH.sight` (3) tegels rond het havenhuis (`homeSight`, dus ook `exploredNow` en `updateFog`). Bots bouwen
   (nog) geen havenhuis; `doAssign` zonder `fish` laat de vissers staan.
 - **Edelmannen en vazallen** (`functions/lib/vassal.js`, tabel `vassals`, migratie `0007`): trouw `s.loy` (ontbreekt = 100,
   herstelt in `accrue`, niet als vazal), `LOYALTY`/`VASSAL` in `rules.js`. `attackTown` roept `applyNobles` op (−25 per

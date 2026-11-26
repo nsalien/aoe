@@ -491,6 +491,8 @@ minuut een bot aan de beurt als niemand online is.
     voor nieuwe dorpelingen. 3D: steiger naar het water; 1 vissershut met netten, 2 stenen voet en pannen, 3 kraan en lantaarn,
     4 visafslag met luifel, 5 vuurtoren; per volk eigen muren en daken. Bootjes (roeiboot → zeil → kajuit en lantaarn) varen
     rondes op de vijver en vissen (kringen, kielzog, springende vis); lege bootjes liggen aan de steiger.
+    Later gevraagd: "als een speler een haven heeft gebouwd, zorg dat de fog of war met 3x3 daarrond weg gaat": nu nooit mist
+    in een vierkant van 3 tegels rond het havenhuis (7×7 tegels, `FISH.sight`), ook al ligt het aan de rand van je gebied.
 
 ## 8. Bekende beperkingen en ideeën
 
