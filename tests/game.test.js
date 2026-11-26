@@ -1685,6 +1685,28 @@ test('3D-gebouwen: elk model (elk volk, elk niveau) bouwt zonder fouten en met g
   }
 });
 
+test('3D-poortgebouw: elk niveau, elke richting en elke stand van de deuren; meer onderdelen per niveau', async () => {
+  const { gateScene, GATE_STATES } = await import('../public/js/models3d.js');
+  const parts = [];
+  for (let L = 1; L <= 5; L++) {
+    for (const ax of ['x', 'y']) {
+      for (let st = 0; st <= GATE_STATES; st++) {
+        const sc = gateScene({ level: L, ax, st });
+        assert.ok(sc.prims.length > 20, `niveau ${L} ${ax} ${st}`);
+        for (const [k, a] of Object.entries(sc.anchors || {})) assert.ok(Array.isArray(a) && a.length === 3 && a.every(Number.isFinite), `anker ${k}`);
+        for (const p of sc.prims) assert.ok(p.bb.every(Number.isFinite), `vorm met ongeldige maten (niveau ${L} ${ax} ${st})`);
+      }
+    }
+    parts.push(gateScene({ level: L, ax: 'x', st: 0 }).prims.length);
+  }
+  // hout → met stenen voet en dakjes; steen → met borstwering en vaandels → met spitsen en goud
+  assert.ok(parts[1] > parts[0] && parts[3] > parts[2] && parts[4] > parts[3], JSON.stringify(parts));
+  // de deuren draaien echt open: andere vormen dan dicht
+  const dicht = JSON.stringify(gateScene({ level: 3, ax: 'y', st: 0 }).prims.map((p) => p.bb));
+  const open = JSON.stringify(gateScene({ level: 3, ax: 'y', st: GATE_STATES }).prims.map((p) => p.bb));
+  assert.notEqual(dicht, open);
+});
+
 // Laden: index.html laadt alle scripts tegelijk (modulepreload) i.p.v. één na één via de imports.
 // Komt er een module bij of valt er een weg, dan moet die lijst mee veranderen.
 test('laden: index.html heeft een modulepreload voor precies alle modules van main.js', async () => {

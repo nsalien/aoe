@@ -84,6 +84,11 @@ Daarom:
   `insideSet()` = de binnenkant van een volledig ommuurde stad. Een poort is **2 tegels breed** (twee aangrenzende tegels in
   `s.gates`; `gateList()` groepeert ze, `gateSpan()` kiest bij een tik de 2 tegels) en staat in een recht stuk muur.
   Oude poorten van 1 tegel worden in `ensureTerritory()` gratis verbreed; afbreken gaat altijd per hele poort.
+  **Uitzicht**: een 3D-poortgebouw (`gateScene` in `models3d.js`, `S3.getGate(level, ax, st)`): per muurniveau beter (1 houten
+  torens + loopbrug, 2 stenen voet + dakjes + fakkels, 3 stenen torens + gemetselde boog + valhek, 4 borstwering + vaandels +
+  wapenschild, 5 spitsen + goud), een beeld per stand van de deuren (`GATE_STATES`; `drawGate` kiest de stand uit
+  `gateOpenness`, valt terug op de dichtstbijzijnde klare stand en anders op de oude getekende poort). Vlag in teamkleur via
+  het anker `flag`; 's nachts gloed bij de fakkels (`drawNightLights`).
   Een stad helemaal dichtmaken zonder poort mag niet; oude dichte steden krijgen in `ensureTerritory()` een poort.
   Routes: `routeTo(s, from, to)` (A* over de tegels: water en muren blokkeren, poorten zijn doorgang; daarna enkel de bochten
   als tussenstops in `g.via`, `fieldArrive` loopt verder). Gebruikt door groepen (`travel`) én de dorpelingen in de stad.
