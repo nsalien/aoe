@@ -1584,7 +1584,7 @@ export function flag(ctx, x, y, h, color, t, s = 1) {
 
 export function smoke(ctx, x, y, t, seed = 0, s = 1) {
   for (let i = 0; i < 4; i++) {
-    const p = ((t * 0.0004 + i / 4 + seed * 0.37) % 1);
+    const p = (((t * 0.0004 + i / 4 + seed * 0.37) % 1) + 1) % 1; // ook bij een negatieve seed (puin op tegels links/boven)
     const px = x + Math.sin(p * 6 + seed) * 4 * s + p * 6 * s;
     const py = y - p * 30 * s;
     ctx.fillStyle = `rgba(230,230,230,${0.45 * (1 - p)})`;
