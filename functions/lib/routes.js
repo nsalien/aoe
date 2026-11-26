@@ -595,8 +595,8 @@ route('POST', '/push/subscribe', { auth: true, process: false }, async (ctx) => 
 
 // welke meldingen staan aan op dit toestel (per inschrijving)
 async function pushPrefs(db, playerId, endpoint) {
-  const r = await db.prepare('SELECT n_attack, n_build, n_march FROM push_subs WHERE endpoint = ? AND player_id = ?').bind(endpoint, playerId).first();
-  return r ? { attack: !!r.n_attack, build: !!r.n_build, march: !!r.n_march } : null;
+  const r = await db.prepare('SELECT n_now, n_ally, n_attack, n_build, n_march FROM push_subs WHERE endpoint = ? AND player_id = ?').bind(endpoint, playerId).first();
+  return r ? { now: !!r.n_now, ally: !!r.n_ally, attack: !!r.n_attack, build: !!r.n_build, march: !!r.n_march } : null;
 }
 
 // meldingen apart aan/uit zetten op dit toestel
@@ -607,8 +607,8 @@ route('POST', '/push/prefs', { auth: true, process: false }, async (ctx) => {
   const cur = await pushPrefs(db, player.id, ep);
   if (!cur) throw new GameError('Meldingen staan niet aan op dit toestel.');
   const v = (k) => (typeof body[k] === 'boolean' ? body[k] : cur[k]) ? 1 : 0;
-  await db.prepare('UPDATE push_subs SET n_attack = ?, n_build = ?, n_march = ? WHERE endpoint = ? AND player_id = ?')
-    .bind(v('attack'), v('build'), v('march'), ep, player.id).run();
+  await db.prepare('UPDATE push_subs SET n_now = ?, n_ally = ?, n_attack = ?, n_build = ?, n_march = ? WHERE endpoint = ? AND player_id = ?')
+    .bind(v('now'), v('ally'), v('attack'), v('build'), v('march'), ep, player.id).run();
   return json({ ok: true, prefs: await pushPrefs(db, player.id, ep) });
 });
 
@@ -621,7 +621,7 @@ route('POST', '/push/unsubscribe', { auth: true, process: false }, async (ctx) =
 // proefmelding naar je eigen toestellen
 route('POST', '/push/test', { auth: true, process: false }, async ({ db, player }) => {
   const sent = await notifyPlayer(db, await vapidKeys(db), player.id, {
-    title: 'Meldingen staan aan', body: 'Je krijgt een melding bij een aanval op je stad, als een bouwer vrij is en als je leger bijna aankomt. Kies in het spel welke.', tag: 'test', url: '/',
+    title: 'Meldingen staan aan', body: 'Je krijgt een melding bij een aanval op je stad of op een clanlid, als een bouwer vrij is en als je leger bijna aankomt. Kies in het spel welke.', tag: 'test', url: '/',
   }, 300);
   return json({ ok: true, sent });
 });

@@ -1819,7 +1819,7 @@ test('tabblad Bouwadvies: gebouwen die je nog niet hebt (bv. het havenhuis in ti
 import { notifyBuilds } from '../functions/lib/push.js';
 import { saveTown, loadTown, nextBuildAt } from '../functions/lib/game.js';
 
-test('meldingen: elke soort apart aan/uit per toestel; aanval op je stad meteen bij vertrek', async () => {
+test('meldingen: elke soort apart aan/uit per toestel; aanval op je stad (en op een clanlid) meteen bij vertrek', async () => {
   const db = await memoryD1();
   const env = { DB: db, ADMIN_KEY: 'k' };
   const later = [];
@@ -1833,13 +1833,16 @@ test('meldingen: elke soort apart aan/uit per toestel; aanval op je stad meteen 
   await call('POST', '/admin/reset', { teamSize: 1, seed: 7, bots: 0 });
   const a = await call('POST', '/register', { name: 'Anna', password: 'geheim123', civ: 'egypt' });
   const b = await call('POST', '/register', { name: 'Bert', password: 'geheim123', civ: 'greek' });
+  const c = await call('POST', '/register', { name: 'Cees', password: 'geheim123', civ: 'persia' });
   const now = Date.now();
   const sql = (q, ...v) => db.raw.prepare(q).run(...v);
   sql('UPDATE world SET start_at = ?', now - 3 * 86400000);
   sql('UPDATE players SET created_at = ?', now - 2 * 86400000);
   sql("UPDATE towns SET state = json_set(state, '$.units.spear', 20)");
+  // Cees zit in de clan van Bert
+  sql("UPDATE players SET team_id = (SELECT team_id FROM players WHERE name = 'Bert') WHERE name = 'Cees'");
   await settle();
-  // Bert heeft twee toestellen: op het tweede zet hij 'aanval op je stad' uit
+  // Bert heeft twee toestellen: op het tweede zet hij 'aanval op je stad' (meteen) uit
   const [p1, k1] = await fakeDevice(); const [p2, k2] = await fakeDevice();
   const ep1 = 'https://fcm.googleapis.com/fcm/send/bert-gsm'; const ep2 = 'https://fcm.googleapis.com/fcm/send/bert-pc';
   const sent = [];
@@ -1847,18 +1850,34 @@ test('meldingen: elke soort apart aan/uit per toestel; aanval op je stad meteen 
   globalThis.fetch = async (url) => { sent.push(String(url)); return new Response(null, { status: 201 }); };
   try {
     let r = await call('POST', '/push/subscribe', { endpoint: ep1, keys: { p256dh: p1, auth: k1 } }, b.cookie);
-    assert.deepEqual(r.data.prefs, { attack: true, build: true, march: true }, 'standaard alles aan');
+    assert.deepEqual(r.data.prefs, { now: true, ally: true, attack: true, build: true, march: true }, 'standaard alles aan');
     await call('POST', '/push/subscribe', { endpoint: ep2, keys: { p256dh: p2, auth: k2 } }, b.cookie);
-    r = await call('POST', '/push/prefs', { endpoint: ep2, attack: false }, b.cookie);
-    assert.deepEqual(r.data.prefs, { attack: false, build: true, march: true });
-    assert.equal((await call('POST', '/push/prefs', { endpoint: ep2, attack: true }, a.cookie)).status, 400, 'niet van een ander');
+    r = await call('POST', '/push/prefs', { endpoint: ep2, now: false }, b.cookie);
+    assert.deepEqual(r.data.prefs, { now: false, ally: true, attack: true, build: true, march: true });
+    assert.equal((await call('POST', '/push/prefs', { endpoint: ep2, now: true }, a.cookie)).status, 400, 'niet van een ander');
+    // Cees (clanlid) heeft ook twee toestellen: op het tweede staat 'aanval op een clanlid' uit
+    const [p3, k3] = await fakeDevice(); const [p4, k4] = await fakeDevice();
+    const ep3 = 'https://fcm.googleapis.com/fcm/send/cees-gsm'; const ep4 = 'https://fcm.googleapis.com/fcm/send/cees-pc';
+    await call('POST', '/push/subscribe', { endpoint: ep3, keys: { p256dh: p3, auth: k3 } }, c.cookie);
+    await call('POST', '/push/subscribe', { endpoint: ep4, keys: { p256dh: p4, auth: k4 } }, c.cookie);
+    r = await call('POST', '/push/prefs', { endpoint: ep4, ally: false }, c.cookie);
+    assert.equal(r.data.prefs.ally, false);
+    // Anna heeft ook een toestel: zij hoort niet bij de clan van Bert
+    const [p5, k5] = await fakeDevice();
+    await call('POST', '/push/subscribe', { endpoint: 'https://fcm.googleapis.com/fcm/send/anna', keys: { p256dh: p5, auth: k5 } }, a.cookie);
     await settle(); sent.length = 0;
-    // Anna valt Bert aan: Bert krijgt meteen een melding, enkel op het toestel waar het aan staat
+    // Anna valt Bert aan: Bert en zijn clanlid krijgen meteen een melding, enkel op de toestellen waar het aan staat
     const bert = db.raw.prepare("SELECT t.id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.name = 'Bert'").get().id;
     r = await call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: bert, units: { spear: 5 } }, a.cookie);
     assert.equal(r.status, 200, JSON.stringify(r.data));
     await settle();
-    assert.deepEqual(sent, [ep1]);
+    assert.deepEqual(sent.sort(), [ep1, ep3].sort());
+    // Cees kan zijn clanlid niet aanvallen (dus ook geen melding naar zichzelf)
+    sent.length = 0;
+    r = await call('POST', '/march', { kind: 'attack', targetKind: 'town', targetId: bert, units: { spear: 5 } }, c.cookie);
+    assert.equal(r.status, 400);
+    await settle();
+    assert.deepEqual(sent, []);
     // een karavaan of versterking geeft geen aanvalsmelding (hier: een kamp aanvallen)
     sent.length = 0;
     const camp = db.raw.prepare('SELECT id FROM camps LIMIT 1').get().id;
@@ -1867,6 +1886,20 @@ test('meldingen: elke soort apart aan/uit per toestel; aanval op je stad meteen 
     await settle();
     assert.deepEqual(sent, []);
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('meldingen: de migratie zet de nieuwe soorten aan, behalve meteen-bij-vertrek voor wie aanvallen uitzette', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(':memory:');
+  const dir = new URL('../migrations/', import.meta.url);
+  const files = readdirSync(dir).filter((n) => n.endsWith('.sql')).sort();
+  const mig = files.indexOf('0012_notify_now_ally.sql');
+  assert.ok(mig > 0);
+  for (const f of files.slice(0, mig)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  raw.exec("INSERT INTO push_subs (player_id, endpoint, p256dh, auth, created_at, n_attack) VALUES (1, 'https://x/a', 'p', 'a', 0, 1), (2, 'https://x/b', 'p', 'a', 0, 0)");
+  for (const f of files.slice(mig)) raw.exec(readFileSync(new URL(f, dir), 'utf8'));
+  const rows = raw.prepare('SELECT player_id, n_now, n_ally FROM push_subs ORDER BY player_id').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ player_id: 1, n_now: 1, n_ally: 1 }, { player_id: 2, n_now: 0, n_ally: 1 }]);
 });
 
 test('meldingen: bouwer vrij als een bouwwerk klaar is (saveTown houdt het tijdstip bij), nooit dubbel', async () => {
