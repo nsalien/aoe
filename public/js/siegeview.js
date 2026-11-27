@@ -369,7 +369,7 @@ export class SiegeView extends TownView {
       else if (look) A.person(ctx, x, y, { ...o, ...look });
       else switch (k) {
         case 'ram': {
-          A.ram(ctx, x, y, 1.35);
+          if (A.ram(ctx, x, y, 1.35, { team, walking: moving, phase: o.phase, attack: atk })) break; // 3D: vaandel in teamkleur zit erop
           // vlaggetje in de kleur van zijn kant op het dak
           const fx = x - 1.35; const fy = y - 19 * 1.35;
           ctx.strokeStyle = '#3e2a18'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 9); ctx.stroke();

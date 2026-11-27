@@ -471,6 +471,15 @@ const MAT = {
     return 2;
   },
   // leer: warme kleur met vlekjes en fijne nerf
+  hide(m, p) { // olifantenhuid: grijs, met fijne rimpels rondom (op de hoogte) en vlekkerig
+    const c = m.c || [0.52, 0.5, 0.48];
+    const wr = Math.sin(p[2] * 420 + vnoise(p[0] * 30, p[1] * 30, 61) * 9);
+    let k = 0.86 + 0.14 * fbm(p[0] * 22 + p[1] * 11, p[2] * 22, 62);
+    k *= wr > 0.75 ? 0.95 : 1;
+    k *= 0.96 + 0.07 * vnoise(p[0] * 110 - p[1] * 60, p[2] * 110, 63);
+    alb[0] = c[0] * k; alb[1] = c[1] * k; alb[2] = c[2] * k;
+    return 1;
+  },
   leather(m, p, n, u, v) {
     const c = m.c || [0.42, 0.27, 0.15];
     const k = 0.8 + 0.25 * fbm(u * 70, v * 70, 52) + 0.06 * vnoise(u * 300, v * 40, 53);

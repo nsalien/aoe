@@ -1235,7 +1235,7 @@ export class TownView {
     }
     if (s.kind === 'stonethrower') { A.stoneThrower(ctx, x, y, 0.8, t); return; }
     if (FIG.uniqueUnit(ctx, s.kind, x, y + bob, o)) return;
-    if (s.kind === 'ram') { A.ram(ctx, x, y, 0.9); return; }
+    if (s.kind === 'ram') { A.ram(ctx, x, y, 0.9, { team, walking: o.walking, phase: o.phase, attack: o.attack }); return; }
     // uitrusting volgens de smidse en het onderzoek van de Academie
     const look = soldierOpts(s.kind, this.troopLook());
     if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: o.walking, phase: o.phase, attack: o.attack });

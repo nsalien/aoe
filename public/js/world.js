@@ -321,7 +321,7 @@ export class WorldView {
     } else {
       const units = m.units || {};
       const cav = (units.rider || 0) + (units.knight || 0);
-      if (units.ram) A.ram(ctx, -12, 2, 0.55);
+      if (units.ram) A.ram(ctx, -12, 2, 0.55, { team: col, walking: true, phase: ph });
       A.person(ctx, -6, 1, { s: 0.65, walking: true, phase: ph + 1, team: col, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' });
       if (cav) A.horseman(ctx, 5, 3, { s: 0.6, walking: true, phase: ph, team: col, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' });
       else A.person(ctx, 5, 3, { s: 0.65, walking: true, phase: ph + 2, team: col, body: '#5b6b85', helmet: '#aab1bb', weapon: 'sword' });

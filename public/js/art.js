@@ -3,6 +3,7 @@
 // Coördinaten: (x, y) in tegels t.o.v. het midden van het grondvlak, z in pixels omhoog.
 import { groundTexture } from './nature.js';
 import * as S3 from './sprite3d.js';
+import { ram3d } from './figures.js';
 
 // een 3D-model van een stuk aankleding (propmodels.js) tekenen met zijn voet op (x, y); false = nog niet klaar
 export function prop3d(ctx, kind, v, x, y, s = 1) {
@@ -1397,7 +1398,9 @@ const TC_CIV = { egypt: tcEgypt, greek: tcGreek, yamato: tcYamato, babylon: tcBa
 
 // ---------- mensen, dieren en machines (in schermruimte) ----------
 
-export function ram(ctx, x, y, s = 1) {
+// o = { team, walking, phase, attack }: eerst het 3D-model (figures.js ram3d), anders deze tekening
+export function ram(ctx, x, y, s = 1, o = null) {
+  if (o && ram3d(ctx, x, y, s, o)) return true;
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
   ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.beginPath(); ctx.ellipse(1, 0, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
   // wielen achteraan
@@ -1425,6 +1428,7 @@ export function ram(ctx, x, y, s = 1) {
     ctx.fillStyle = C.iron; ctx.beginPath(); ctx.arc(wx, -2.8, 0.8, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
+  return false;
 }
 
 // mensen en ruiters staan in figures.js (rijker getekend en per animatiebeeld gecachet)
