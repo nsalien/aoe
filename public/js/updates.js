@@ -13,6 +13,36 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 2,
+    at: '2026-11-27T12:00:00+01:00',
+    tag: 'Leger',
+    icon: 'shield',
+    title: 'Troepen ontslaan: plaats maken voor een ram',
+    intro: 'Zit je bevolking vol en wil je toch nog een ram of een ridder trainen? Je kan nu soldaten die thuis zijn ontslaan. '
+      + 'Hun plaats komt meteen vrij en je krijgt een kwart van wat ze kostten terug.',
+    body: [
+      {
+        h: 'Waar vind je het?', icon: 'minus',
+        p: [
+          'In je stad, bij <b>Leger thuis</b>: de knop <b>Troepen ontslaan</b>. Ook in het tabblad <b>Mijn leger</b> onderaan staat '
+          + 'een kaartje <b>Ontslaan</b>.',
+          'Wil je een eenheid trainen en is er geen plaats meer? Dan staat er bij die eenheid meteen een knop <b>Troepen ontslaan '
+          + 'om plaats te maken</b>. Het venster rekent dan voor je uit of er genoeg plaats vrijkomt (een ram vraagt er 3).',
+        ],
+      },
+      {
+        h: 'Hoe werkt het?', icon: 'people',
+        ul: [
+          'Kies per soort hoeveel soldaten je ontslaat (of tik op <b>alle</b>).',
+          'Hun plaats in je bevolking komt meteen vrij.',
+          'Je krijgt <b>25%</b> van hun kosten terug, zoals bij het afbreken van een gebouw.',
+          'Enkel soldaten die thuis zijn: niet wie in je gebied rondloopt, onderweg is of bij een bondgenoot staat.',
+          'Wordt je stad net aangevallen, dan kan het pas na de slag.',
+        ],
+      },
+    ],
+  },
+  {
     id: 1,
     at: '2026-11-27T10:00:00+01:00',
     tag: 'Clans',
