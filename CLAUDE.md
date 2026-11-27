@@ -111,6 +111,11 @@ Daarom:
   Routes: `routeTo(s, from, to)` (A* over de tegels: water en muren blokkeren, poorten zijn doorgang; daarna enkel de bochten
   als tussenstops in `g.via`, `fieldArrive` loopt verder). Gebruikt door groepen (`travel`) én de dorpelingen in de stad.
   Gebouwen afbreken: `doDemolish` (deel van de kosten terug, zie `DEMOLISH` in `rules.js`).
+  **Troepen ontslaan** (plaats in de bevolking vrij, bv. voor een ram): `checkDismiss`/`doDismiss`/`dismissRefund` in `sim.js`
+  (enkel soldaten thuis in `s.units`, `DISMISS.refund` van de kosten terug), route `/dismiss` (geweigerd zolang er een slag in je
+  stad loopt of wacht op een keuze). Browser: venster `dismissHtml` (`openModal('dismiss', unit)`; met `unit` = wat je wilde
+  trainen rekent het uit of er genoeg plaats vrijkomt), knoppen bij Leger thuis, bij een eenheid die niet past (`popFull` in
+  `trainHtml`) en een kaartje Ontslaan in het tabblad Mijn leger.
   Gebouwen verplaatsen (gratis): `checkMove`/`doMove` (`canPlaceAt(..., ignoreId)`; stadscentrum en muren niet), route `/move`.
   In de stad: knop **Verplaatsen** bovenaan in het gebouwpaneel (`startMove(b)`; níet met lang indrukken, dat kiest het leger).
   Tikken/klikken zet het doorschijnende gebouw op die plek (`updateMove`), het gebouw zelf verslepen met een vinger kan ook

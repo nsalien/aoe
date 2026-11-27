@@ -573,6 +573,12 @@ minuut een bot aan de beurt als niemand online is.
     Eerste artikel: clans wisselen, privéberichten en verraad (punt 61). Getest op pc, gsm 390 en 360 breed (8 knoppen passen) en
     liggend; een nieuwe speler krijgt oudere artikels niet als 'nieuw'.
 
+63. **Troepen ontslaan** (gevraagd: "mogelijkheid om je leger wat in te krimpen: ik wil een ram maken, maar mijn stad zit met
+    volle populatie"). Soldaten die thuis zijn ontslaan: hun plaats in de bevolking komt meteen vrij en ze geven 25% van hun kosten
+    terug (zoals afbreken). Knop **Troepen ontslaan** bij Leger thuis, kaartje **Ontslaan** in Mijn leger, en bij een eenheid die
+    niet meer past (bv. de ram) een knop "Troepen ontslaan om plaats te maken": het venster rekent uit of er genoeg plaats
+    vrijkomt. Niet tijdens een slag in je eigen stad. Nieuwsartikel nr. 2. Getest op pc, gsm en liggend.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
