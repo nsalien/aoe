@@ -216,6 +216,8 @@ export const WALL_TILE = { cost: [null, { wood: 6 }, { wood: 8 }, { stone: 6, wo
 export const GATE = { cost: { wood: 80, stone: 40 }, max: 4 };
 // Afbreken: dit deel van wat het gebouw kostte, krijg je terug (een lopende bouw krijg je voor de helft terug)
 export const DEMOLISH = { built: 0.25, job: 0.5 };
+// Troepen ontslaan (thuis): hun plaats in de bevolking komt vrij en je krijgt een deel van hun kosten terug
+export const DISMISS = { refund: 0.25 };
 // Torens in een veldslag: levenspunten en schade per niveau
 export const TOWER = { hp: [0, 220, 320, 450, 600, 780], dmg: [0, 9, 13, 18, 23, 29], range: 6, rate: 2000 };
 
