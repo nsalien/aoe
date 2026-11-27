@@ -4,7 +4,7 @@
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
-  LAND, landCost, WALL_TILE, GATE, DEMOLISH, TECHS, TECH_IDS, LOYALTY,
+  LAND, landCost, WALL_TILE, GATE, DEMOLISH, DISMISS, TECHS, TECH_IDS, LOYALTY,
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue, JOBS, FISH,
 } from './rules.js';
 import {
@@ -1766,6 +1766,44 @@ export function doDemolish(s, bid) {
   for (const r of JOBS) {
     if ((s.villagers[r] || 0) > sl[r]) { s.villagers.idle += s.villagers[r] - sl[r]; s.villagers[r] = sl[r]; }
   }
+  return refund;
+}
+
+// Troepen ontslaan: enkel soldaten die thuis zijn (niet in je gebied, onderweg of elders). units = { soort: aantal }.
+// Hun plaats in de bevolking komt vrij en je krijgt DISMISS.refund van hun kosten terug (zoals bij afbreken).
+export function checkDismiss(s, units) {
+  const keys = Object.keys(units || {}).filter((k) => units[k]);
+  if (!keys.length) return 'Kies welke troepen je wil ontslaan.';
+  for (const k of keys) {
+    const n = units[k];
+    const u = UNITS[k];
+    if (!u || u.wild || k === 'villager' || !ARMY_UNITS.includes(k)) return 'Onbekende eenheid.';
+    if (!Number.isInteger(n) || n < 0) return 'Ongeldig aantal.';
+    if (n > (s.units[k] || 0)) return `Zoveel ${u.name.toLowerCase()}s heb je niet thuis.`;
+  }
+  return null;
+}
+
+export function dismissRefund(units) {
+  const out = {};
+  for (const k of Object.keys(units || {})) {
+    const u = UNITS[k];
+    if (!u || !units[k]) continue;
+    for (const r of RES) if (u.cost[r]) out[r] = (out[r] || 0) + u.cost[r] * units[k] * DISMISS.refund;
+  }
+  for (const r of Object.keys(out)) out[r] = Math.floor(out[r]);
+  return out;
+}
+
+export function doDismiss(s, units) {
+  const err = checkDismiss(s, units);
+  if (err) throw new GameError(err);
+  const refund = dismissRefund(units);
+  for (const k of Object.keys(units)) {
+    s.units[k] = (s.units[k] || 0) - units[k];
+    if (s.units[k] <= 0) delete s.units[k];
+  }
+  addRes(s, refund);
   return refund;
 }
 

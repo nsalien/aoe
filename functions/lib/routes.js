@@ -16,7 +16,7 @@ import {
 import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
   townScore, totalVillagers, unitsPop, ensureTerritory, settleBuilds, doFieldSend, doFieldOrder, doFieldSplit,
-  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls, doBoat,
+  doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls, doBoat, doDismiss,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -440,6 +440,16 @@ route('POST', '/train', { auth: true, active: true }, async (ctx) => {
   const body = await readJson(ctx.request);
   const away = await awayInfo(ctx.db, ctx.player.id);
   return townAction(ctx, (s) => doTrain(s, String(body.unit), int(body.count), ctx.now, ctx.world.speed, away.pop, away.nobles));
+});
+
+// troepen ontslaan (thuis): plaats in de bevolking vrij, een deel van de kosten terug; niet tijdens een slag in je stad
+route('POST', '/dismiss', { auth: true, active: true }, async (ctx) => {
+  const body = await readJson(ctx.request);
+  const units = {};
+  for (const k of ARMY_UNITS) { const v = int(body.units && body.units[k]); if (v > 0) units[k] = v; }
+  const busy = await ctx.db.prepare("SELECT id FROM battles WHERE def_player = ? AND status != 'done' AND target_kind != 'practice' LIMIT 1").bind(ctx.player.id).first();
+  if (busy) throw new GameError('Je stad wordt aangevallen: ontslaan kan pas na de slag.');
+  return townAction(ctx, (s) => doDismiss(s, units));
 });
 
 route('POST', '/research', { auth: true, active: true }, async (ctx) => {

@@ -1030,3 +1030,11 @@ body.page-updates { height: auto; min-height: 100%; overflow: visible; backgroun
 .news-card { position: relative; width: 100%; max-width: none; max-height: none; overflow: visible; }
 .news-back { text-align: center; margin: 16px 0 0; }
 .news-back .btn { display: inline-flex; text-decoration: none; }
+
+/* troepen ontslaan */
+.summary .ok { color: var(--green); font-weight: 700; }
+.summary .req { color: var(--red); font-weight: 700; }
+.bcard.dismiss-card { display: grid; place-items: center; align-content: center; gap: 2px; font: inherit; color: var(--ink2); cursor: pointer; border-style: dashed; }
+.bcard.dismiss-card .ic { width: 26px; height: 26px; }
+.summary .refund { display: inline-flex; align-items: center; gap: 6px; }
+.summary .refund > * { margin: 0; }
