@@ -151,6 +151,7 @@ function head(s, L, hz, skin) {
   if (L.look === 'lionguard') { s.cyl(0, 0, 0.037, hz, hz + 0.075, cloth('#244e8f')); s.cyl(0, 0, 0.039, hz + 0.004, hz + 0.014, metal('#e0b23a')); return; }
   if (L.look === 'immortal') { s.cyl(0, 0, 0.038, hz + 0.005, hz + 0.05, cloth('#e8dcc0')); s.cyl(0, 0, 0.04, hz + 0.02, hz + 0.03, cloth('#1f9a9a')); return; }
   if (L.look === 'peltast') { s.ell(0, 0, hz + 0.012, 0.039, 0.037, 0.038, cloth('#7a5129')); return; }
+  if (L.look === 'mahout') { s.ell(0, 0, hz + 0.022, 0.043, 0.041, 0.034, cloth('#efe6d2')); s.ell(0.01, 0, hz + 0.03, 0.044, 0.042, 0.012, cloth('#d0a63a')); return; }
   if (L.helmet) {
     s.ell(0, 0, hz + 0.006, 0.041, 0.039, 0.04, metal(L.helmet), hz - 0.004);
     s.ell(0, 0, hz - 0.002, 0.044, 0.042, 0.007, metal(shade(L.helmet, -0.2))); // rand
@@ -512,12 +513,225 @@ export function boar(s, L, mode, f) {
   s.cap([-0.17, 0, bz + 0.03], [-0.21, 0, bz - 0.04], 0.006, plain('#2b1d14')); // staart
 }
 
+// dezelfde scène, verschoven (om een figuur op een olifant te zetten)
+const at = (s, dx, dy, dz) => ({
+  cap: (a, b, r, m) => s.cap([a[0] + dx, a[1] + dy, a[2] + dz], [b[0] + dx, b[1] + dy, b[2] + dz], r, m),
+  ell: (cx, cy, cz, rx, ry, rz, m, zmin = -1e9) => s.ell(cx + dx, cy + dy, cz + dz, rx, ry, rz, m, zmin + dz),
+  cyl: (cx, cy, r, z0, z1, m) => s.cyl(cx + dx, cy + dy, r, z0 + dz, z1 + dz, m),
+  cone: (cx, cy, r, z0, z1, m) => s.cone(cx + dx, cy + dy, r, z0 + dz, z1 + dz, m),
+});
+const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+// Oorlogsolifant (Perzen): gerimpelde huid, slagtanden met gouden punten, een kleed in de teamkleur met gouden franje,
+// een torentje met een boogschutter en een berijder op de nek. Lopen: telkens één poot (zoals een echte olifant).
+// Aanval (8 beelden, 0 = de stoot): kop omlaag en slagtanden vooruit, daarna kop en slurf omhoog en een voorpoot op.
+const E_HEAD_DZ = [-0.05, -0.035, -0.01, 0.02, 0.05, 0.07, 0.06, 0.0];
+const E_HEAD_DX = [0.04, 0.025, 0.01, -0.005, -0.015, -0.02, -0.01, 0.02];
+const E_TRUNK = [0.0, 0.08, 0.25, 0.5, 0.8, 1.0, 0.85, 0.3]; // 0 = hangt, 1 = opgerold omhoog
+const E_STOMP = [0, 0, 0.02, 0.05, 0.09, 0.11, 0.08, 0.03];
+const T_HANG = [[0, 0, 0], [0.05, 0, -0.085], [0.075, 0, -0.18], [0.085, 0, -0.27], [0.092, 0, -0.355], [0.12, 0, -0.405]];
+const T_UP = [[0, 0, 0], [0.075, 0, 0.025], [0.125, 0, 0.095], [0.135, 0, 0.18], [0.105, 0, 0.245], [0.06, 0, 0.255]];
+const T_R = [0.05, 0.043, 0.036, 0.03, 0.025, 0.021];
+
+export function elephant(s, L, mode, f) {
+  const a = (f / 8) * TAU;
+  const walk = mode === 'walk'; const atk = mode === 'atk';
+  const team = L.team || '#c0392b';
+  const skin = { k: 'hide', c: rgb('#726b63') };
+  const skinD = { k: 'hide', c: rgb('#5f5952') };
+  const bob = walk ? Math.abs(Math.sin(a * 2)) * 0.008 : 0;
+  const bz = 0.5 + bob;
+  // poten: zuilen met een knie, ronde voeten met teennagels; lopen in de volgorde links-achter, links-voor, rechts-achter, rechts-voor
+  for (const [lx, side, ph, hind] of [[0.15, 1, 0.25, false], [0.15, -1, 0.75, false], [-0.17, 1, 0, true], [-0.17, -1, 0.5, true]]) {
+    const q = (a / TAU + ph) * TAU;
+    const sw = walk ? Math.sin(q) * 0.055 : 0;
+    let lift = walk ? Math.max(0, Math.cos(q)) * 0.04 : 0;
+    let fx = lx + sw;
+    if (atk && !hind && side === 1) { lift = E_STOMP[f]; fx = lx + E_STOMP[f] * 0.6; }
+    const top = [lx, side * 0.088, bz - 0.04];
+    const knee = [(lx + fx) / 2 + (hind ? -0.01 : 0.012), side * 0.09, 0.25 + lift * 0.6];
+    const foot = [fx, side * 0.09, 0.05 + lift];
+    s.cap(top, knee, hind ? 0.082 : 0.076, skin);
+    s.cap(knee, foot, 0.066, skin);
+    s.ell(knee[0] + (hind ? -0.01 : 0.01), knee[1], knee[2], 0.07, 0.068, 0.056, skin); // knie
+    s.ell(foot[0], foot[1], foot[2] - 0.008, 0.076, 0.074, 0.046, skinD); // voet
+    for (const dy of [-0.036, 0, 0.036]) s.ell(foot[0] + 0.066, foot[1] + dy, foot[2] - 0.022, 0.015, 0.014, 0.013, plain('#e3d9c6')); // teennagels
+    if (L.team) s.cyl(foot[0], foot[1], 0.071, foot[2] + 0.035, foot[2] + 0.055, { k: 'gold' }); // gouden enkelband
+  }
+  // romp: buik, schouders (hoogste punt) en achterhand
+  s.ell(0, 0, bz, 0.3, 0.16, 0.17, skin);
+  s.ell(0.13, 0, bz + 0.035, 0.17, 0.155, 0.19, skin);
+  s.ell(-0.17, 0, bz + 0.015, 0.16, 0.155, 0.175, skin);
+  s.ell(0.0, 0, bz - 0.09, 0.24, 0.13, 0.09, skinD); // buik
+  // staart met een pluim
+  const tw = walk ? Math.sin(a) * 0.02 : 0;
+  s.cap([-0.33, 0, bz + 0.06], [-0.36, tw * 0.5, bz - 0.08], 0.013, skin);
+  s.cap([-0.36, tw * 0.5, bz - 0.08], [-0.36, tw, bz - 0.17], 0.01, skin);
+  s.ell(-0.36, tw, bz - 0.19, 0.012, 0.012, 0.025, plain('#2a2420'));
+  // kleed in de teamkleur over de rug, met een donkere band, gouden boord en franje
+  s.ell(-0.01, 0, bz + 0.04, 0.29, 0.168, 0.185, cloth(shade(team, -0.35)), bz - 0.05); // donkere band onderaan
+  s.ell(-0.01, 0, bz + 0.04, 0.294, 0.171, 0.188, cloth(team), bz - 0.012);
+  s.ell(-0.01, 0, bz - 0.052, 0.296, 0.172, 0.012, { k: 'gold' });
+  for (let i = 0; i < 9; i++) {
+    const x = -0.24 + i * 0.06; const y = 0.172 * Math.sqrt(Math.max(0, 1 - ((x + 0.01) / 0.3) ** 2));
+    s.cap([x, y, bz - 0.06], [x, y + 0.004, bz - 0.095], 0.008, { k: 'gold' });
+    s.ell(x, y + 0.004, bz - 0.1, 0.011, 0.011, 0.011, plain(shade(team, -0.2)));
+  }
+  s.ell(0.0, 0.17, bz + 0.0, 0.045, 0.012, 0.045, { k: 'gold' }); // medaillon op de flank
+  s.ell(0.0, 0.176, bz + 0.0, 0.026, 0.008, 0.026, plain(shade(team, 0.35)));
+  // kop
+  const hx = 0.34 + (atk ? E_HEAD_DX[f] : 0); const hz = bz + 0.12 + (atk ? E_HEAD_DZ[f] : walk ? Math.sin(a * 2) * 0.006 : 0);
+  s.cap([0.2, 0, bz + 0.08], [hx - 0.03, 0, hz - 0.01], 0.13, skin); // nek
+  s.ell(hx, 0, hz, 0.12, 0.105, 0.13, skin);
+  for (const side of [1, -1]) s.ell(hx + 0.025, side * 0.042, hz + 0.08, 0.07, 0.05, 0.06, skin); // twee bulten op het voorhoofd
+  s.ell(hx + 0.05, 0, hz - 0.075, 0.08, 0.08, 0.07, skin); // kaak
+  // oren: groot en plat, flapperen bij het lopen
+  const flap = walk ? Math.sin(a * 2) * 0.012 : atk ? 0.02 : 0;
+  for (const side of [1, -1]) {
+    s.ell(hx - 0.07, side * (0.118 + flap), hz - 0.005, 0.078, 0.016, 0.11, skinD);
+    s.ell(hx - 0.068, side * (0.124 + flap), hz - 0.01, 0.06, 0.01, 0.088, { k: 'hide', c: rgb('#9c8c86') }); // binnenkant
+    s.ell(hx + 0.072, side * 0.087, hz + 0.02, 0.013, 0.008, 0.011, plain(DARK)); // oog
+    s.cap([hx + 0.07, side * 0.09, hz + 0.036], [hx + 0.05, side * 0.094, hz + 0.042], 0.004, plain('#4e4a46')); // ooglid
+  }
+  // kopkleed in de teamkleur dat vooraan over het voorhoofd hangt, met een gouden rand, schijf en belletjes
+  s.ell(hx + 0.088, 0, hz + 0.045, 0.05, 0.082, 0.12, { k: 'gold' });
+  s.ell(hx + 0.094, 0, hz + 0.047, 0.05, 0.072, 0.11, cloth(team));
+  s.ell(hx + 0.142, 0, hz + 0.075, 0.008, 0.026, 0.026, { k: 'gold' });
+  s.ell(hx + 0.147, 0, hz + 0.075, 0.005, 0.014, 0.014, plain(shade(team, 0.35)));
+  for (const dy of [-0.05, 0, 0.05]) s.ell(hx + 0.13, dy, hz - 0.075, 0.012, 0.012, 0.012, { k: 'gold' });
+  // slurf: van hangend (met wat zwaai) tot opgerold omhoog
+  const tu = atk ? E_TRUNK[f] : 0;
+  const base = [hx + 0.11, 0, hz - 0.03];
+  const pts = T_HANG.map((ph, i) => {
+    const t = i / (T_HANG.length - 1);
+    const p = lerp3(ph, T_UP[i], tu);
+    return [base[0] + p[0], base[1] + p[1] + (walk ? Math.sin(a + 0.6) * 0.03 * t * t : 0), base[2] + p[2]];
+  });
+  for (let i = 0; i < pts.length - 1; i++) s.cap(pts[i], pts[i + 1], T_R[i], skin);
+  const tip = pts[pts.length - 1];
+  s.ell(tip[0] + 0.012, tip[1], tip[2] + (tu > 0.5 ? 0.01 : -0.012), 0.022, 0.022, 0.018, skinD);
+  s.ell(hx + 0.085, 0, hz - 0.125, 0.03, 0.035, 0.022, plain('#6e5a55')); // onderlip
+  // slagtanden (ivoor) die naar voren en omhoog buigen, met gouden punten
+  for (const side of [1, -1]) {
+    const t0 = [hx + 0.095, side * 0.048, hz - 0.085]; const t1 = [hx + 0.19, side * 0.054, hz - 0.13]; const t2 = [hx + 0.27, side * 0.058, hz - 0.085];
+    s.cap(t0, t1, 0.019, plain('#efe6d2', true)); s.cap(t1, t2, 0.015, plain('#f4eddc', true));
+    s.cap(t2, [t2[0] + 0.03, t2[1], t2[2] + 0.025], 0.012, { k: 'gold' });
+    s.cyl(t0[0] + 0.02, t0[1], 0.022, t0[2] - 0.03, t0[2] - 0.01, { k: 'gold' }); // ring
+  }
+  // zadelkleed en torentje (howdah) van hout met gouden boorden en kantelen
+  const tx = -0.07; const z0 = bz + 0.19;
+  s.ell(tx, 0, z0 - 0.015, 0.17, 0.16, 0.03, cloth(shade(team, -0.25)));
+  s.box(tx - 0.13, -0.115, z0, tx + 0.13, 0.115, z0 + 0.03, wood('#5c3b1f'));
+  const wallM = { k: 'wood', c: rgb('#8a5f35'), bw: 0.028 };
+  const wz = z0 + 0.13;
+  s.box(tx - 0.13, 0.1, z0 + 0.03, tx + 0.13, 0.115, wz, wallM); // linkerwand (naar de kijker)
+  s.box(tx - 0.13, -0.115, z0 + 0.03, tx + 0.13, -0.1, wz, wallM);
+  s.box(tx + 0.115, -0.115, z0 + 0.03, tx + 0.13, 0.115, wz, wallM); // voorwand
+  s.box(tx - 0.13, -0.115, z0 + 0.03, tx - 0.115, 0.115, wz, wallM);
+  for (const [x0, y0, x1, y1] of [[tx - 0.135, 0.098, tx + 0.135, 0.12], [tx - 0.135, -0.12, tx + 0.135, -0.098], [tx + 0.113, -0.12, tx + 0.135, 0.12], [tx - 0.135, -0.12, tx - 0.113, 0.12]]) {
+    s.box(x0, y0, wz - 0.012, x1, y1, wz, { k: 'gold' });
+    s.box(x0, y0, z0 + 0.03, x1, y1, z0 + 0.042, { k: 'gold' });
+  }
+  for (let i = 0; i < 4; i++) { // kantelen op de linkerwand en de voorwand
+    const x = tx - 0.1 + i * 0.066;
+    s.box(x - 0.018, 0.1, wz, x + 0.018, 0.115, wz + 0.035, wallM);
+    const y = -0.08 + i * 0.053;
+    s.box(tx + 0.115, y - 0.016, wz, tx + 0.13, y + 0.016, wz + 0.035, wallM);
+  }
+  s.ell(tx, 0.117, z0 + 0.085, 0.03, 0.006, 0.03, cloth(team)); // schildje in teamkleur
+  s.ell(tx, 0.121, z0 + 0.085, 0.014, 0.004, 0.014, { k: 'gold' });
+  // vaandel achteraan
+  s.cap([tx - 0.12, -0.09, z0 + 0.03], [tx - 0.12, -0.09, z0 + 0.5], 0.007, wood('#5c3b1f'));
+  s.ell(tx - 0.12, -0.09, z0 + 0.51, 0.011, 0.011, 0.011, { k: 'gold' });
+  const wave = walk ? Math.sin(a) * 0.01 : 0;
+  s.ell(tx - 0.06, -0.09 + wave, z0 + 0.45, 0.06, 0.005, 0.04, cloth(team));
+  // boogschutter in het torentje
+  const P = at(s, tx + 0.01, 0, z0 - 0.045); // voeten in het torentje: de schutter staat tot zijn heupen achter de wand
+  person(P, { team, body: '#1f6f78', leg: '#3a2a1c', hat: '#e8dcc0', weapon: 'bow', skin: 2, kit: L.kit }, atk ? 'atk' : 'idle', atk ? f : 0);
+  // berijder (mahout) op de nek, met een stok
+  person(at(s, 0.215, 0, 0), { body: '#c9a66b', leg: '#6b4a2b', skin: 3, look: 'mahout' }, 'idle', 0, bz + 0.165);
+  s.cap([0.29, -0.06, bz + 0.27], [0.36, -0.07, bz + 0.33], 0.005, wood('#5c3b1f'));
+}
+
+// Stormram: een overdekt onderstel op vier spaakwielen, een dak van natte huiden met touwen, een stam aan kettingen met
+// een ijzeren ramskop en een vaandel in de teamkleur. Rijden: de wielen draaien. Aanval (0 = de stoot): de stam zwaait
+// naar achter en slaat naar voren.
+const RAM_X = [0.075, 0.035, -0.02, -0.065, -0.095, -0.11, -0.085, -0.01];
+export function ram(s, L, mode, f) {
+  const walk = mode === 'walk'; const atk = mode === 'atk';
+  const team = L.team || '#c0392b';
+  const timber = wood('#6e4826'); const timberD = wood('#4f331b');
+  const iron = metal('#5f666e');
+  // wielen: schijf, vier spaken (draaien bij het rijden), ijzeren band en naaf
+  const spin = walk ? (f / 8) * (Math.PI / 4) : 0;
+  const R = 0.078; const wz = 0.078;
+  for (const wx of [-0.21, 0.21]) {
+    for (const side of [1, -1]) {
+      const wy = side * 0.17;
+      s.hcyl('y', wx, wz, R, wy - 0.016, wy + 0.016, wood('#5a3a1e'));
+      const fy = wy + side * 0.018;
+      for (let k = 0; k < 4; k++) {
+        const an = spin + (k / 4) * Math.PI;
+        s.cap([wx + Math.cos(an) * R * 0.82, fy, wz + Math.sin(an) * R * 0.82], [wx - Math.cos(an) * R * 0.82, fy, wz - Math.sin(an) * R * 0.82], 0.008, wood('#8a6238'));
+      }
+      for (let k = 0; k < 12; k++) {
+        const a0 = (k / 12) * TAU; const a1 = ((k + 1) / 12) * TAU;
+        s.cap([wx + Math.cos(a0) * R, fy - side * 0.004, wz + Math.sin(a0) * R], [wx + Math.cos(a1) * R, fy - side * 0.004, wz + Math.sin(a1) * R], 0.009, iron);
+      }
+      s.hcyl('y', wx, wz, 0.02, side > 0 ? wy : wy - 0.03, side > 0 ? wy + 0.03 : wy, iron); // naaf
+    }
+    s.hcyl('y', wx, wz, 0.012, -0.175, 0.175, iron); // as
+  }
+  // onderstel en palen
+  for (const side of [1, -1]) s.box(-0.35, side > 0 ? 0.115 : -0.15, 0.115, 0.35, side > 0 ? 0.15 : -0.115, 0.155, timber);
+  for (const x of [-0.31, 0, 0.31]) s.box(x - 0.02, -0.15, 0.115, x + 0.02, 0.15, 0.15, timberD);
+  for (const x of [-0.32, 0.32]) for (const side of [1, -1]) s.cap([x, side * 0.13, 0.15], [x, side * 0.13, 0.29], 0.017, timber);
+  // de stam aan kettingen, met ijzeren banden; vooraan steekt hij uit met een ijzeren ramskop
+  const lx = atk ? RAM_X[f] : walk ? Math.sin((f / 8) * TAU) * 0.008 : 0;
+  const cz = 0.215 + Math.abs(Math.min(0, lx)) * 0.22;
+  const x0 = -0.3 + lx; const x1 = 0.47 + lx;
+  s.hcyl('x', 0, cz, 0.045, x0, x1, { k: 'wood', c: rgb('#7a5530'), bw: 0.02 });
+  for (const bx of [-0.2, 0.08, 0.36]) s.hcyl('x', 0, cz, 0.049, bx + lx - 0.014, bx + lx + 0.014, iron);
+  for (const hx of [-0.14, 0.14]) s.cap([hx, 0, 0.47], [hx + lx, 0, cz + 0.04], 0.006, metal('#55595f')); // kettingen
+  const head = metal('#6d747c'); const horn = metal('#8c7240');
+  s.ell(x1 + 0.065, 0, cz - 0.004, 0.09, 0.06, 0.058, head);
+  s.ell(x1 + 0.025, 0, cz + 0.035, 0.06, 0.062, 0.05, head);
+  s.ell(x1 + 0.135, 0, cz - 0.014, 0.028, 0.04, 0.036, metal('#545a61')); // snuit
+  for (const side of [1, -1]) {
+    const H = [[x1 + 0.005, side * 0.04, cz + 0.06], [x1 - 0.05, side * 0.075, cz + 0.07], [x1 - 0.07, side * 0.1, cz + 0.008], [x1 - 0.025, side * 0.104, cz - 0.045], [x1 + 0.025, side * 0.088, cz - 0.034]];
+    for (let k = 0; k < H.length - 1; k++) s.cap(H[k], H[k + 1], 0.025 - k * 0.0035, horn);
+    s.ell(x1 + 0.085, side * 0.05, cz + 0.016, 0.01, 0.007, 0.009, plain('#d8b23a', true)); // ogen
+  }
+  // dak van natte huiden: steil, laag tot boven de wielen, met lappen, touwen en een nokbalk
+  const hideM = { k: 'leather', c: rgb('#5e4430') };
+  s.gable(-0.35, -0.13, 0.35, 0.13, 0.285, 0.235, 'x', hideM, 0.05);
+  s.cap([-0.39, 0, 0.523], [0.39, 0, 0.523], 0.018, timberD);
+  for (const x of [-0.24, 0, 0.24]) for (const side of [1, -1]) s.cap([x, side * 0.18, 0.287], [x, 0, 0.527], 0.0055, plain('#a88e5e'));
+  // huiden die opzij tot net boven de wielen hangen, met schilden in de teamkleur
+  for (const side of [1, -1]) s.box(-0.36, side > 0 ? 0.165 : -0.175, 0.16, 0.36, side > 0 ? 0.175 : -0.165, 0.29, { k: 'leather', c: rgb('#4f3a28') });
+  for (const x of [-0.18, 0.12]) {
+    s.ell(x, 0.181, 0.225, 0.052, 0.008, 0.052, wood('#4a3020'));
+    s.ell(x, 0.186, 0.225, 0.046, 0.007, 0.046, cloth(team));
+    s.ell(x, 0.192, 0.225, 0.013, 0.006, 0.013, { k: 'gold' });
+  }
+  // voorkant: een plank met een opening voor de stam
+  s.box(0.345, -0.13, 0.27, 0.36, 0.13, 0.32, timber);
+  // vaandel in de teamkleur op de nok
+  s.cap([-0.3, 0, 0.52], [-0.3, 0, 0.8], 0.008, timberD);
+  s.ell(-0.3, 0, 0.81, 0.012, 0.012, 0.012, { k: 'gold' });
+  const wave = walk ? Math.sin((f / 8) * TAU) * 0.008 : 0;
+  s.ell(-0.235, wave, 0.75, 0.065, 0.006, 0.045, cloth(team));
+  s.ell(-0.225, wave + 0.004, 0.75, 0.02, 0.004, 0.02, { k: 'gold' });
+}
+
 // de opties van de getekende figuur → een scène
 export function figureScene(kind, L, mode, f) {
   const s = new Scene();
   if (kind === 'h') horse(s, L, mode, f);
   else if (kind === 's') sheep(s, L, mode, f);
   else if (kind === 'b') boar(s, L, mode, f);
+  else if (kind === 'e') elephant(s, L, mode, f);
+  else if (kind === 'r') ram(s, L, mode, f);
   else person(s, L, mode, f);
   return s;
 }
@@ -529,4 +743,6 @@ export const GALLERY = [
   ['zwaard', () => figureScene('p', { team: '#c0392b', body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }, 'idle', 0), { ground: false, scale: 4, show: 4, fill: 0.5, ao: 3 }],
   ['boog', () => figureScene('p', { team: '#c0392b', body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }, 'idle', 0), { ground: false, scale: 4, show: 4, fill: 0.5, ao: 3 }],
   ['ridder', () => figureScene('h', { team: '#c0392b', body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530' }, 'walk', 3), { ground: false, scale: 4, show: 3, fill: 0.5, ao: 3 }],
+  ['olifant', () => figureScene('e', { team: '#c0392b' }, 'walk', 2), { ground: false, scale: 4, show: 2, fill: 0.5, ao: 3 }],
+  ['ram', () => figureScene('r', { team: '#c0392b' }, 'idle', 0), { ground: false, scale: 4, show: 3, fill: 0.5, ao: 3 }],
 ];

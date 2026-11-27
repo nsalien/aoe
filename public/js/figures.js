@@ -99,10 +99,12 @@ const frameOf = (phase) => {
 };
 // Welke eenheden een aanvalsbeweging hebben, en in welke houding ze wachten op hun volgende slag of schot
 // (zwaard omhoog, speer naar achter, boog helemaal aangespannen).
-const ATK_KINDS = new Set(['villager', 'barbarian', 'spear', 'sword', 'archer', 'rider', 'knight', 'hoplite', 'peltast', 'samurai', 'yabusame', 'lionguard', 'immortal', 'noble']);
+const ATK_KINDS = new Set(['villager', 'barbarian', 'spear', 'sword', 'archer', 'rider', 'knight', 'hoplite', 'peltast', 'samurai', 'yabusame', 'lionguard', 'immortal', 'noble', 'elephant', 'ram']);
 export const hasAttackAnim = (k) => ATK_KINDS.has(k);
+// (ram: stam naar achter getrokken; olifant: kop en slurf omhoog)
 export const attackReady = (k) => (k === 'archer' || k === 'peltast' || k === 'yabusame' ? 0.9
-  : k === 'spear' || k === 'hoplite' || k === 'lionguard' || k === 'immortal' || k === 'rider' || k === 'knight' ? 0.6 : 0.8);
+  : k === 'spear' || k === 'hoplite' || k === 'lionguard' || k === 'immortal' || k === 'rider' || k === 'knight' || k === 'elephant' ? 0.6
+    : k === 'ram' ? 0.55 : 0.8);
 
 // mode en beeld van een figuur. o.attack = fase in de aanvalscyclus (0..1, 0 = de slag of het schot): dan 'atk'.
 function modeOf(o) {
@@ -984,8 +986,28 @@ export function chariot(ctx, x, y, o = {}) {
 export function elephant(ctx, x, y, o = {}) {
   const s = sz(o);
   ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.beginPath(); ctx.ellipse(x + 1 * s, y, 13 * s, 3.6 * s, 0, 0, TAU); ctx.fill();
+  // 3D-model (figmodels.js), iets groter dan de getekende versie: een olifant torent boven het voetvolk uit
+  const [m3, f3i] = modeOf(o);
+  const s3 = s * E3D;
+  const f3 = S3.getFig('e', { team: o.team, thumb: o.thumb }, m3, f3i, needOf(ctx, s3));
+  if (f3) { ctx.drawImage(f3.cv, x - f3.ax * s3, y - f3.ay * s3, f3.w * s3, f3.h * s3); return; }
   const mode = o.walking ? 'walk' : 'idle'; const f = mode === 'idle' ? 0 : frameOf(o.phase); const R = resFor(ctx, s);
   blit(ctx, sprite(`o|${mode}${f}|${R}|${o.team || ''}`, R, E_BOX, (c) => drawElephant(c, o, mode, f), [-15, 17]), E_BOX, x, y, s);
+}
+
+const E3D = 1.12;
+
+// Stormram in 3D (figmodels.js): wielen die draaien, een stam die zwaait bij een aanval, vaandel en schilden in de
+// teamkleur. Geeft false als het 3D-beeld (nog) niet klaar is: dan tekent art.js de oude versie.
+// s = dezelfde schaal als A.ram (de 3D-ram is iets breder, dus wat kleiner getekend)
+export function ram3d(ctx, x, y, s, o = {}) {
+  const s3 = s * 0.82;
+  const [mode, f] = modeOf(o);
+  const f3 = S3.getFig('r', { team: o.team, thumb: o.thumb }, mode, f, needOf(ctx, s3));
+  if (!f3) return false;
+  ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.beginPath(); ctx.ellipse(x + 2 * s, y - 1 * s, 15 * s, 4.4 * s, 0, 0, TAU); ctx.fill();
+  ctx.drawImage(f3.cv, x - f3.ax * s3, y - f3.ay * s3, f3.w * s3, f3.h * s3);
+  return true;
 }
 
 // eenheid van een volk tekenen (geeft false terug als het geen eenheid van een volk is)
