@@ -399,6 +399,18 @@ export const TEAM_NAMES = ['Huis van de Eik', 'Wolvenclan', 'Orde van de Valk', 
   'Hertenbond', 'Rozenwacht', 'IJzeren Beer', 'Zonen van de Zee'];
 export const TEAM_COLORS = ['#d64545', '#3f7fd9', '#3fae5a', '#e0b020', '#9455d1', '#e07a2a', '#2cb5b0', '#d6589a'];
 export const MAX_TEAMS = 8;
+// kleuren voor clans die spelers zelf stichten (bij het verlaten van een clan): de meest verschillende vrije kleur
+export const CLAN_COLORS = [...TEAM_COLORS, '#8d5a2b', '#5c6bc0', '#7cb342', '#b0306a', '#00897b', '#f06292', '#6d4c41', '#546e7a', '#b8860b', '#5e2a84', '#1b5e20', '#9e9d24'];
+
+// Clans wisselen, verraad en privéberichten (functions/lib/clan.js)
+export const CLAN = {
+  maxMembers: 4, // zoveel leden mag een clan hebben (of de teamgrootte van de wereld als die groter is)
+  switchMs: 6 * 3600000, // na een wissel van clan (verlaten of toetreden) zo lang wachten voor de volgende (echte tijd)
+  inviteMs: 3 * 24 * 3600000, // uitnodigingen en verzoeken vervallen na zoveel tijd
+  traitorMs: 3 * 24 * 3600000, // zo lang na een aanval op een clanlid kan de clan de verrader buitenzetten
+  nameMin: 3,
+  nameMax: 24,
+};
 
 export const WORLD_SIZE = 56;
 export const CAMP_EXTRA = 12; // naast de 3 kampen rond elk startgebied

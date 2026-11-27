@@ -6,11 +6,12 @@
 //   - grondstoffen sturen naar clanleden die tekortkomen (karavaan via de markt)
 //   - spelers aanvallen zodra hun vrede voorbij is (enkel als hij denkt te winnen; samen met de clan)
 //   - roverskampen plunderen
-import { RES, UNITS, ARMY_UNITS, MARKET, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, campUnits } from '../../public/shared/rules.js';
+import { RES, UNITS, ARMY_UNITS, MARKET, CIV_IDS, TEAM_NAMES, TEAM_COLORS, campUnits } from '../../public/shared/rules.js';
 import {
   newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age, townScore, loyalty,
 } from '../../public/shared/sim.js';
 import { nobleBlock } from './vassal.js';
+import { freeSlot } from './clan.js';
 import { notifyAttack } from './push.js';
 import { resolveBattle, slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, teamRegion, findSpot } from '../../public/shared/worldgen.js';
@@ -40,14 +41,14 @@ const SLACK = 4 * 60000; // zo dicht bij 'nu' telt een bot als bijgewerkt
 
 async function createBot(db, world, now) {
   const teams = (await db.prepare(
-    'SELECT t.id, t.slot, COUNT(p.id) AS c, COALESCE(SUM(p.bot), 0) AS b FROM teams t LEFT JOIN players p ON p.team_id = t.id GROUP BY t.id ORDER BY t.slot',
+    'SELECT t.id, t.slot, t.founder, COUNT(p.id) AS c, COALESCE(SUM(p.bot), 0) AS b FROM teams t LEFT JOIN players p ON p.team_id = t.id GROUP BY t.id ORDER BY t.slot',
   ).all()).results;
   const size = Math.max(1, world.team_size || 2);
-  // een clan met enkel bots en nog plaats, anders een lege of een nieuwe clan
-  let team = teams.find((t) => t.c > 0 && t.b === t.c && t.c < size) || teams.find((t) => t.c === 0);
+  // een clan met enkel bots en nog plaats, anders een lege of een nieuwe clan (nooit een clan die een speler stichtte)
+  let team = teams.find((t) => t.c > 0 && t.b === t.c && t.c < size) || teams.find((t) => t.c === 0 && t.founder == null);
   if (!team) {
-    if (teams.length >= MAX_TEAMS) return null;
-    const slot = teams.length;
+    const slot = freeSlot(teams);
+    if (slot < 0) return null;
     const ins = await db.prepare('INSERT INTO teams (slot, name, color) VALUES (?, ?, ?)').bind(slot, TEAM_NAMES[slot], TEAM_COLORS[slot]).run();
     team = { id: ins.meta.last_row_id, slot, c: 0 };
   }
