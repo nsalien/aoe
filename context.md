@@ -579,8 +579,12 @@ minuut een bot aan de beurt als niemand online is.
     niet meer past (bv. de ram) een knop "Troepen ontslaan om plaats te maken": het venster rekent uit of er genoeg plaats
     vrijkomt. Niet tijdens een slag in je eigen stad. Nieuwsartikel nr. 2. Getest op pc, gsm en liggend.
 
+64. **Idee: belegering (een stad uithongeren)**: uitgewerkt in `docs/idee-belegering.md`, **nog niet gebouwd** (gevraagd:
+    "werk het idee uit, maar nog niet implementeren"). Wacht op de keuzes van de gebruiker (open vragen onderaan dat bestand).
+
 ## 8. Bekende beperkingen en ideeën
 
+- Belegering (uithongeren, uitval in open veld): zie `docs/idee-belegering.md` (voorstel, nog niet gebouwd).
 - Haven, boten en eilanden: zie `docs/idee-haven.md` (voorstel, nog niet gebouwd). Op de wereldkaart lopen legers nog
   in een rechte lijn, ook over water.
 
