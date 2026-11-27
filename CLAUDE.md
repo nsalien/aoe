@@ -230,6 +230,19 @@ Daarom:
 - Volkeren: `CIVS` en de elite-eenheden staan in `rules.js` (eigenschappen zoals `bonus`, `tough`, `defMult`, `walls`, `fear`
   worden in `battle.js` verrekend). Het volk zit in `towns.state.civ`; oude steden krijgen er een in `ensureTerritory()`.
   Bouwstijl per volk: `STYLES` en de kastelen (`TC_CIV`) in `art.js`; elite-figuren in `figures.js` (`uniqueUnit`).
+- **Clans wisselen, verraad, privéberichten** (`functions/lib/clan.js`, regels in `CLAN` in `rules.js`, migratie `0013`): een speler
+  zit altijd in precies één clan (`players.team_id`). `/clan/leave` = een eigen clan stichten (`teams.founder`, kleur via `pickColor`);
+  `/clan/invite`, `/clan/request` en `/clan/answer` (tabel `clan_invites`, vervalt na 3 dagen; vroeg de andere kant het al, dan meteen
+  rond); `switchClan()` doet de wissel: troepen bij de oude clan gaan naar huis (en omgekeerd), versterking onderweg keert om, aanvallen
+  tussen jou en je nieuwe clan keren om, `marches.team_id`/`target_team` volgen mee, een lege clan verdwijnt, berichten in de clanchat
+  (`player_id` 0, naam 'Clan'). Wachttijd `CLAN.switchMs` (`players.clan_at`), max. `clanMax()` leden, nooit in een computerclan.
+  Automatisch koppelen (`/register`, `createBot`) vult enkel teams zonder `founder` en neemt `freeSlot()`; een nieuwe speler komt bij
+  de stad van zijn clanleden. **Verraad**: `/march` laat een aanval/verkenning op een clanlid toe met `betray: true` (zet
+  `players.traitor_at`); `/state` toont zo'n leger als vijandig (`ally: false`, `betray: true`); `attackTown` laat de versterking van de
+  aanvaller zelf niet meevechten en meldt het in de clanchat; `sides()` geeft beide kanten een andere kleur. `/clan/kick` zet een
+  verrader (binnen `CLAN.traitorMs`) buiten. **Privéberichten**: tabel `dms` (`pair` = 'klein:groot'), `/dm/list`, `/dm?with=`
+  (markeert gelezen), `POST /dm`; `/state` geeft `chat.newDm`/`lastDm` en `clan.invites`/`clan.requests`. In de browser: Team-venster
+  (`teamHtml`, `clanAskHtml`, `clanListHtml`, tab Privé = `dmListHtml`/`dmConvHtml`), knoppen bij een stad op de wereldkaart.
 - `public/js/dom.js` — `setHTML()` werkt panelen bij zonder ze te vervangen. Gebruik dit (geen `innerHTML`) voor alles
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.

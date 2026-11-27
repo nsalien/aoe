@@ -17,6 +17,8 @@ vriendengroep. Live op https://rijken-van-de-vallei.pages.dev (Cloudflare Pages 
   (Vroeger: 3 weken vrede voor iedereen + 1 oorlogsweek; migratie `0004` zette het lopende seizoen om, zelfde einddatum.)
 - Spelers worden automatisch in **teams** gekoppeld (standaard 2 per team, tot 8 teams). Bondgenoten starten naast
   elkaar, kunnen elkaar troepen (versterking) en grondstoffen (karavanen via de markt) sturen en chatten.
+  Daarna kan je **van clan wisselen** (verlaten, toetreding vragen, uitgenodigd worden; max. 4 leden), **privéberichten** sturen
+  en een bondgenoot **verraden** (aanvallen terwijl hij nog in je clan zit). Zie §7 punt 61.
 - Twee weergaven: **je stad** (met je eigen gebied eromheen) en de **wereldkaart** (56×56, steden + roverskampen).
 - Een wereld wordt beheerd via `/admin.html` (sleutel `ADMIN_KEY`): starten, snelheid (`speed`), duur, teamgrootte.
 
@@ -541,6 +543,26 @@ minuut een bot aan de beurt als niemand online is.
     barbaren), Een bouwer is vrij, Je leger komt bijna aan. Nieuwe soorten staan standaard aan; wie vroeger 'aanval op je stad'
     uitzette, houdt 'meteen bij vertrek' uit (migratie `0012`). Getest met de echte routes (twee spelers in een clan, elk twee
     toestellen, één met de schakelaar uit; een speler van een andere clan krijgt niets) en het kaartje in de browser.
+
+61. **Clans wisselen, verraad en privéberichten** (gevraagd: "je bondgenoten clan kan verlaten als je wil; toetreding vragen bij
+    een andere clan of uitgenodigd worden; rechtstreeks chatten om te onderhandelen; je bondgenoot aanvallen als die nog je
+    bondgenoot is = verraden"). `functions/lib/clan.js` + migratie `0013` (`clan_invites`, `dms`, `teams.founder`,
+    `players.clan_at`/`traitor_at`).
+    - Team-venster: uitnodigingen en verzoeken bovenaan (aanvaarden/weigeren), lidkaarten met 'Bericht' (en 'Uit de clan zetten' bij
+      een verrader), chat met tabbladen Clanchat / Iedereen / **Privé** (gesprekken + nieuw gesprek met eender welke echte speler),
+      'Clans in de vallei' (toetreding vragen, uitnodigen, bericht), 'Wacht op antwoord' (intrekken) en 'Clan verlaten' (naam kiezen).
+    - Wereldkaart, stad van een andere speler: Bericht, In je clan uitnodigen, Vraag om bij zijn clan te komen. Stad van een
+      bondgenoot: Bericht en een uitklapper 'Verraad…' met Bondgenoot aanvallen / Verkennen (bevestigen).
+    - Regels (`CLAN`): hooguit 4 leden (of de teamgrootte als die groter is); na een wissel 6 uur wachten (buitengezet: niet);
+      uitnodigingen vervallen na 3 dagen; vroeg de andere kant het al, dan is de wissel meteen rond. Bij een wissel komen troepen bij
+      de oude clan naar huis (en die van hen bij jou), keert versterking onderweg om en keren aanvallen tussen jou en je nieuwe clan
+      om. Een lege clan verdwijnt. Computerclans nemen niemand op; bots wisselen nooit en lezen geen privéberichten.
+    - Verraad: het slachtoffer en de clan zien een rood leger ("Verraad door …"), krijgen een gsm-melding met "Verraad", de
+      rapporten beginnen met "Verraad:" en de clanchat meldt het. Troepen van de verrader die in de stad gestationeerd staan, vechten
+      niet mee. In een live slag krijgt de verrader een andere kleur. De clan kan de verrader 3 dagen lang buitenzetten.
+    - Nieuwe spelers worden niet automatisch in een zelf gestichte clan gezet, en komen bij de steden van hun clan terecht.
+    - Getest: `tests/clan.test.js` (echte routes, `node:sqlite`) en in Chromium op pc, gsm rechtop (390) en liggend (915).
+    - Nog niet: een gsm-melding bij een nieuw privébericht of een uitnodiging (enkel in het spel: rood getal, knop en melding).
 
 ## 8. Bekende beperkingen en ideeën
 
