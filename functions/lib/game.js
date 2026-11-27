@@ -24,7 +24,7 @@ export function worldTimes(w) {
 // einde van de vrede van een speler (aangemeld vóór de start: vanaf de start van het seizoen)
 export const peaceEnd = (w, playerCreatedAt) => Math.max(playerCreatedAt || 0, w.start_at) + w.prep_ms;
 
-const fmtLeft = (ms) => {
+export const fmtLeft = (ms) => {
   const m = Math.max(1, Math.ceil(ms / 60000));
   return m >= 60 ? `${Math.floor(m / 60)} u ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
 };
@@ -311,12 +311,15 @@ async function attackTown(db, world, m, t, override = null) {
   const { attacker, smithy, tech, score, age: attAge } = await participants(db, m);
   const lc = m.units.noble ? await lordCount(db, m.player_id) : 0;
   const def = await db.prepare(
-    'SELECT t.id, t.name, t.player_id, p.name AS pname, p.bot, tm.color FROM towns t JOIN players p ON p.id = t.player_id LEFT JOIN teams tm ON tm.id = p.team_id WHERE t.id = ?',
+    'SELECT t.id, t.name, t.player_id, p.name AS pname, p.bot, p.team_id, tm.color FROM towns t JOIN players p ON p.id = t.player_id LEFT JOIN teams tm ON tm.id = p.team_id WHERE t.id = ?',
   ).bind(m.target_id).first();
   if (!def) { await sendBack(db, m, m.units, {}, t); return; }
+  // verraad: de aanvaller zit in dezelfde clan als de verdediger
+  const betray = !!(attacker && attacker.team_id === def.team_id);
+  // troepen van de aanvaller zelf die hier gestationeerd staan, vechten niet tegen hun eigen heer
   const supRows = (await db.prepare(
-    'SELECT s.*, p.name AS pname, p.bot FROM support s JOIN players p ON p.id = s.player_id WHERE s.host_town = ?',
-  ).bind(m.target_id).all()).results;
+    'SELECT s.*, p.name AS pname, p.bot FROM support s JOIN players p ON p.id = s.player_id WHERE s.host_town = ? AND s.player_id != ?',
+  ).bind(m.target_id, m.player_id).all()).results;
   for (const r of supRows) r.unitsObj = JSON.parse(r.units);
 
   const { result: out, town: defTown } = await mutateTown(db, world, m.target_id, t, (s) => {
@@ -400,7 +403,7 @@ async function attackTown(db, world, m, t, override = null) {
     attacker: { name: attacker ? attacker.name : '?', town: attacker ? attacker.town : '?' },
     defender: { name: def.pname, town: def.name },
     attUnits: m.units, attLost: b.attLost, defUnits, defLost, loot, bounty, wallDamage, monumentDamage,
-    supporters: supRows.map((r) => r.pname), noble, freed: freed.length,
+    supporters: supRows.map((r) => r.pname), noble, freed: freed.length, betray,
   };
   data.live = !!(override && override.live);
   // replay (enkel als er een echte speler bij is: computer tegen computer bekijkt niemand)
@@ -410,15 +413,21 @@ async function attackTown(db, world, m, t, override = null) {
       v: 1, kind: 'town', title: def.name, attP: m.player_id,
       att: m.units, defGroups: groups.map((g) => ({ key: g.key, units: g.units })),
       smithyA: smithy, smithyD: look.smithyD, techA: tech || null, techD: look.techD, dir: marchDir(m), view: look.view, style: look.style,
-      side: { att: { name: data.attacker.name, color: (attacker && attacker.color) || '#2e6fb5' }, def: { name: def.pname, color: def.color || '#c0392b' } },
+      side: sides(data.attacker.name, attacker && attacker.color, def.pname, def.color),
       fate: fateOf(b, groups), res: { attWins: b.attWins, attLost: b.attLost, defLost, loot, bounty: bounty || null, wallDamage, monumentDamage },
     }, t, humans);
   }
   const conq = noble && noble.conquered;
+  const tr = betray ? 'Verraad: ' : '';
   await addReport(db, m.player_id, t, 'attack',
-    conq ? `${def.name} is nu je vazal!` : b.attWins ? `Overwinning bij ${def.name}` : `Nederlaag bij ${def.name}`, data);
+    tr + (conq ? `${def.name} is nu je vazal!` : b.attWins ? `Overwinning bij ${def.name}` : `Nederlaag bij ${def.name}`), data);
   await addReport(db, def.player_id, t, 'defense',
-    conq ? `${def.name} is nu vazal van ${data.attacker.name}` : b.attWins ? `${data.attacker.name} heeft ${def.name} geplunderd` : `${def.name} hield stand tegen ${data.attacker.name}`, data);
+    tr + (conq ? `${def.name} is nu vazal van ${data.attacker.name}` : b.attWins ? `${data.attacker.name} heeft ${def.name} geplunderd` : `${def.name} hield stand tegen ${data.attacker.name}`), data);
+  // de rest van de clan hoort het in de clanchat
+  if (betray) {
+    await db.prepare("INSERT INTO messages (channel, player_id, name, text, created_at) VALUES (?, 0, 'Clan', ?, ?)").bind(`team:${def.team_id}`,
+      `Verraad! ${data.attacker.name} viel zijn bondgenoot ${def.pname} aan en ${b.attWins ? 'plunderde' : 'verloor bij'} ${def.name}. De clan kan hem buitenzetten in het Team-venster.`, t).run();
+  }
   const notified = new Set([def.player_id, m.player_id]);
   for (const r of supRows) {
     if (notified.has(r.player_id)) continue;
@@ -643,7 +652,7 @@ async function startBattle(db, world, b, now) {
     ensureTerritory(town.state, town.id);
     advance(town.state, gameTime(world, now), world.speed);
     const s = town.state;
-    const sup = (await db.prepare('SELECT id, units FROM support WHERE host_town = ?').bind(b.target_id).all()).results;
+    const sup = (await db.prepare('SELECT id, units FROM support WHERE host_town = ? AND player_id != ?').bind(b.target_id, m.player_id).all()).results;
     const defGroups = [{ key: 'home', units: { ...s.units } }, ...sup.map((r) => ({ key: r.id, units: JSON.parse(r.units) }))];
     setup = {
       kind: 'town', att: m.units, defGroups, smithyA, smithyD: bLevel(s, 'smithy'), town: s, townId: town.id, techA, techD: s.tech || null,
@@ -666,14 +675,27 @@ async function startBattle(db, world, b, now) {
   // namen en kleuren voor het slagveld in de browser
   const side = (pid) => (pid ? db.prepare('SELECT p.name, tm.color FROM players p LEFT JOIN teams tm ON tm.id = p.team_id WHERE p.id = ?').bind(pid).first() : null);
   const pa = await side(b.att_player); const pd = await side(b.def_player);
+  const sd = sides(pa ? pa.name : '?', pa && pa.color, pd ? pd.name : 'Rovers', pd ? pd.color || '#c0392b' : '#7a1b12');
   state.meta = {
     attInit: m.units, defInit: Object.fromEntries(setup.defGroups.map((g) => [g.key, g.units])), style: setup.style || null, level: setup.level || 0, view: setup.view,
-    att: { name: pa ? pa.name : '?', color: (pa && pa.color) || '#2e6fb5' },
-    def: { name: pd ? pd.name : 'Rovers', color: pd ? pd.color || '#c0392b' : '#7a1b12' },
+    att: sd.att, def: sd.def,
   };
   b.status = 'live';
   b.state = state;
   await saveBattle(db, b, now);
+}
+
+// een kleur die duidelijk verschilt van c (de computer in een oefenslag, of een verrader uit dezelfde clan)
+const rgb = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); const v = m ? parseInt(m[1], 16) : 0; return [v >> 16, (v >> 8) & 255, v & 255]; };
+export function contrastColor(c) {
+  const me3 = rgb(c);
+  return ['#2e6fb5', '#c0392b', '#d4a017', '#7d3c98', '#1e8449'].map((x) => ({ x, d: rgb(x).reduce((a, v, i) => a + (v - me3[i]) ** 2, 0) })).sort((a, b) => b.d - a.d)[0].x;
+}
+
+// namen en kleuren van beide kanten op het slagveld; zelfde clan (verraad): de aanvaller krijgt een andere kleur
+function sides(attName, attColor, defName, defColor) {
+  const a = attColor || '#2e6fb5'; const d = defColor || '#c0392b';
+  return { att: { name: attName, color: a.toLowerCase() === d.toLowerCase() ? contrastColor(d) : a }, def: { name: defName, color: d } };
 }
 
 // ---------- oefenslag: meteen een slag van 30 tegen 30 tegen de computer, zonder gevolgen ----------
@@ -726,10 +748,7 @@ export async function startPractice(db, world, player, role, now) {
     smithyA: role === 'att' ? mySmithy : 0, smithyD: role === 'def' ? mySmithy : 0,
   });
   // de computer krijgt een kleur die duidelijk verschilt van de jouwe
-  const rgb = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); const v = m ? parseInt(m[1], 16) : 0; return [v >> 16, (v >> 8) & 255, v & 255]; };
-  const me3 = rgb(myColor);
-  const foeColor = ['#2e6fb5', '#c0392b', '#d4a017', '#7d3c98', '#1e8449'].map((c) => ({ c, d: rgb(c).reduce((a, v, i) => a + (v - me3[i]) ** 2, 0) })).sort((a, b) => b.d - a.d)[0].c;
-  const foe = { name: 'Computer', color: foeColor }; const mine = { name: player.name, color: myColor };
+  const foe = { name: 'Computer', color: contrastColor(myColor) }; const mine = { name: player.name, color: myColor };
   state.meta = {
     practice: true, attInit: PRACTICE.att, defInit: { home: PRACTICE.def }, style: { civ: town.civ, age: bLevel(town, 'tc') }, level: 0,
     view: {

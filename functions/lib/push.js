@@ -164,7 +164,8 @@ export async function notifyDue(db, now, max = 6) {
 // versterking sturen). Wordt opgeroepen na /march en na een aanval van een bot.
 export async function notifyAttack(db, marchId, now) {
   const m = await db.prepare(
-    `SELECT m.id, m.kind, m.arrive_at, t.name AS town, t.player_id AS def_player, d.name AS def_name, d.team_id AS def_team, p.name AS att_name
+    `SELECT m.id, m.kind, m.arrive_at, m.player_id AS att_player, t.name AS town, t.player_id AS def_player, d.name AS def_name, d.team_id AS def_team,
+            p.name AS att_name, p.team_id AS att_team
      FROM marches m JOIN towns t ON t.id = m.target_id AND m.target_kind = 'town' JOIN players p ON p.id = m.player_id
      JOIN players d ON d.id = t.player_id
      WHERE m.id = ?`,
@@ -172,21 +173,24 @@ export async function notifyAttack(db, marchId, now) {
   if (!m || m.kind !== 'attack' || m.arrive_at <= now) return 0;
   const keys = await vapidKeys(db);
   const ttl = Math.max(60, (m.arrive_at - now) / 1000);
+  // verraad: de aanvaller zit in dezelfde clan als de verdediger
+  const betray = m.def_team != null && m.att_team === m.def_team;
   let sent = await notifyPlayer(db, keys, m.def_player, {
     tag: `march-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at,
-    title: `Aanval op ${m.town}!`,
-    body: `${m.att_name} stuurt een leger naar je stad. Aankomst om {clock} (over {left}).`,
+    title: betray ? `Verraad! ${m.att_name} valt ${m.town} aan` : `Aanval op ${m.town}!`,
+    body: betray ? `Je bondgenoot ${m.att_name} stuurt een leger naar je stad. Aankomst om {clock} (over {left}).`
+      : `${m.att_name} stuurt een leger naar je stad. Aankomst om {clock} (over {left}).`,
   }, ttl, 'now');
   if (m.def_team == null) return sent;
-  // clanleden (echte spelers; enkel wie die melding aan heeft, krijgt ze)
+  // clanleden (echte spelers; enkel wie die melding aan heeft, krijgt ze; de verrader zelf niet)
   const mates = (await db.prepare(
     `SELECT DISTINCT p.id FROM players p JOIN push_subs s ON s.player_id = p.id
-     WHERE p.team_id = ? AND p.id != ? AND p.bot = 0 AND s.n_ally = 1 LIMIT 8`,
-  ).bind(m.def_team, m.def_player).all()).results;
+     WHERE p.team_id = ? AND p.id != ? AND p.id != ? AND p.bot = 0 AND s.n_ally = 1 LIMIT 8`,
+  ).bind(m.def_team, m.def_player, m.att_player).all()).results;
   for (const r of mates) {
     sent += await notifyPlayer(db, keys, r.id, {
       tag: `ally-${m.id}`, url: `/?march=${m.id}`, at: m.arrive_at,
-      title: `Je clanlid ${m.def_name} wordt aangevallen!`,
+      title: betray ? `Verraad: ${m.att_name} valt clanlid ${m.def_name} aan!` : `Je clanlid ${m.def_name} wordt aangevallen!`,
       body: `${m.att_name} stuurt een leger naar ${m.town}. Aankomst om {clock} (over {left}). Stuur versterking!`,
     }, ttl, 'ally');
   }

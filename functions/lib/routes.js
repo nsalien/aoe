@@ -3,6 +3,7 @@ import { vapidKeys, validPushEndpoint, notifyAll, notifyAttack, notifyPlayer } f
 import { botTick, ensureBots, BOT_MAX } from './bots.js';
 import { relocateTeam } from './relocate.js';
 import { relation, payRansom, vassalShare } from './vassal.js';
+import { switchClan, inviteToClan, requestClan, answerInvite, kickTraitor, clanInfo, freeSlot } from './clan.js';
 import {
   hashPassword, newSalt, safeEqual, createSession, sessionCookie, clearCookie, getSessionPlayer,
   destroySession, validateName, validatePassword,
@@ -20,7 +21,7 @@ import {
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import {
-  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA, JOBS,
+  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA, JOBS, CLAN,
 } from '../../public/shared/rules.js';
 
 const routes = [];
@@ -125,18 +126,18 @@ route('POST', '/register', { process: false }, async ({ request, db, world, now 
 
   // automatisch koppelen: vul eerst een team dat al spelers heeft, maak anders een nieuw team
   const all = (await db.prepare(
-    'SELECT t.id, t.slot, COUNT(p.id) AS c, COALESCE(SUM(p.bot), 0) AS b FROM teams t LEFT JOIN players p ON p.team_id = t.id GROUP BY t.id ORDER BY t.slot',
+    'SELECT t.id, t.slot, t.founder, COUNT(p.id) AS c, COALESCE(SUM(p.bot), 0) AS b FROM teams t LEFT JOIN players p ON p.team_id = t.id GROUP BY t.id ORDER BY t.slot',
   ).all()).results;
-  // clans van computerspelers zijn enkel voor bots
-  const teams = all.filter((t) => !t.b);
+  // clans van computerspelers zijn enkel voor bots; een clan die een speler zelf stichtte, vult het spel niet aan
+  const teams = all.filter((t) => !t.b && t.founder == null);
   let team = null;
   const open = teams.filter((t) => t.c < world.team_size);
+  const slot = freeSlot(all);
   if (open.length) {
     const most = Math.max(...open.map((t) => t.c));
     const cand = open.filter((t) => t.c === most);
     team = cand[Math.floor(Math.random() * cand.length)];
-  } else if (all.length < MAX_TEAMS) {
-    const slot = all.length;
+  } else if (slot >= 0) {
     const ins = await db.prepare('INSERT INTO teams (slot, name, color) VALUES (?, ?, ?)')
       .bind(slot, TEAM_NAMES[slot], TEAM_COLORS[slot]).run();
     team = { id: ins.meta.last_row_id, slot, c: 0 };
@@ -146,9 +147,10 @@ route('POST', '/register', { process: false }, async ({ request, db, world, now 
     team = teams.find((t) => t.c === least);
   }
 
-  // plaats de stad in het gebied van het team
+  // plaats de stad in het gebied van het team (heeft het al leden, dan bij hen: na wissels liggen die niet altijd daar)
   const terrain = generateTerrain(world.seed, world.size);
-  const region = teamRegion(world.seed, world.size, team.slot);
+  const mid = team.c ? await db.prepare('SELECT AVG(t.x) AS x, AVG(t.y) AS y FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id = ?').bind(team.id).first() : null;
+  const region = mid && mid.x != null ? { x: mid.x, y: mid.y } : teamRegion(world.seed, world.size, team.slot);
   const taken = [
     ...(await db.prepare('SELECT x, y FROM towns').all()).results,
     ...(await db.prepare('SELECT x, y FROM camps').all()).results,
@@ -208,10 +210,13 @@ route('GET', '/state', { auth: true }, async (ctx) => {
      WHERE m.team_id = ? OR m.target_team = ?`,
   ).bind(player.team_id, player.team_id).all()).results.map((m) => {
     const own = m.team_id === player.team_id;
+    // een aanval of verkenning op een stad van onze clan is vijandig, ook van een clanlid (verraad)
+    const hostile = (m.kind === 'attack' || m.kind === 'scout') && m.target_kind === 'town' && m.target_team === player.team_id;
     // versterking, karavanen en schatting naar ons (bv. van een vazal uit een andere clan) zijn vriendelijk
-    const friendly = own || (['support', 'trade', 'tribute'].includes(m.kind) && m.target_team === player.team_id);
+    const friendly = m.player_id === player.id || (!hostile && (own || (['support', 'trade', 'tribute'].includes(m.kind) && m.target_team === player.team_id)));
     return {
       id: m.id, kind: m.kind, status: m.status, own: m.player_id === player.id, ally: friendly,
+      betray: (m.kind === 'attack' || m.kind === 'scout') && m.target_kind === 'town' && m.team_id === m.target_team,
       player: m.player_name, from: { id: m.from_town, name: m.from_name, x: m.from_x, y: m.from_y },
       to: { kind: m.target_kind, id: m.target_id, name: m.to_name, x: m.to_x, y: m.to_y },
       targetTeam: m.target_team, teamId: m.team_id,
@@ -238,8 +243,13 @@ route('GET', '/state', { auth: true }, async (ctx) => {
             (SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE channel = 'world' AND id > ? AND player_id != ? LIMIT 9)) AS nw,
             (SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE channel = ? AND id > ? AND player_id != ? LIMIT 9)) AS nt,
             (SELECT json_object('name', name, 'text', substr(text, 1, 90), 'me', player_id = ?) FROM messages WHERE channel = 'world' ORDER BY id DESC LIMIT 1) AS pw,
-            (SELECT json_object('name', name, 'text', substr(text, 1, 90), 'me', player_id = ?) FROM messages WHERE channel = ? ORDER BY id DESC LIMIT 1) AS pt`,
-  ).bind(player.id, teamCh, seenW, player.id, teamCh, seenT, player.id, player.id, player.id, teamCh).first();
+            (SELECT json_object('name', name, 'text', substr(text, 1, 90), 'me', player_id = ?) FROM messages WHERE channel = ? ORDER BY id DESC LIMIT 1) AS pt,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM dms WHERE to_id = ? AND seen = 0 LIMIT 9)) AS nd,
+            (SELECT json_object('id', id, 'from', from_id, 'name', name, 'text', substr(text, 1, 90)) FROM dms WHERE to_id = ? AND seen = 0 ORDER BY id DESC LIMIT 1) AS pd,
+            (SELECT COUNT(*) FROM clan_invites WHERE player_id = ? AND kind = 'invite' AND created_at > ?) AS ci,
+            (SELECT COUNT(*) FROM clan_invites WHERE team_id = ? AND kind = 'request' AND created_at > ?) AS cr`,
+  ).bind(player.id, teamCh, seenW, player.id, teamCh, seenT, player.id, player.id, player.id, teamCh,
+    player.id, player.id, player.id, now - CLAN.inviteMs, player.team_id, now - CLAN.inviteMs).first();
   const unseen = { c: counts.unseen };
   const lastWorld = { last: counts.lw };
   const lastTeam = { last: counts.lt };
@@ -260,7 +270,11 @@ route('GET', '/state', { auth: true }, async (ctx) => {
     chat: {
       world: lastWorld.last || 0, team: lastTeam.last || 0, newWorld: counts.nw || 0, newTeam: counts.nt || 0,
       lastWorld: preview(counts.pw), lastTeam: preview(counts.pt),
+      // privéberichten: ongelezen (hooguit 9 geteld) en het laatste ongelezen bericht
+      newDm: counts.nd || 0, lastDm: preview(counts.pd),
     },
+    // uitnodigingen voor mij en verzoeken om bij mijn clan te komen (antwoord in het Team-venster)
+    clan: { invites: counts.ci || 0, requests: counts.cr || 0 },
   });
 });
 
@@ -292,7 +306,7 @@ route('GET', '/map', { auth: true }, async ({ db, world, now }) => {
 route('GET', '/team', { auth: true }, async ({ db, world, player, now }) => {
   const t = gameTime(world, now);
   const rows = (await db.prepare(
-    'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.last_seen, p.kill_pts FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id = ?',
+    'SELECT t.id, t.name, t.x, t.y, t.state, p.id AS pid, p.name AS pname, p.last_seen, p.kill_pts, p.traitor_at FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id = ?',
   ).bind(player.team_id).all()).results;
   const members = rows.map((r) => {
     const s = JSON.parse(r.state);
@@ -303,10 +317,49 @@ route('GET', '/team', { auth: true }, async ({ db, world, player, now }) => {
     return {
       townId: r.id, town: r.name, x: r.x, y: r.y, playerId: r.pid, player: r.pname, me: r.pid === player.id,
       lastSeen: r.last_seen, killPts: r.kill_pts, res, units: s.units, villagers: totalVillagers(s),
+      // viel de laatste dagen een clanlid aan: de clan kan hem buitenzetten
+      traitor: !!(r.traitor_at && now - r.traitor_at < CLAN.traitorMs),
       ...publicSummary(s),
     };
   });
-  return json({ members });
+  return json({ members, clan: await clanInfo(db, world, player, now) });
+});
+
+// ---------- clans: verlaten, uitnodigen, toetreding vragen, antwoorden, een verrader buitenzetten ----------
+
+function clanOpen(world, now) {
+  if (phaseOf(world, now) === 'ended') throw new GameError('Het seizoen is afgelopen.');
+}
+
+route('POST', '/clan/leave', { auth: true, process: false }, async ({ db, world, player, request, now }) => {
+  clanOpen(world, now);
+  const body = await readJson(request);
+  const team = await switchClan(db, world, player, null, now, { self: true, name: body.name });
+  return json({ ok: true, team, msg: `Je hebt ${team.left} verlaten. Je zit nu alleen in ${team.name}.` });
+});
+
+route('POST', '/clan/invite', { auth: true, process: false }, async ({ db, world, player, request, now }) => {
+  clanOpen(world, now);
+  const body = await readJson(request);
+  return json({ ok: true, ...(await inviteToClan(db, world, player, int(body.player), now)) });
+});
+
+route('POST', '/clan/request', { auth: true, process: false }, async ({ db, world, player, request, now }) => {
+  clanOpen(world, now);
+  const body = await readJson(request);
+  return json({ ok: true, ...(await requestClan(db, world, player, int(body.team), now)) });
+});
+
+route('POST', '/clan/answer', { auth: true, process: false }, async ({ db, world, player, request, now }) => {
+  clanOpen(world, now);
+  const body = await readJson(request);
+  return json({ ok: true, ...(await answerInvite(db, world, player, int(body.id), body.accept === true, now)) });
+});
+
+route('POST', '/clan/kick', { auth: true, process: false }, async ({ db, world, player, request, now }) => {
+  clanOpen(world, now);
+  const body = await readJson(request);
+  return json({ ok: true, ...(await kickTraitor(db, world, player, int(body.player), now)) });
 });
 
 route('GET', '/leaderboard', { auth: true }, async ({ db, world, now }) => {
@@ -502,9 +555,13 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
   if (tkind === 'town' && target.id === home.id) throw new GameError('Dat is je eigen stad.');
   // heer en vazal vallen elkaar niet aan, maar mogen elkaar wel helpen
   const rel = tkind === 'town' ? await relation(db, player.id, target.player_id) : null;
-  const ally = tkind === 'town' && (targetTeam === player.team_id || !!rel);
-  if ((kind === 'attack' || kind === 'scout') && rel) throw new GameError(rel === 'lord' ? 'Dit is je vazal: die val je niet aan.' : 'Je kan je heer niet aanvallen. Koop je vrij of laat een clanlid je bevrijden.');
-  if ((kind === 'attack' || kind === 'scout') && ally) throw new GameError('Je kan geen bondgenoten aanvallen.');
+  const sameClan = tkind === 'town' && targetTeam === player.team_id;
+  const ally = sameClan || !!rel;
+  const hostile = kind === 'attack' || kind === 'scout';
+  if (hostile && rel) throw new GameError(rel === 'lord' ? 'Dit is je vazal: die val je niet aan.' : 'Je kan je heer niet aanvallen. Koop je vrij of laat een clanlid je bevrijden.');
+  // een clanlid aanvallen of verkennen mag: dat is verraad (de browser vraagt eerst of je het zeker weet)
+  const betray = hostile && sameClan;
+  if (betray && body.betray !== true) throw new GameError('Dit is je bondgenoot. Bevestig dat je hem wil verraden.');
   if ((kind === 'support' || kind === 'trade') && !ally) throw new GameError('Dat kan enkel bij bondgenoten.');
 
   const units = {};
@@ -547,9 +604,11 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
        units, res, depart_at, arrive_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'out')`,
   ).bind(player.id, player.team_id, kind, home.id, home.x, home.y, tkind, target.id, targetTeam, target.x, target.y,
     JSON.stringify(units), JSON.stringify(res), now, now + dur).run();
+  // verraad: de clan kan je de komende dagen buitenzetten
+  if (betray && kind === 'attack') await db.prepare('UPDATE players SET traitor_at = ? WHERE id = ?').bind(now, player.id).run();
   // de verdediger krijgt meteen een melding op zijn gsm (als hij die aan heeft)
   if (kind === 'attack' && tkind === 'town' && ins.meta && ins.meta.last_row_id) ctx.later((d) => notifyAttack(d, ins.meta.last_row_id, now));
-  return json({ ok: true, arriveAt: now + dur });
+  return json({ ok: true, arriveAt: now + dur, betray });
 });
 
 // troepen bij een bondgenoot terugroepen (door de eigenaar) of terugsturen (door de gastheer)
@@ -719,6 +778,63 @@ route('POST', '/chat', { auth: true, process: false }, async ({ db, player, requ
   return json({ ok: true });
 });
 
+// ---------- privéberichten (om te onderhandelen, ook met spelers van een andere clan) ----------
+
+const pairOf = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+
+// gesprekken (laatste bericht per speler, ongelezen) en alle echte spelers om een nieuw gesprek mee te beginnen
+route('GET', '/dm/list', { auth: true, process: false }, async ({ db, player }) => {
+  const last = (await db.prepare(
+    `SELECT d.id, d.from_id, d.to_id, substr(d.text, 1, 90) AS text, d.created_at FROM dms d
+     JOIN (SELECT MAX(id) AS mid FROM dms WHERE from_id = ? OR to_id = ? GROUP BY pair) x ON x.mid = d.id ORDER BY d.id DESC LIMIT 40`,
+  ).bind(player.id, player.id).all()).results;
+  const unread = new Map((await db.prepare('SELECT from_id, COUNT(*) AS c FROM dms WHERE to_id = ? AND seen = 0 GROUP BY from_id').bind(player.id).all()).results.map((r) => [r.from_id, r.c]));
+  const players = (await db.prepare(
+    'SELECT p.id, p.name, p.team_id, p.last_seen, t.name AS team, t.color FROM players p LEFT JOIN teams t ON t.id = p.team_id WHERE p.bot = 0 AND p.id != ? ORDER BY p.name COLLATE NOCASE',
+  ).bind(player.id).all()).results.map((r) => ({ id: r.id, name: r.name, teamId: r.team_id, team: r.team, color: r.color, ally: r.team_id === player.team_id }));
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const convs = last.map((m) => {
+    const other = m.from_id === player.id ? m.to_id : m.from_id;
+    const p = byId.get(other);
+    return { with: other, name: p ? p.name : '?', team: p ? p.team : null, color: p ? p.color : null, ally: !!(p && p.ally), text: m.text, me: m.from_id === player.id, at: m.created_at, unread: unread.get(other) || 0 };
+  });
+  return json({ convs, players });
+});
+
+// één gesprek; wat aan mij gericht was, is nu gelezen
+route('GET', '/dm', { auth: true, process: false }, async ({ db, player, url }) => {
+  const other = int(url.searchParams.get('with'));
+  const p = await db.prepare('SELECT p.id, p.name, p.team_id, t.name AS team, t.color FROM players p LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?').bind(other).first();
+  if (!p || p.id === player.id) throw new GameError('Speler niet gevonden.', 404);
+  const pair = pairOf(player.id, p.id);
+  const after = Math.max(0, int(url.searchParams.get('after')));
+  const rows = (await db.prepare('SELECT id, from_id, name, text, created_at FROM dms WHERE pair = ? AND id > ? ORDER BY id DESC LIMIT 60').bind(pair, after).all()).results.reverse();
+  const upd = await db.prepare('UPDATE dms SET seen = 1 WHERE pair = ? AND to_id = ? AND seen = 0').bind(pair, player.id).run();
+  const left = upd.meta.changes ? (await db.prepare('SELECT COUNT(*) AS c FROM (SELECT 1 FROM dms WHERE to_id = ? AND seen = 0 LIMIT 9)').bind(player.id).first()).c : null;
+  return json({
+    with: { id: p.id, name: p.name, team: p.team, color: p.color, ally: p.team_id === player.team_id },
+    messages: rows.map((m) => ({ id: m.id, player_id: m.from_id, name: m.name, text: m.text, created_at: m.created_at, me: m.from_id === player.id })),
+    unreadLeft: left,
+  });
+});
+
+route('POST', '/dm', { auth: true, process: false }, async ({ db, player, request, now }) => {
+  const body = await readJson(request);
+  const text = String(body.text || '').trim().slice(0, 300);
+  if (!text) throw new GameError('Leeg bericht.');
+  const to = await db.prepare('SELECT id, bot FROM players WHERE id = ?').bind(int(body.to)).first();
+  if (!to || to.id === player.id) throw new GameError('Speler niet gevonden.', 404);
+  if (to.bot) throw new GameError('Computerspelers lezen geen berichten.');
+  const pair = pairOf(player.id, to.id);
+  const ins = await db.prepare('INSERT INTO dms (pair, from_id, to_id, name, text, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(pair, player.id, to.id, player.name, text, now).run();
+  // af en toe oude berichten opruimen: per gesprek de laatste 200
+  if (ins.meta.last_row_id % 25 === 0) {
+    await db.prepare('DELETE FROM dms WHERE pair = ? AND id <= (SELECT id FROM dms WHERE pair = ? ORDER BY id DESC LIMIT 1 OFFSET 200)').bind(pair, pair).run();
+  }
+  return json({ ok: true });
+});
+
 // ---------- beheer ----------
 
 function readTimes(body, w) {
@@ -751,7 +867,7 @@ route('POST', '/admin/reset', { admin: true }, async ({ db, request, now }) => {
   const size = WORLD_SIZE;
   const terrain = generateTerrain(seed, size);
   const camps = generateCamps(seed, size, terrain, CAMP_EXTRA);
-  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs', 'vassals', 'replays']
+  const stmts = ['world', 'teams', 'players', 'sessions', 'towns', 'camps', 'marches', 'support', 'reports', 'messages', 'battles', 'push_subs', 'vassals', 'replays', 'clan_invites', 'dms']
     .map((tb) => db.prepare(`DELETE FROM ${tb}`));
   stmts.push(db.prepare("DELETE FROM config WHERE k LIKE 'clan:%' OR k LIKE 'prey:%'")); // notities van de bots
   stmts.push(db.prepare('INSERT INTO world (id, seed, size, start_at, prep_ms, war_ms, speed, team_size, join_code, created_at, bots, bot_level) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
