@@ -1,5 +1,5 @@
 // Gevechtsberekening (gedeeld zodat de browser een simulator kan tonen).
-import { UNITS, COMBAT, RES } from './rules.js';
+import { UNITS, COMBAT, RES, TECHS, carryMult } from './rules.js';
 
 const TYPES = ['inf', 'cav', 'rng'];
 
@@ -19,13 +19,29 @@ export function composition(units) {
 // bonus van een eenheid tegen een tegenstander met deze samenstelling (0 = geen)
 const bonusVs = (u, comp) => (u.bonus && comp ? Object.keys(u.bonus).reduce((a, t) => a + u.bonus[t] * (comp[t] || 0), 0) : 0);
 
-export function attackPower(units, smithy = 0, foe = null) {
+// wat het onderzoek van de Academie betekent in een automatisch uitgerekende slag
+export function techMods(tech) {
+  const m = { atk: { inf: 0, cav: 0, rng: 0 }, def: { inf: {}, cav: {}, rng: {} }, towers: 0, wall: 0, rams: 1 };
+  for (const id of Object.keys(tech || {})) {
+    const a = TECHS[id] && TECHS[id].auto;
+    if (!a) continue;
+    for (const t of Object.keys(a.atk || {})) m.atk[t] += a.atk[t];
+    for (const t of Object.keys(a.def || {})) for (const v of Object.keys(a.def[t])) m.def[t][v] = (m.def[t][v] || 0) + a.def[t][v];
+    if (a.towers) m.towers += a.towers;
+    if (a.wall) m.wall += a.wall;
+    if (a.rams) m.rams *= a.rams;
+  }
+  return m;
+}
+
+export function attackPower(units, smithy = 0, foe = null, tech = null) {
   const byType = { inf: 0, cav: 0, rng: 0 };
+  const tm = tech ? techMods(tech) : null;
   let fear = 0;
   for (const k of Object.keys(units || {})) {
     const u = UNITS[k];
     if (!u || !u.atk) continue;
-    const a = u.atk * (units[k] || 0) * (1 + bonusVs(u, foe));
+    const a = u.atk * (units[k] || 0) * (1 + bonusVs(u, foe)) * (tm ? 1 + tm.atk[u.type] : 1);
     byType[u.type] += a;
     if (u.fear) fear += u.fear * a;
   }
@@ -36,13 +52,14 @@ export function attackPower(units, smithy = 0, foe = null) {
 }
 
 // verdediging; foe = samenstelling van de aanvaller (voor bonussen tegen dat soort vijand)
-export function unitDefense(units, shares, foe = null) {
+export function unitDefense(units, shares, foe = null, tm = null) {
   let d = 0;
   for (const k of Object.keys(units || {})) {
     const u = UNITS[k];
     if (!u || !u.def) continue;
     let per = 0;
-    for (const t of TYPES) per += shares[t] * u.def[t];
+    const tb = tm ? tm.def[u.type] || {} : {};
+    for (const t of TYPES) per += shares[t] * u.def[t] * (1 + (tb[t] || 0));
     per *= (u.defMult || 1) * (1 + bonusVs(u, foe) * 0.5);
     d += per * (units[k] || 0);
   }
@@ -71,19 +88,23 @@ export function subtractUnits(a, b) {
 export const countUnits = (u) => Object.values(u || {}).reduce((a, b) => a + (b || 0), 0);
 
 // groups: [{ key, units }] - de eigen troepen van de verdediger en eventuele ondersteuning
-export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, wall = 0, towerDef = 0, baseDef = 0 }) {
+// attTech / defTech: het onderzoek van aanvaller en verdediger (Academie)
+export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, wall = 0, towerDef = 0, baseDef = 0, attTech = null, defTech = null }) {
   const defAll = {};
   for (const g of groups) for (const k of Object.keys(g.units || {})) defAll[k] = (defAll[k] || 0) + (g.units[k] || 0);
-  const att = attackPower(attUnits, attSmithy, composition(defAll));
+  const ta = techMods(attTech); const td = techMods(defTech);
+  const att = attackPower(attUnits, attSmithy, composition(defAll), attTech);
   const A = att.total;
   const shares = { inf: 1, cav: 0, rng: 0 };
   if (A > 0) for (const t of TYPES) shares[t] = att.byType[t] / (att.byType.inf + att.byType.cav + att.byType.rng);
-  const rams = wallBreakers(attUnits);
+  const rams = wallBreakers(attUnits) * td.rams;
+  if (wall > 0 && td.wall) wall += td.wall; // kokende pek
+  const tDef = towerDef * Math.max(0, 1 + td.towers + Math.min(0, ta.towers)); // torenkruisbogen / vuurpijlen
   const wallEff = Math.max(0, wall - rams / COMBAT.ramsPerWallLevel);
   const attComp = composition(attUnits);
   let du = 0;
-  for (const g of groups) du += unitDefense(g.units, shares, attComp);
-  const D = (du * (1 + COMBAT.smithyBonus * defSmithy) + baseDef + towerDef + COMBAT.wallFlat * wallEff)
+  for (const g of groups) du += unitDefense(g.units, shares, attComp, td);
+  const D = (du * (1 + COMBAT.smithyBonus * defSmithy) + baseDef + tDef + COMBAT.wallFlat * wallEff)
     * (1 + COMBAT.wallBonus * wallEff) * (1 - Math.min(0.3, att.fear));
 
   const attWins = A > D;
@@ -102,7 +123,7 @@ export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, 
   let wallDamage = 0;
   let monumentDamage = 0;
   if (attWins) {
-    const pts = Math.floor(wallBreakers(attLeft) / COMBAT.ramsPerWallLevel);
+    const pts = Math.floor((wallBreakers(attLeft) * td.rams) / COMBAT.ramsPerWallLevel);
     wallDamage = Math.min(pts, COMBAT.maxWallDamage, Math.floor(wall));
     if (pts - wallDamage >= 1 && wall - wallDamage <= 0) monumentDamage = 1;
   }
@@ -114,6 +135,15 @@ export function resolveBattle({ attUnits, attSmithy = 0, groups, defSmithy = 0, 
   };
 }
 
+// De vaste uitslag van een automatisch uitgerekende slag, voor de replay (setFate in fieldbattle.js): wie wint en hoeveel er
+// per soort overleven, met dezelfde sleutels als battleOutcome (aanvaller '0||soort', verdediger '1|groep|soort').
+export function fateOf(b, groups) {
+  const left = {};
+  for (const [k, n] of Object.entries(b.attLeft || {})) left[`0||${k}`] = n;
+  groups.forEach((g, i) => { for (const [k, n] of Object.entries((b.groupsLeft[i] && b.groupsLeft[i].units) || {})) left[`1|${g.key}|${k}`] = n; });
+  return { win: b.attWins ? 0 : 1, left };
+}
+
 export function resolveScouting(attScouts, defScouts) {
   if (attScouts > defScouts) {
     const loss = defScouts > 0 ? Math.pow(defScouts / attScouts, COMBAT.lossExponent) : 0;
@@ -122,10 +152,11 @@ export function resolveScouting(attScouts, defScouts) {
   return { success: false, left: 0 };
 }
 
-export function carryCapacity(units) {
+// age = tijdperk van de aanvaller: hoe later, hoe meer buit je troepen meedragen (WAR.carry); zonder age het ruwe getal
+export function carryCapacity(units, age = 0) {
   let c = 0;
   for (const k of Object.keys(units || {})) if (UNITS[k]) c += (UNITS[k].carry || 0) * (units[k] || 0);
-  return c;
+  return age ? Math.round(c * carryMult(age)) : c;
 }
 
 // Verdeel de draagcapaciteit zo eerlijk mogelijk over de beschikbare grondstoffen.
@@ -149,8 +180,13 @@ export function computeLoot(available, capacity) {
   return take;
 }
 
-export function slowestSpeed(units) {
+// tech: onderzoek van de eigenaar (hoefijzers maken ruiterij 10% sneller)
+export function slowestSpeed(units, tech = null) {
   let s = Infinity;
-  for (const k of Object.keys(units || {})) if ((units[k] || 0) > 0 && UNITS[k]) s = Math.min(s, UNITS[k].speed);
+  const hs = !!(tech && tech.horseshoes);
+  for (const k of Object.keys(units || {})) {
+    if ((units[k] || 0) <= 0 || !UNITS[k]) continue;
+    s = Math.min(s, UNITS[k].speed * (hs && UNITS[k].type === 'cav' && !UNITS[k].noble ? 1.1 : 1));
+  }
   return s === Infinity ? 0 : s;
 }

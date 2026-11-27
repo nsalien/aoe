@@ -21,48 +21,51 @@ export const AGES = [
   { name: 'Tijdperk van de Vuursteen', short: 'Vuursteen' },
   { name: 'Tijdperk van het Brons', short: 'Brons' },
   { name: 'Tijdperk van het IJzer', short: 'IJzer' },
+  { name: 'Tijdperk van de Gilden', short: 'Gilden' },
   { name: 'Tijdperk van de Kroon', short: 'Kroon' },
 ];
+export const MAX_AGE = AGES.length - 1;
 
 // Kosten en bouwtijd (seconden bij snelheid 1) om het stadscentrum naar dat tijdperk te brengen.
 export const AGE_UP = {
   2: { cost: { food: 1200, wood: 1000, gold: 300 }, time: 2 * 3600 },
   3: { cost: { food: 6000, wood: 5000, stone: 2500, gold: 3000 }, time: 12 * 3600 },
   4: { cost: { food: 18000, wood: 15000, stone: 10000, gold: 12000 }, time: 36 * 3600 },
+  5: { cost: { food: 40000, wood: 32000, stone: 24000, gold: 30000 }, time: 48 * 3600 },
 };
 
 // Gebouwen. cost/time gelden voor niveau 1; hogere niveaus schalen met growth/timeGrowth.
 export const BUILDINGS = {
   tc: {
-    name: 'Stadscentrum', size: 2, max: 1, maxLevel: 4, age: 1, placeable: false,
+    name: 'Stadscentrum', size: 2, max: 1, maxLevel: 5, age: 1, placeable: false,
     desc: 'Het hart van je rijk. Train dorpelingen en breng je volk naar een nieuw tijdperk.',
   },
   house: {
-    name: 'Huis', size: 1, max: 14, maxLevel: 3, age: 1, cost: { wood: 50 }, time: 180,
+    name: 'Huis', size: 1, max: 14, maxLevel: 5, age: 1, cost: { wood: 50 }, time: 180,
     pop: 5, desc: '+5 bevolking per niveau.',
   },
   farm: {
-    name: 'Boerderij', size: 1, max: 10, maxLevel: 3, age: 1, cost: { wood: 75 }, time: 300,
+    name: 'Boerderij', size: 1, max: 10, maxLevel: 5, age: 1, cost: { wood: 75 }, time: 300,
     slots: { food: 4 }, desc: 'Werk voor 4 boeren per niveau.',
   },
   lumber: {
-    name: 'Houthakkerskamp', size: 1, max: 4, maxLevel: 3, age: 1, cost: { wood: 100 }, time: 300,
+    name: 'Houthakkerskamp', size: 1, max: 4, maxLevel: 5, age: 1, cost: { wood: 100 }, time: 300,
     slots: { wood: 5 }, desc: 'Werk voor 5 houthakkers per niveau.',
   },
   quarry: {
-    name: 'Steengroeve', size: 1, max: 4, maxLevel: 3, age: 1, cost: { wood: 100, food: 50 }, time: 360,
+    name: 'Steengroeve', size: 1, max: 4, maxLevel: 5, age: 1, cost: { wood: 100, food: 50 }, time: 360,
     slots: { stone: 4 }, desc: 'Werk voor 4 steenhouwers per niveau.',
   },
   goldmine: {
-    name: 'Goudmijn', size: 1, max: 4, maxLevel: 3, age: 1, cost: { wood: 100, food: 50 }, time: 360,
+    name: 'Goudmijn', size: 1, max: 4, maxLevel: 5, age: 1, cost: { wood: 100, food: 50 }, time: 360,
     slots: { gold: 4 }, desc: 'Werk voor 4 goudzoekers per niveau.',
   },
   storage: {
-    name: 'Opslagplaats', size: 1, max: 2, maxLevel: 3, age: 1, cost: { wood: 150 }, time: 600,
+    name: 'Opslagplaats', size: 1, max: 2, maxLevel: 5, age: 1, cost: { wood: 150 }, time: 600,
     storage: 4000, protect: 500, desc: '+4000 opslag per niveau en verbergt 500 per niveau voor plunderaars.',
   },
   barracks: {
-    name: 'Kazerne', size: 1, max: 1, maxLevel: 3, age: 1, cost: { wood: 150, stone: 50 }, time: 900,
+    name: 'Kazerne', size: 1, max: 1, maxLevel: 5, age: 1, cost: { wood: 150, stone: 50 }, time: 900,
     trains: true, desc: 'Train voetvolk. Elk niveau traint 15% sneller.',
   },
   wall: {
@@ -70,11 +73,11 @@ export const BUILDINGS = {
     placeable: false, desc: 'Bepaalt hoe sterk je muren zijn. Plaats ze zelf, tegel per tegel. Een volledig gesloten muur verdedigt het best.',
   },
   range: {
-    name: 'Schietbaan', size: 1, max: 1, maxLevel: 3, age: 2, cost: { wood: 200, gold: 60 }, time: 1500,
+    name: 'Schietbaan', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, gold: 60 }, time: 1500,
     trains: true, desc: 'Train boogschutters.',
   },
   stable: {
-    name: 'Stal', size: 1, max: 1, maxLevel: 3, age: 2, cost: { wood: 200, food: 120, gold: 60 }, time: 1800,
+    name: 'Stal', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, food: 120, gold: 60 }, time: 1800,
     trains: true, desc: 'Train verkenners, ruiters en ridders.',
   },
   smithy: {
@@ -82,15 +85,15 @@ export const BUILDINGS = {
     desc: '+5% aanval en verdediging per niveau voor al je troepen.',
   },
   market: {
-    name: 'Markt', size: 1, max: 1, maxLevel: 3, age: 2, cost: { wood: 250, stone: 50 }, time: 1800,
+    name: 'Markt', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 250, stone: 50 }, time: 1800,
     desc: 'Ruil grondstoffen en stuur karavanen naar bondgenoten.',
   },
   tower: {
-    name: 'Wachttoren', size: 1, max: 4, maxLevel: 3, age: 2, cost: { stone: 250, wood: 80 }, time: 2400,
+    name: 'Wachttoren', size: 1, max: 4, maxLevel: 5, age: 2, cost: { stone: 250, wood: 80 }, time: 2400,
     defense: 80, desc: 'Schiet tijdens een veldslag op de dichtstbijzijnde vijand. Elk niveau geeft meer schade en levens. Aanvallers kunnen hem slopen.',
   },
   workshop: {
-    name: 'Belegwerkplaats', size: 1, max: 1, maxLevel: 2, age: 3, cost: { wood: 350, gold: 200, stone: 100 }, time: 3600,
+    name: 'Belegwerkplaats', size: 1, max: 1, maxLevel: 3, age: 3, cost: { wood: 350, gold: 200, stone: 100 }, time: 3600,
     trains: true, desc: 'Bouw stormrammen om muren en monumenten te slopen.',
   },
   monument: {
@@ -98,12 +101,51 @@ export const BUILDINGS = {
     time: 8 * 3600, growth: 1.35, score: 1500,
     desc: 'Een wereldwonder. Elk niveau levert 1500 extra punten op. Rammen kunnen het beschadigen!',
   },
+  harbor: {
+    name: 'Havenhuis', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 260, food: 100, stone: 40 }, time: 1800, shore: true,
+    desc: 'Ligt aan het water. Bouw vissersbootjes en laat dorpelingen vissen: dat brengt sneller voedsel op dan de boerderij. Elk niveau: een bootje meer (hooguit 4) en sneller vissen.',
+  },
+  mill: {
+    name: 'Molen', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, stone: 60 }, time: 1500,
+    boost: { food: 0.05 }, desc: '+5% voedsel per niveau.',
+  },
+  academy: {
+    name: 'Academie', size: 1, max: 1, maxLevel: 3, age: 3, cost: { wood: 400, stone: 200, gold: 300 }, time: 3600,
+    levelAges: [3, 4, 5], research: true,
+    desc: 'Onderzoek nieuwe vaardigheden voor je troepen en je stad. Elk niveau opent een nieuwe rij onderzoek.',
+  },
+  guild: {
+    name: 'Gildehuis', size: 1, max: 1, maxLevel: 5, age: 4, cost: { wood: 2500, stone: 1500, gold: 2000 }, time: 4 * 3600,
+    boost: { food: 0.03, wood: 0.03, stone: 0.03, gold: 0.03 }, desc: '+3% productie van alle grondstoffen per niveau.',
+  },
+  lodge: {
+    name: 'Bouwloods', size: 1, max: 1, maxLevel: 3, age: 4, cost: { wood: 3000, stone: 2000, food: 1000 }, time: 3 * 3600,
+    builders: 1, buildSpeed: 0.05, desc: 'Eén bouwer extra, en elk niveau bouwt 5% sneller.',
+  },
+  court: {
+    name: 'Adelshof', size: 1, max: 1, maxLevel: 3, age: 5, cost: { food: 8000, wood: 8000, stone: 10000, gold: 12000 },
+    time: 8 * 3600, growth: 1.5, trains: true,
+    desc: 'Train edelmannen om andere steden te onderwerpen. Per niveau mag je één edelman hebben.',
+  },
+  cathedral: {
+    name: 'Kathedraal', size: 1, max: 1, maxLevel: 3, age: 5, cost: { food: 4000, wood: 6000, stone: 15000, gold: 12000 },
+    time: 12 * 3600, growth: 1.5, score: 600, loyalty: 1,
+    desc: 'Je volk blijft je trouw: de trouw herstelt per niveau 1 per uur sneller. Elk niveau levert 600 extra punten op.',
+  },
 };
 
 export const BUILD_ORDER = ['house', 'farm', 'lumber', 'quarry', 'goldmine', 'storage', 'barracks', 'range',
-  'stable', 'smithy', 'market', 'tower', 'workshop', 'monument'];
+  'stable', 'smithy', 'market', 'tower', 'mill', 'harbor', 'workshop', 'academy', 'guild', 'lodge', 'monument', 'court', 'cathedral'];
 
-export const TC_SLOTS = { food: 5, wood: 5, stone: 2, gold: 2 };
+export const TC_SLOTS = { food: 5, wood: 5, stone: 2, gold: 2, fish: 0 };
+// Taken van dorpelingen: de vier grondstoffen en vissen (levert voedsel op, enkel met een havenhuis en bootjes)
+export const JOBS = ['food', 'wood', 'stone', 'gold', 'fish'];
+// Vissen vanuit het havenhuis. Per bootje 'crew' vissers; elke visser vangt 'rate' voedsel per uur (de boerderij: 16),
+// +levelBonus per niveau van het havenhuis boven 1 (en zoals alles +10% per tijdperk). Hooguit boats[niveau] bootjes.
+// Een bootje kost boatCost en is na boatTime seconden klaar (spelsnelheid 1). Het havenhuis staat op een vrije tegel naast
+// water, tot reach ringen voorbij je bouwgrond (de vijver ligt net buiten het dorp).
+// sight = zoveel tegels rond het havenhuis (een vierkant) is er nooit mist
+export const FISH = { rate: 24, crew: 2, levelBonus: 0.08, boats: [0, 1, 2, 3, 4, 4], boatCost: { wood: 120, food: 40 }, boatTime: 900, reach: 4, sight: 3 };
 export const TC_POP_PER_AGE = 10;
 export const TC_STORAGE_PER_AGE = 3000;
 export const BASE_PROTECT = 300;
@@ -149,6 +191,11 @@ export const UNITS = {
     atk: 35, def: { inf: 20, cav: 10, rng: 60 }, speed: 5, carry: 0, pop: 3, siege: true,
     desc: 'Traag, maar beschadigt muren en monumenten na een gewonnen gevecht.',
   },
+  noble: {
+    name: 'Edelman', type: 'cav', building: 'court', bl: 1, age: 5, cost: { food: 5000, wood: 4000, stone: 3000, gold: 7000 },
+    time: 4 * 3600, atk: 8, def: { inf: 20, cav: 20, rng: 20 }, speed: 6, carry: 0, pop: 5, noble: true,
+    desc: 'Overleeft hij een gewonnen aanval, dan daalt de trouw van die stad met 25. Bij 0 wordt de stad je vazal.',
+  },
 };
 
 // wilde tegenstanders in je eigen gebied (niet trainbaar)
@@ -170,7 +217,7 @@ export const GATE = { cost: { wood: 80, stone: 40 }, max: 4 };
 // Afbreken: dit deel van wat het gebouw kostte, krijg je terug (een lopende bouw krijg je voor de helft terug)
 export const DEMOLISH = { built: 0.25, job: 0.5 };
 // Torens in een veldslag: levenspunten en schade per niveau
-export const TOWER = { hp: [0, 220, 320, 450], dmg: [0, 9, 13, 18], range: 6, rate: 2000 };
+export const TOWER = { hp: [0, 220, 320, 450, 600, 780], dmg: [0, 9, 13, 18, 23, 29], range: 6, rate: 2000 };
 
 // ---------- volkeren ----------
 // Elk volk heeft een eigen bouwstijl en twee eigen eenheden. Die train je in het kasteel: het stadscentrum
@@ -265,25 +312,27 @@ const HP = {
   rider: [75, 9, 1600], knight: [120, 13, 1600], ram: [150, 2, 2500],
   chariot: [90, 11, 1600], camel: [80, 8, 1500], hoplite: [80, 7, 1500], peltast: [40, 7, 1700, true],
   samurai: [75, 11, 1400], yabusame: [70, 8, 1700, true], lionguard: [85, 8, 1500], stonethrower: [100, 14, 3000, true],
-  elephant: [250, 18, 2000], immortal: [70, 8, 1500],
+  elephant: [250, 18, 2000], immortal: [70, 8, 1500], noble: [110, 4, 1800],
   boar: [75, 7, 1400], barbarian: [32, 5, 1500],
 };
 for (const [k, [hp, dmg, rate, ranged]] of Object.entries(HP)) Object.assign(UNITS[k], { hp, dmg, rate, ranged: !!ranged });
 
 export const UNIQUE_UNITS = CIV_IDS.flatMap((c) => CIVS[c].units);
-export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram', ...UNIQUE_UNITS];
+export const ARMY_UNITS = ['spear', 'sword', 'archer', 'scout', 'rider', 'knight', 'ram', ...UNIQUE_UNITS, 'noble'];
 
 // Eenheden die je zelf door je gebied stuurt (echte tijd: dit is je eigen terrein, er zijn geen andere spelers).
 export const FIELD = {
   speed: {
     villager: 1.1, spear: 1.1, sword: 1.0, archer: 1.1, scout: 2.4, rider: 2.0, knight: 1.6, ram: 0.6,
     chariot: 2.2, camel: 1.8, hoplite: 1.0, peltast: 1.3, samurai: 1.1, yabusame: 2.1, lionguard: 1.0, stonethrower: 0.6, elephant: 0.9, immortal: 1.1,
+    noble: 0.8,
   }, // tegels per seconde
   vision: { villager: 2.6, scout: 5, rider: 3.6, knight: 3.4, chariot: 3.6, camel: 3.6, yabusame: 4, elephant: 3.8 }, // tegels; anders 3
   maxGroups: 8,
   chopMs: 12000, // bos kappen duurt 12 echte seconden per boom
   chopWood: 25,
   clearReach: 3, // tot zoveel ringen voorbij het bouwvierkant kan je bos kappen
+  homeSight: 3.2, // zo ver (tegels) rond je bouwgrond en je muren zie je altijd; daarbuiten begint de oorlogsmist
   gatherEff: 0.8, // wilde bronnen: 80% van een gewone werkplek (de weg is langer)
   aggro: 3.4, // wie zo dicht bij het barbarenkamp komt, wordt meteen aangevallen (tegels)
   armorK: 40, // schade x armorK / (armorK + verdediging)
@@ -294,8 +343,14 @@ export const FIELD = {
 // De wildernis: everzwijnen, een barbarenkamp en wilde bronnen.
 export const WILD = {
   boar: { name: 'Everzwijn', loot: { food: 200 }, respawnHours: 10 },
-  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 160, wood: 160, stone: 90, gold: 90 } },
-  raid: { firstHours: 30, minHours: 20, maxHours: 40, warnMs: 90000, carry: 25 },
+  // het kamp groeit elke dag dat je het met rust laat (growPerDay, tot growMax keer zo sterk); verwoesten = opnieuw klein
+  // (en een groter kamp geeft ook meer buit)
+  camp: { name: 'Barbarenkamp', respawnHours: 36, loot: { food: 320, wood: 320, stone: 180, gold: 180 }, growPerDay: 0.35, growMax: 3 },
+  // Overvallen op je dorp: om de checkHours een kans (chance + chancePerDay per dag dat het kamp groeit, hooguit maxChance),
+  // nooit binnen quietHours na de vorige overval of het heropbouwen van het kamp; in een nieuwe stad pas na firstHours.
+  // warnMs = zo lang (echte tijd) trekken de barbaren naar je dorp: zolang kan je kiezen om de slag zelf te spelen,
+  // daarna gaat ze automatisch. liveMs = vangnet: een zelf gespeelde slag die nooit afgerond werd, gaat daarna automatisch.
+  raid: { firstHours: 30, quietHours: 10, checkHours: 2, chance: 0.02, chancePerDay: 0.06, maxChance: 0.4, warnMs: 15 * 60000, liveMs: 30 * 60000, carry: 25, max: 60 },
   deposits: {
     gold: { name: 'Goudader', res: 'gold', amount: 500 },
     stone: { name: 'Rotswand', res: 'stone', amount: 600 },
@@ -350,6 +405,68 @@ export const CAMP_EXTRA = 12; // naast de 3 kampen rond elk startgebied
 
 export const MARKET = { rate: 0.6, ratePerLevel: 0.07, shipPerLevel: 1000, merchantSpeed: 12 };
 
+// ---------- Academie: onderzoek ----------
+// Een raster van 4 soorten x 3 rijen. Rij r vraagt Academie niveau r (= tijdperk r + 2) en het onderzoek ervoor
+// in dezelfde soort. Geen ruwe kracht (dat doet de smidse): elk onderzoek verandert hoe je troepen vechten.
+// auto = wat het betekent in een automatisch uitgerekende slag (battle.js).
+export const TECH_LINES = {
+  inf: { name: 'Voetvolk' }, rng: { name: 'Schutters' }, cav: { name: 'Ruiterij' }, town: { name: 'Stad' },
+};
+export const TECH_LINE_IDS = ['inf', 'rng', 'cav', 'town'];
+const T1 = { food: 800, wood: 600, gold: 900 };
+const T2 = { food: 2400, wood: 2000, gold: 3200 };
+const T3 = { food: 6000, wood: 5000, stone: 2000, gold: 8000 };
+export const TECHS = {
+  shieldwall: { line: 'inf', row: 1, name: 'Schildmuur', cost: T1, time: 2 * 3600, auto: { def: { inf: { rng: 0.3 } } },
+    desc: 'Voetvolk in blok of linie sluit de schilden: 30% minder schade van pijlen en torens.' },
+  drill: { line: 'inf', row: 2, name: 'Krijgsdrill', cost: T2, time: 5 * 3600, auto: { def: { inf: { inf: 0.08, cav: 0.08 } } },
+    desc: 'Voetvolk staat sneller in formatie en verliest een kwart minder moed.' },
+  warcry: { line: 'inf', row: 3, name: 'Strijdkreet', cost: T3, time: 10 * 3600, auto: { atk: { inf: 0.1 } },
+    desc: 'Een stormloop van je voetvolk kost de vijand moed.' },
+  firearrows: { line: 'rng', row: 1, name: 'Vuurpijlen', cost: { wood: 900, food: 600, gold: 800 }, time: 2 * 3600, auto: { atk: { rng: 0.05 }, towers: -0.25 },
+    desc: 'Brandende pijlen: 60% meer schade tegen rammen, torens, muren en poorten.' },
+  yew: { line: 'rng', row: 2, name: 'Taxusboog', cost: T2, time: 5 * 3600, auto: { atk: { rng: 0.1 } },
+    desc: 'Schutters schieten een tegel verder.' },
+  volley: { line: 'rng', row: 3, name: 'Pijlenregen', cost: T3, time: 10 * 3600, auto: { atk: { rng: 0.15 } },
+    desc: 'Schutters schieten 15% sneller.' },
+  horseshoes: { line: 'cav', row: 1, name: 'Hoefijzers', cost: { food: 1000, wood: 300, gold: 900 }, time: 2 * 3600, auto: {},
+    desc: 'Ruiterij is 10% sneller: op de wereldkaart en in de slag.' },
+  lances: { line: 'cav', row: 2, name: 'Lansen', cost: T2, time: 5 * 3600, auto: { atk: { cav: 0.1 } },
+    desc: 'De stormloop van je ruiterij is 25% sterker.' },
+  flank: { line: 'cav', row: 3, name: 'Flankrit', cost: T3, time: 10 * 3600, auto: { atk: { cav: 0.1 } },
+    desc: 'Ruiterij die in de flank of de rug aanvalt, doet 50% meer extra schade.' },
+  pitch: { line: 'town', row: 1, name: 'Kokende pek', cost: { food: 500, wood: 900, stone: 800, gold: 500 }, time: 2 * 3600, auto: { wall: 0.5 },
+    desc: 'Wie aan je poort staat, krijgt kokende pek over zich heen.' },
+  xbow: { line: 'town', row: 2, name: 'Torenkruisbogen', cost: { food: 1500, wood: 2500, stone: 3000, gold: 2500 }, time: 5 * 3600, auto: { towers: 0.2 },
+    desc: 'Wachttorens schieten een tegel verder en 20% harder.' },
+  ironbound: { line: 'town', row: 3, name: 'IJzerbeslag', cost: { food: 3000, wood: 5000, stone: 8000, gold: 6000 }, time: 10 * 3600, auto: { rams: 0.67 },
+    desc: 'Poorten houden 50% langer stand tegen rammen en soldaten.' },
+};
+export const TECH_IDS = Object.keys(TECHS);
+export const techAt = (line, row) => TECH_IDS.find((id) => TECHS[id].line === line && TECHS[id].row === row);
+// hoeveel onderzoeken van een soort klaar zijn (0-3): bepaalt ook hoe de troepen eruitzien
+export const techTier = (tech, line) => { let n = 0; for (let r = 1; r <= 3; r++) if (tech && tech[techAt(line, r)]) n = r; else break; return n; };
+export const hasTech = (tech, id) => !!(tech && tech[id]);
+
+// uitzicht van de uitrusting volgens de smidse: 0 = leer en brons, 1 = ijzer en maliën, 2 = plaatharnas
+export const gearOf = (smithy) => (smithy >= 5 ? 2 : smithy >= 3 ? 1 : 0);
+
+// ---------- edelmannen, trouw en vazallen ----------
+export const LOYALTY = {
+  max: 100, hit: 25, regen: 2, // trouw per uur (bij snelheid 1)
+  shieldMs: 24 * 3600000, // na een bevrijding: zo lang geen edelmannen tegen die stad
+  minScore: 0.45, // niet tegen steden met minder dan 45% van je punten
+};
+export const VASSAL = {
+  ms: 3 * 24 * 3600000, // zo lang blijft een stad vazal (echte tijd)
+  maxPerLord: 2,
+  tribute: 0.2, // deel van de productie
+  tributeMs: 6 * 3600000, // om de zoveel tijd vertrekt een karavaan met schatting
+  scoreShare: 0.2, // zoveel van de punten van je vazal tellen mee voor jou
+  ransom: 1000, // losgeld per grondstof, maal het tijdperk van de vazal
+};
+export const ransomCost = (a) => ({ food: VASSAL.ransom * a, wood: VASSAL.ransom * a, stone: VASSAL.ransom * a, gold: VASSAL.ransom * a });
+
 // ---------- hulpfuncties ----------
 
 const round5 = (v) => Math.max(5, Math.round(v / 5) * 5);
@@ -373,7 +490,8 @@ export function levelTime(type, level, speed = 1) {
 export function levelAge(type, level) {
   const b = BUILDINGS[type];
   if (type === 'tc') return level - 1;
-  return Math.max(b.age, Math.min(4, level));
+  if (b.levelAges) return b.levelAges[Math.min(b.levelAges.length, level) - 1];
+  return Math.max(b.age, Math.min(MAX_AGE, level));
 }
 
 export function unitTime(unit, buildingLevel, speed = 1) {
@@ -386,6 +504,32 @@ export function costValue(cost) {
   let v = 0;
   for (const r of RES) v += cost[r] || 0;
   return v;
+}
+
+// ---------- oorlog moet lonen ----------
+// Een dorpeling brengt ±16-30 per uur op. Een soldaat die plundert, moet per plaats in je bevolking minstens even veel
+// opleveren, anders loont aanvallen niet. Daarom:
+//   carry   troepen dragen meer naarmate je tijdperk stijgt (karren en lastdieren): draagvermogen x dit, per tijdperk
+//           van de aanvaller (1 = Vuursteen ... 5 = Kroon)
+//   bounty  krijgsbuit: wie de slag wint, raapt wapens en uitrusting op = dit deel van wat de gesneuvelde vijanden kostten
+//           (aanvaller: gaat mee naar huis, bovenop wat hij draagt; verdediger: meteen in zijn opslag)
+//   killPts gevechtspunten: 1 punt per zoveel (kostprijs) gedode vijanden; campKillPts idem bij roverskampen
+//   lootPts 1 punt per zoveel grondstoffen die je bij een speler buitmaakt
+export const WAR = { carry: [1, 2, 2.5, 3, 3.5, 4], bounty: 0.3, killPts: 25, campKillPts: 50, lootPts: 250 };
+// Replay van een automatisch uitgerekende slag (achteraf bekijken, zonder zelf te besturen): zo lang na de slag te zien
+export const REPLAY = { ms: 24 * 3600000 };
+export const carryMult = (age) => WAR.carry[Math.max(1, Math.min(WAR.carry.length - 1, Math.floor(age) || 1))];
+
+// krijgsbuit: frac van de kosten van deze (gesneuvelde) troepen, per grondstof
+export function bountyOf(units, frac = WAR.bounty) {
+  const out = { food: 0, wood: 0, stone: 0, gold: 0 };
+  for (const k of Object.keys(units || {})) {
+    const c = UNITS[k] && UNITS[k].cost;
+    if (!c || !(units[k] > 0)) continue;
+    for (const r of RES) if (c[r]) out[r] += c[r] * units[k] * frac;
+  }
+  for (const r of RES) out[r] = Math.floor(out[r]);
+  return out;
 }
 
 export function unitValue(units) {
@@ -405,7 +549,7 @@ export function campUnits(level) {
 }
 
 export function campLoot(level) {
-  const v = Math.round(350 * Math.pow(level, 1.6));
+  const v = Math.round(500 * Math.pow(level, 1.6));
   return { food: v, wood: v, stone: v, gold: v };
 }
 

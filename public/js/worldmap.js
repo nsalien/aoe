@@ -95,13 +95,21 @@ function chaikin(pts, it) {
 let treeSprites = null;
 const trees = () => (treeSprites ||= Array.from({ length: NAT.TREE_COUNT }, (_, k) => NAT.treeSprite(k)));
 
-export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
+// Wordt in stukjes uitgevoerd (generator: `yield` = even pauzeren), zodat de kaart op de achtergrond kan voorbereid
+// worden zonder het spel te laten haperen. bakeWorld() doet alles in één keer.
+export function bakeWorld(opts) {
+  const g = bakeWorldGen(opts);
+  for (;;) { const r = g.next(); if (r.done) return r.value; }
+}
+
+export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   const t0 = performance.now();
   const N = size * R;
   const regions = teamRegions(seed, size);
   const E = new Float32Array(N * N);
   const M = new Float32Array(N * N);
   for (let v = 0; v < N; v++) {
+    if ((v & 7) === 7) yield;
     for (let u = 0; u < N; u++) {
       const gx = (u + 0.5) / R; const gy = (v + 0.5) / R;
       const [e, m] = fieldAt(seed, size, regions, gx - 0.5, gy - 0.5);
@@ -142,6 +150,7 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
   const H = new Float32Array(N * N);
   let maxH = 0;
   for (let v = 0; v < N; v++) {
+    if ((v & 7) === 7) yield;
     for (let u = 0; u < N; u++) {
       const i = v * N + u; const e = E[i];
       if (e <= SEA) continue;
@@ -239,6 +248,7 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
   const mixc = (k, t) => { if (t <= 0) return; if (t > 1) t = 1; c[0] += (k[0] - c[0]) * t; c[1] += (k[1] - c[1]) * t; c[2] += (k[2] - c[2]) * t; };
   const hstep = TILE_PX / R; // afstand tussen texels in pixels
   for (let v = 0; v < N; v++) {
+    if ((v & 7) === 7) yield;
     for (let u = 0; u < N; u++) {
       const i = v * N + u; const e = E[i]; const h = H[i];
       const gx = (u + 0.5) / R; const gy = (v + 0.5) / R;
@@ -346,6 +356,7 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
     return (255 << 24) | ((b > 255 ? 255 : b < 0 ? 0 : b) << 16) | ((g > 255 ? 255 : g < 0 ? 0 : g) << 8) | (r > 255 ? 255 : r < 0 ? 0 : r);
   };
   for (let px = 0; px < ow; px++) {
+    if ((px & 15) === 15) yield;
     const wx = (px + 0.5) / scale - W / 2;
     const cc = wx / halfW; // gx - gy
     const ac = Math.abs(cc);
@@ -429,18 +440,30 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
     const tmp = document.createElement('canvas');
     tmp.width = ow; tmp.height = oh;
     const t2 = tmp.getContext('2d');
-    t2.fillStyle = t2.createPattern(tex, 'repeat');
-    t2.fillRect(0, 0, ow, oh);
-    t2.globalCompositeOperation = 'destination-in';
-    t2.drawImage(landCv, 0, 0);
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.34;
-    ctx.drawImage(tmp, 0, 0);
-    ctx.restore();
+    const pat = t2.createPattern(tex, 'repeat');
+    // in stroken (met een clip, zelfde resultaat), met telkens een pauze: één keer over de hele kaart duurt te lang
+    const STRIP = 256;
+    for (let y0 = 0; y0 < oh; y0 += STRIP) {
+      const sh = Math.min(STRIP, oh - y0);
+      t2.save(); t2.beginPath(); t2.rect(0, y0, ow, sh); t2.clip();
+      t2.fillStyle = pat; t2.fillRect(0, y0, ow, sh);
+      t2.globalCompositeOperation = 'destination-in';
+      t2.drawImage(landCv, 0, 0);
+      t2.restore();
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.beginPath(); ctx.rect(0, y0, ow, sh); ctx.clip();
+      ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.34;
+      ctx.drawImage(tmp, 0, 0);
+      ctx.restore();
+      yield;
+    }
   }
+  yield;
   const tg = performance.now();
   const proj = (gx, gy) => { const h = hAt(gx, gy); return [(gx - gy) * halfW, (gx + gy) * halfH - h]; };
+  let fi = 0;
   for (const f of fields) {
+    if ((++fi & 7) === 0) yield;
     if (hidden((f.x0 + f.x1) / 2, (f.y0 + f.y1) / 2, hAt((f.x0 + f.x1) / 2, (f.y0 + f.y1) / 2))) continue;
     const c00 = proj(f.x0, f.y0); const c10 = proj(f.x1, f.y0); const c11 = proj(f.x1, f.y1); const c01 = proj(f.x0, f.y1);
     ctx.beginPath(); ctx.moveTo(...c00); ctx.lineTo(...c10); ctx.lineTo(...c11); ctx.lineTo(...c01); ctx.closePath();
@@ -466,6 +489,7 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
   // wegen: scherp getekend op het reliëf, niet achter heuvels
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const r of roads) {
+    yield;
     const runs = [];
     let cur = null;
     for (const [gx, gy] of r) {
@@ -487,6 +511,7 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
   const deco = [];
   const sp = 0.3;
   for (let gy = sp / 2; gy < size; gy += sp) {
+    yield;
     for (let gx = sp / 2; gx < size; gx += sp) {
       const k1 = Math.floor(gx / sp); const k2 = Math.floor(gy / sp);
       const jx = gx + (hash2(k1, k2, seed + 61) - 0.5) * sp * 0.9;
@@ -517,8 +542,11 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
     }
   }
   deco.sort((a, b) => a.gx + a.gy - (b.gx + b.gy));
+  yield;
   const TS = trees();
+  yield;
   const vis = deco.filter((d) => !(d.h > 3 && hidden(d.gx, d.gy, d.h)));
+  yield;
   // eerst alle schaduwen van de bomen in één keer, dan de bomen van achter naar voor
   ctx.fillStyle = 'rgba(12,28,8,0.26)';
   ctx.beginPath();
@@ -528,7 +556,9 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
     ctx.moveTo(x + 13 * d.s, y); ctx.ellipse(x, y, 13 * d.s, 4.5 * d.s, 0, 0, Math.PI * 2);
   }
   ctx.fill();
+  let di = 0;
   for (const d of vis) {
+    if ((++di & 127) === 0) yield;
     const x = (d.gx - d.gy) * halfW; const y = (d.gx + d.gy) * halfH - d.h;
     if (d.kind === 'tree') {
       const spr = TS[d.spr];
@@ -543,6 +573,7 @@ export function bakeWorld({ seed, size, tiles, towns, camps, scale, R }) {
   const shore = [];
   const water = [];
   for (let v = 1; v < N - 1; v++) {
+    if ((v & 15) === 15) yield;
     for (let u = 1; u < N - 1; u++) {
       const i = v * N + u;
       if (E[i] >= SEA) continue;

@@ -4,13 +4,13 @@
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
-  LAND, landCost, WALL_TILE, GATE, DEMOLISH,
-  levelCost, levelTime, levelAge, unitTime, costValue, unitValue,
+  LAND, landCost, WALL_TILE, GATE, DEMOLISH, TECHS, TECH_IDS, LOYALTY,
+  levelCost, levelTime, levelAge, unitTime, costValue, unitValue, JOBS, FISH,
 } from './rules.js';
 import {
-  territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, TILE, exDecode, exEncode, revealCircle, revealSegment,
+  territory, ringOf, ringForAge, tileIndex, tileOf, inTerr, T_MIN, T_MAX, T_W, TILE, exDecode, exEncode, revealCircle, revealSegment,
 } from './territory.js';
-import { resolveBattle, computeLoot, carryCapacity } from './battle.js';
+import { resolveBattle, computeLoot, carryCapacity, fateOf } from './battle.js';
 import { combatants, runFight, fightEnd, survivorsByGroup } from './skirmish.js';
 
 export class GameError extends Error {
@@ -49,7 +49,7 @@ export const fieldSoldierPop = (s) => (s.field || []).reduce((a, g) => {
   for (const k of Object.keys(g.units)) if (k !== 'villager' && UNITS[k]) p += UNITS[k].pop * g.units[k];
   return a + p;
 }, 0);
-export const totalVillagers = (s) => RES.reduce((a, r) => a + s.villagers[r], s.villagers.idle) + harvesting(s) + fieldVillagers(s);
+export const totalVillagers = (s) => JOBS.reduce((a, r) => a + (s.villagers[r] || 0), s.villagers.idle) + harvesting(s) + fieldVillagers(s);
 // dorpelingen die nu thuis zijn en verdeeld kunnen worden
 export const homeVillagers = (s) => totalVillagers(s) - harvesting(s) - fieldVillagers(s);
 
@@ -59,7 +59,68 @@ export function slots(s) {
     const sl = BUILDINGS[b.type].slots;
     if (sl && b.level > 0) for (const r of Object.keys(sl)) out[r] += sl[r] * b.level;
   }
+  out.fish = boatsReady(s) * FISH.crew; // vissers: zoveel per bootje
   return out;
+}
+
+// ---------- havenhuis en vissersbootjes ----------
+export const maxBoats = (s) => FISH.boats[Math.min(FISH.boats.length - 1, bLevel(s, 'harbor'))] || 0;
+// bootjes die kunnen uitvaren (een kleiner havenhuis na afbreken heeft minder plaats)
+export const boatsReady = (s) => Math.min(s.boats || 0, maxBoats(s));
+export const fishMult = (s) => 1 + FISH.levelBonus * Math.max(0, bLevel(s, 'harbor') - 1);
+export function boatTime(s, speed = 1) {
+  return Math.max(5000, Math.round((FISH.boatTime * 1000) / speed));
+}
+export function checkBoat(s) {
+  if (!bLevel(s, 'harbor')) return 'Bouw eerst een havenhuis.';
+  if (s.boatJob) return 'Er wordt al een bootje gebouwd.';
+  if ((s.boats || 0) >= maxBoats(s)) return maxBoats(s) >= FISH.boats[FISH.boats.length - 1] ? `Je hebt het maximum van ${maxBoats(s)} bootjes.` : 'Verbeter je havenhuis voor een bootje meer.';
+  if (!canAfford(s.res, FISH.boatCost)) return 'Niet genoeg grondstoffen.';
+  return null;
+}
+export function doBoat(s, now, speed = 1) {
+  const err = checkBoat(s);
+  if (err) throw new GameError(err);
+  pay(s.res, FISH.boatCost);
+  s.boatJob = { start: now, end: now + boatTime(s, speed) };
+  return s.boatJob;
+}
+// een bootje is klaar: vrije dorpelingen gaan meteen aan boord
+function finishBoat(s) {
+  s.boats = (s.boats || 0) + 1;
+  s.boatJob = null;
+  const free = slots(s).fish - (s.villagers.fish || 0);
+  const n = Math.max(0, Math.min(free, s.villagers.idle));
+  s.villagers.fish = (s.villagers.fish || 0) + n; s.villagers.idle -= n;
+}
+// mag het havenhuis op tegel (i, j)? Vrij land (geen bos, geen water) naast water, niet te ver van je bouwgrond.
+export function shoreTile(s, i, j, cl = null) {
+  if (!s.terr || !inTerr(i, j)) return false;
+  const terr = territory(s.terr.seed);
+  const T = terr.tiles[tileIndex(i, j)];
+  if (T === TILE.WATER) return false;
+  const set = cl || clearedSet(s);
+  if (T === TILE.FOREST && !set.has(tileIndex(i, j)) && !isBuildable(s, i, j, set)) return false;
+  if (ringOf(i, j) > ringForAge(age(s)) + FISH.reach) return false;
+  if (reservedTile(terr, i, j)) return false;
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inTerr(i + dx, j + dy) && terr.tiles[tileIndex(i + dx, j + dy)] === TILE.WATER);
+}
+// alle tegels waar het havenhuis kan staan (om ze te tonen bij het plaatsen)
+export function shoreSpots(s, ignoreId = null) {
+  if (!s.terr) return [];
+  const R = ringForAge(age(s)) + FISH.reach;
+  const cl = clearedSet(s);
+  const out = [];
+  for (let j = -R; j < TOWN_GRID + R; j++) for (let i = -R; i < TOWN_GRID + R; i++) if (shoreTile(s, i, j, cl) && canPlaceAt(s, 'harbor', i, j, ignoreId)) out.push([i, j]);
+  return out;
+}
+// aan welke kant ligt het water? 0 = +x, 1 = +y, 2 = -x, 3 = -y (voor de steiger van het model)
+export function shoreSide(s, i, j) {
+  if (!s.terr) return 0;
+  const tiles = territory(s.terr.seed).tiles;
+  const w = (a, b) => inTerr(a, b) && tiles[tileIndex(a, b)] === TILE.WATER;
+  if (w(i + 1, j)) return 0; if (w(i, j + 1)) return 1; if (w(i - 1, j)) return 2; if (w(i, j - 1)) return 3;
+  return 0;
 }
 
 export function popCap(s) {
@@ -80,10 +141,23 @@ export function protectAmount(s) {
   return p;
 }
 
+// extra productie van de molen en het gildehuis (per niveau)
+export function boost(s) {
+  const out = { food: 0, wood: 0, stone: 0, gold: 0 };
+  for (const b of s.buildings) {
+    const bo = BUILDINGS[b.type].boost;
+    if (bo && b.level > 0) for (const r of Object.keys(bo)) out[r] += bo[r] * b.level;
+  }
+  return out;
+}
+
 export function rates(s, speed = 1) {
   const mult = (1 + 0.1 * (age(s) - 1)) * speed;
+  const bo = boost(s);
   const out = {};
-  for (const r of RES) out[r] = s.villagers[r] * GATHER_RATE[r] * mult;
+  for (const r of RES) out[r] = s.villagers[r] * GATHER_RATE[r] * mult * (1 + bo[r]);
+  // vissers (havenhuis): sneller voedsel dan de boerderij
+  if (s.villagers.fish) out.food += s.villagers.fish * FISH.rate * mult * (1 + bo.food) * fishMult(s);
   return out;
 }
 
@@ -103,12 +177,28 @@ export function unitsPop(units) {
 export const homePop = (s) => totalVillagers(s) + unitsPop(s.units) + queuedPop(s) + fieldSoldierPop(s);
 
 export function maxBuilds(s) {
-  return age(s) >= 3 ? 3 : 2;
+  return (age(s) >= 3 ? 3 : 2) + (bLevel(s, 'lodge') > 0 ? BUILDINGS.lodge.builders : 0);
 }
+
+// bouwduur in ms voor deze stad (de bouwloods bouwt sneller)
+export function buildTime(s, type, level, speed = 1) {
+  const f = type === 'tc' || type === 'lodge' ? 1 : 1 - BUILDINGS.lodge.buildSpeed * bLevel(s, 'lodge');
+  return Math.max(5000, Math.round(levelTime(type, level, speed) * f));
+}
+
+// ---------- trouw ----------
+export const isVassal = (s, t = s.t) => !!(s.vas && s.vas.until > t);
+export const loyalty = (s) => (s.loy == null ? LOYALTY.max : s.loy);
+export const loyaltyRegen = (s) => LOYALTY.regen + BUILDINGS.cathedral.loyalty * bLevel(s, 'cathedral');
 
 function accrue(s, t, speed) {
   const dt = (t - s.t) / 3600000;
   if (dt <= 0) return;
+  // de trouw herstelt vanzelf (niet zolang je vazal bent)
+  if (s.loy != null && s.loy < LOYALTY.max && !isVassal(s)) {
+    s.loy = Math.min(LOYALTY.max, s.loy + loyaltyRegen(s) * dt * speed);
+    if (s.loy >= LOYALTY.max) delete s.loy;
+  }
   const r = rates(s, speed);
   const extra = gatherAccrue(s, dt, speed);
   const cap = capacity(s);
@@ -121,9 +211,9 @@ function accrue(s, t, speed) {
 
 function placeVillager(s) {
   const sl = slots(s);
-  const order = s.rally && s.rally !== 'auto' ? [s.rally] : ['food', 'wood', 'gold', 'stone'];
+  const order = s.rally && s.rally !== 'auto' ? [s.rally] : ['fish', 'food', 'wood', 'gold', 'stone'];
   for (const r of order) {
-    if (s.villagers[r] < sl[r]) { s.villagers[r]++; return; }
+    if ((s.villagers[r] || 0) < (sl[r] || 0)) { s.villagers[r] = (s.villagers[r] || 0) + 1; return; }
   }
   s.villagers.idle++;
 }
@@ -217,7 +307,7 @@ function finishHarvest(s, hv) {
   }
   s.harvests = s.harvests.filter((x) => x !== hv);
   // de dorpeling gaat terug naar zijn vorige taak
-  if (hv.job !== 'idle' && s.villagers[hv.job] < slots(s)[hv.job]) s.villagers[hv.job]++;
+  if (hv.job !== 'idle' && (s.villagers[hv.job] || 0) < (slots(s)[hv.job] || 0)) s.villagers[hv.job] = (s.villagers[hv.job] || 0) + 1;
   else s.villagers.idle++;
 }
 
@@ -243,10 +333,10 @@ export function doHarvest(s, nodeId, job, now) {
   const node = s.nodes.find((n) => n.id === nodeId);
   let from = null;
   if (job === 'idle' && s.villagers.idle > 0) from = 'idle';
-  else if (RES.includes(job) && s.villagers[job] > 0) from = job;
+  else if (JOBS.includes(job) && s.villagers[job] > 0) from = job;
   else if (s.villagers.idle > 0) from = 'idle';
   else {
-    from = RES.reduce((best, r) => (s.villagers[r] > (best ? s.villagers[best] : 0) ? r : best), null);
+    from = JOBS.reduce((best, r) => ((s.villagers[r] || 0) > (best ? s.villagers[best] : 0) ? r : best), null);
   }
   if (!from) throw new GameError('Je hebt geen dorpeling vrij.');
   s.villagers[from]--;
@@ -262,7 +352,14 @@ export function advance(s, t, speed = 1) {
   ensureBonus(s, speed);
   if (s.terr) {
     if (!s.field) s.field = [];
-    if (s.terr.camp.next == null) s.terr.camp.next = s.t + Math.round((WILD.raid.firstHours * 3600000) / speed);
+    const c = s.terr.camp;
+    c.day = Math.round(86400000 / speed); // één speldag in ms (het kamp groeit per speldag)
+    if (c.since == null) {
+      // nieuwe stad: de eerste overval pas na firstHours; een oudere stad (van voor het groeiende kamp): het groeit vanaf nu
+      const fresh = c.next == null && !c.raids;
+      c.since = Math.max(s.t, c.down || 0);
+      if (!c.raid) scheduleRaid(s, fresh ? s.t + Math.round((c.day * (WILD.raid.firstHours - WILD.raid.quietHours)) / 24) : s.t);
+    }
     autoReveal(s);
   }
   for (let guard = 0; guard < 20000; guard++) {
@@ -285,9 +382,15 @@ export function advance(s, t, speed = 1) {
     }
     for (const h of s.harvests) if (h.end < next) { next = h.end; job = null; qkey = null; hv = h; wild = null; }
     if (s.nextNode < next) { next = s.nextNode; job = null; qkey = null; hv = null; spawn = true; wild = null; }
+    let rs = false;
+    if (s.research && s.research.end < next) { next = s.research.end; job = null; qkey = null; hv = null; spawn = false; wild = null; rs = true; }
+    let bj = false;
+    if (s.boatJob && s.boatJob.end < next) { next = s.boatJob.end; job = null; qkey = null; hv = null; spawn = false; wild = null; rs = false; bj = true; }
     if (next > t) break;
     accrue(s, next, speed);
-    if (wild) applyWildEvent(s, wild, speed);
+    if (bj) finishBoat(s);
+    else if (rs) finishResearch(s);
+    else if (wild) applyWildEvent(s, wild, speed);
     else if (spawn) spawnBonus(s, next, speed);
     else if (hv) finishHarvest(s, hv);
     else if (job) finishBuild(s, job);
@@ -350,6 +453,19 @@ export function ensureTerritory(s, seed) {
   // steden van voor de volkeren krijgen een willekeurig (maar vast) volk
   if (!CIVS[s.civ]) s.civ = CIV_IDS[(Math.imul(seed | 0, 2654435761) >>> 0) % CIV_IDS.length];
   if (!s.field) s.field = [];
+  if (s.villagers && s.villagers.fish == null) s.villagers.fish = 0; // vissers (havenhuis) bestonden vroeger niet
+  // ontdekkingen in de wildernis (25/11 kort online, op vraag van de gebruiker weer weggehaald): restjes opruimen.
+  // Wat al gevonden werd, blijft; relikwieën leveren niets meer op.
+  if (s.relics !== undefined) delete s.relics;
+  if (s.terr) {
+    if (s.terr.sites) delete s.terr.sites;
+    const den = (s.terr.fights || []).filter((f) => f.foe && f.foe.type === 'den').map((f) => f.id);
+    if (den.length) {
+      s.terr.fights = s.terr.fights.filter((f) => !den.includes(f.id));
+      for (const g of s.field) if (den.includes(g.fight)) g.fight = null;
+    }
+    for (const g of s.field) if (g.order && g.order.type === 'site') g.order = { type: 'move' };
+  }
   if (s.terr) return;
   s.terr = { seed, ex: '', rv: -1, cl: [], dep: {}, boar: {}, camp: { down: 0, raids: 0, loss: 0, next: null }, log: [], lid: 0 };
 }
@@ -516,28 +632,6 @@ export function doPlaceGate(s, i, j) {
   s.gates.push(...idxs);
 }
 
-// Moet een groep van 'from' naar 'to' door de stadsmuur? Dan via de dichtstbijzijnde poort: [voor de poort, achter de poort].
-export function gateRoute(s, from, to) {
-  if (!(s.gates || []).length) return null;
-  const walls = wallSet(s);
-  const inside = insideSet(s, walls);
-  if (!inside) return null;
-  const key = (p) => `${Math.floor(p.x)},${Math.floor(p.y)}`;
-  const a = inside.has(key(from)); const b = inside.has(key(to));
-  if (a === b) return null;
-  let best = null;
-  for (const g of gateList(s)) {
-    const p1 = g.ax === 'x' ? { x: g.cx, y: g.cy - 0.9 } : { x: g.cx - 0.9, y: g.cy };
-    const p2 = g.ax === 'x' ? { x: g.cx, y: g.cy + 0.9 } : { x: g.cx + 0.9, y: g.cy };
-    const in1 = inside.has(key(p1));
-    const pin = in1 ? p1 : p2; const pout = in1 ? p2 : p1;
-    const [first, second] = a ? [pin, pout] : [pout, pin];
-    const d = Math.hypot(first.x - from.x, first.y - from.y) + 1.8 + Math.hypot(to.x - second.x, to.y - second.y);
-    if (!best || d < best.d) best = { d, via: [first, second] };
-  }
-  return best ? best.via : null;
-}
-
 // muurwaarde in gevechten: volledig als de stad dicht is, anders maar een stukje
 export function effectiveWall(s) {
   const L = bLevel(s, 'wall');
@@ -587,6 +681,89 @@ export function doRemoveWalls(s, tiles) {
   if (s.gates) s.gates = s.gates.filter((x) => !rm.has(x));
 }
 
+// ---------- muren verplaatsen (gratis) ----------
+// Het rechte stuk muur (met de poorten erin) door tegel (i, j): langs x of langs y, het langste dat geen poort doorsnijdt.
+export function wallRun(s, i, j) {
+  const set = wallSet(s);
+  const has = (a, b) => inTerr(a, b) && set.has(tileIndex(a, b));
+  if (!has(i, j)) return [];
+  const run = (dx, dy) => {
+    const out = [[i, j]];
+    for (let k = 1; has(i + dx * k, j + dy * k); k++) out.push([i + dx * k, j + dy * k]);
+    for (let k = 1; has(i - dx * k, j - dy * k); k++) out.unshift([i - dx * k, j - dy * k]);
+    return out;
+  };
+  const gl = gateList(s);
+  const whole = (r) => { const k = new Set(r.map(([a, b]) => tileIndex(a, b))); return gl.every((g) => { const n = g.tiles.filter(([a, b]) => k.has(tileIndex(a, b))).length; return !n || n === g.tiles.length; }); };
+  const cands = [run(1, 0), run(0, 1)].filter(whole).sort((a, b) => b.length - a.length);
+  return cands[0] || [[i, j]];
+}
+
+// staat een (verplaatste) poort in een recht stuk muur, met aan beide kanten een muurstuk en geen hoek ernaast?
+function gateFits(walls, gates, tl) {
+  const any = (a, b) => inTerr(a, b) && (walls.has(tileIndex(a, b)) || gates.has(tileIndex(a, b)));
+  const isW = (a, b) => inTerr(a, b) && walls.has(tileIndex(a, b));
+  if (tl.length === 1) { const all = new Set([...walls, ...gates]); return !!gateAxis(all, tl[0][0], tl[0][1]); }
+  const [a, b] = tl; const dx = b[0] - a[0]; const dy = b[1] - a[1];
+  if (!isW(a[0] - dx, a[1] - dy) || !isW(b[0] + dx, b[1] + dy)) return false;
+  return !tl.some(([u, v]) => any(u + dy, v + dx) || any(u - dy, v - dx));
+}
+
+// Verplaats muurstukken (en poorten in hun geheel) over (dx, dy). Een poort alleen verplaatsen: de oude opening wordt muur.
+// Geeft de nieuwe { walls, gates } terug, of een foutmelding.
+export function planWallMove(s, tiles, dx, dy) {
+  if (!bLevel(s, 'wall')) return 'Bouw eerst de stadsmuur.';
+  if (!Array.isArray(tiles) || !tiles.length) return 'Kies welke muur je wil verplaatsen.';
+  if (tiles.length > WALL_TILE.maxPerOrder) return `Maximaal ${WALL_TILE.maxPerOrder} muurstukken tegelijk.`;
+  if (!Number.isInteger(dx) || !Number.isInteger(dy) || (!dx && !dy) || Math.abs(dx) > T_W || Math.abs(dy) > T_W) return 'Kies een nieuwe plek voor de muur.';
+  const walls = new Set(s.walls || []); const gates = new Set(s.gates || []);
+  const src = new Set();
+  for (const t of tiles) {
+    if (!Array.isArray(t) || !Number.isInteger(t[0]) || !Number.isInteger(t[1]) || !inTerr(t[0], t[1])) return 'Ongeldige plaats.';
+    const idx = tileIndex(t[0], t[1]);
+    if (!walls.has(idx) && !gates.has(idx)) return 'Daar staat geen muur.';
+    if (src.has(idx)) return 'Ongeldige plaats.';
+    src.add(idx);
+  }
+  const moved = [];
+  for (const g of gateList(s)) {
+    const n = g.tiles.filter(([a, b]) => src.has(tileIndex(a, b))).length;
+    if (n && n < g.tiles.length) return 'Een poort verplaats je in zijn geheel.';
+    if (n) moved.push(g);
+  }
+  const gateOnly = moved.length > 0 && [...src].every((x) => gates.has(x));
+  const nw = new Set(walls); const ng = new Set(gates);
+  for (const x of src) { nw.delete(x); ng.delete(x); }
+  if (gateOnly) for (const x of src) nw.add(x); // de oude opening wordt muur
+  const cl = clearedSet(s); const occ = occupied(s);
+  for (const x of src) {
+    const { i, j } = tileOf(x); const a = i + dx; const b = j + dy;
+    if (!inTerr(a, b) || !isBuildable(s, a, b, cl)) return 'Muren kan je enkel op je eigen bouwgrond zetten.';
+    if (occ.has(`${a},${b}`)) return 'Daar staat een gebouw.';
+    const t = tileIndex(a, b);
+    if (ng.has(t)) return 'Daar staat al een poort.';
+    if (nw.has(t) && !gateOnly) return 'Daar staat al een muur.';
+    if (gates.has(x)) { nw.delete(t); ng.add(t); } else nw.add(t);
+  }
+  for (const g of moved) {
+    if (!gateFits(nw, ng, g.tiles.map(([i, j]) => [i + dx, j + dy]))) return 'Een poort moet in een recht stuk muur staan, met aan beide kanten een muurstuk.';
+  }
+  if (!ng.size && insideSet(s, nw)) return 'Zo is je stad helemaal dicht zonder poort. Maak eerst een poort (2 tegels breed) in een recht stuk muur.';
+  return { walls: [...nw], gates: [...ng] };
+}
+
+export function checkMoveWalls(s, tiles, dx, dy) {
+  const p = planWallMove(s, tiles, dx, dy);
+  return typeof p === 'string' ? p : null;
+}
+
+export function doMoveWalls(s, tiles, dx, dy) {
+  const p = planWallMove(s, tiles, dx, dy);
+  if (typeof p === 'string') throw new GameError(p);
+  s.walls = p.walls;
+  s.gates = p.gates;
+}
+
 export function buildRing(s) {
   return ringForAge(age(s));
 }
@@ -630,9 +807,59 @@ function withEx(s, fn) {
   s.terr.ex = exEncode(b);
 }
 
-// wat is er nu ontdekt (inclusief wat lopende eenheden onderweg al zagen)
+// Wat je rond je eigen stad altijd ziet: je bouwgrond (vierkant van je tijdperk, gekochte loten, gekapt bos), je muren
+// en poorten en alles erbinnen, met een rand van FIELD.homeSight tegels. Daarbuiten begint de oorlogsmist, dus nooit
+// binnen je eigen muren. Geeft een Uint8Array per tegel (1 = zichtbaar); gedeeld en gecachet: niet aanpassen.
+const SIGHT_OFF = (() => {
+  const r = FIELD.homeSight; const R = Math.ceil(r); const out = [];
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (dx * dx + dy * dy <= r * r) out.push([dx, dy]);
+  return out;
+})();
+let sightCache = null;
+export function homeSight(s) {
+  const k = ringForAge(age(s));
+  const tr = s.terr;
+  const harbors = findType(s, 'harbor');
+  const key = tr ? `${k}|${tr.seed}|${tr.cl.join()}|${JSON.stringify(tr.lots || [])}|${(s.walls || []).join()}|${(s.gates || []).join()}|${harbors.map((h) => `${h.x},${h.y}`).join()}` : `${k}`;
+  if (sightCache && sightCache.key === key) return sightCache.vis;
+  const src = new Uint8Array(T_W * T_W);
+  for (let j = T_MIN; j < T_MAX; j++) for (let i = T_MIN; i < T_MAX; i++) if (ringOf(i, j) <= k) src[tileIndex(i, j)] = 1;
+  if (tr) {
+    for (const idx of clearedSet(s)) src[idx] = 1;
+    const walls = wallSet(s);
+    for (const idx of walls) if (idx >= 0 && idx < src.length) src[idx] = 1;
+    const inside = insideSet(s, walls);
+    if (inside) {
+      for (const p of inside) {
+        const [i, j] = p.split(',').map(Number);
+        if (inTerr(i, j)) src[tileIndex(i, j)] = 1;
+      }
+    }
+  }
+  const vis = new Uint8Array(T_W * T_W);
+  for (let idx = 0; idx < src.length; idx++) {
+    if (!src[idx]) continue;
+    const i = (idx % T_W) + T_MIN; const j = Math.floor(idx / T_W) + T_MIN;
+    for (const [dx, dy] of SIGHT_OFF) if (inTerr(i + dx, j + dy)) vis[tileIndex(i + dx, j + dy)] = 1;
+  }
+  // rond het havenhuis (dat aan de rand van je gebied kan liggen) is er ook nooit mist: een vierkant van FISH.sight tegels
+  if (tr) {
+    const r = FISH.sight;
+    for (const h of harbors) {
+      for (let j = h.y - r; j <= h.y + r; j++) for (let i = h.x - r; i <= h.x + r; i++) if (inTerr(i, j)) vis[tileIndex(i, j)] = 1;
+    }
+  }
+  sightCache = { key, vis };
+  return vis;
+}
+
+// wat is er nu ontdekt (je eigen stad en de rand errond, plus wat lopende eenheden onderweg al zagen)
 export function exploredNow(s, now) {
   const b = exDecode(s.terr ? s.terr.ex : '');
+  if (s.terr) {
+    const hs = homeSight(s);
+    for (let k = 0; k < hs.length; k++) if (hs[k]) b[k >> 3] |= 1 << (k & 7);
+  }
   for (const g of s.field || []) {
     const p = groupPos(g, now);
     if (g.pending) revealSegment(b, g.x0, g.y0, p.x, p.y, groupVision(g));
@@ -716,8 +943,24 @@ function gatherAccrue(s, dt, speed) {
 }
 
 // Het barbarenkamp rond je stad is bedoeld als vrij makkelijke buit: ongeveer evenveel soldaten als barbaren volstaat.
-export const campSize = (s) => 2 + 2 * age(s) + Math.min(3, Math.floor(s.terr.camp.raids / 3)) - (s.terr.camp.loss || 0);
-export const raidSize = (s) => Math.min(40, Math.round(3 + age(s) * 2.5 + s.terr.camp.raids * 1.2));
+// Maar het groeit elke dag dat je het met rust laat (x1 bij het (her)opbouwen, tot WILD.camp.growMax), en dan worden ook
+// de overvallen op je dorp groter en vaker.
+const campDays = (s, t) => {
+  const c = s.terr.camp;
+  return c.since == null ? 0 : Math.max(0, t - c.since) / (c.day || 86400000);
+};
+export function campGrowth(s, t = s.t) {
+  return Math.round((1 + Math.min(WILD.camp.growMax - 1, WILD.camp.growPerDay * campDays(s, t))) * 100) / 100;
+}
+// kans op een overval bij elke controle (om de WILD.raid.checkHours)
+export function raidChance(s, t = s.t) {
+  const R = WILD.raid;
+  return Math.min(R.maxChance, R.chance + R.chancePerDay * campDays(s, t));
+}
+export const campSize = (s, t = s.t) => Math.round((2 + 2 * age(s)) * campGrowth(s, t)) - (s.terr.camp.loss || 0);
+export const raidSize = (s, t = s.t) => Math.min(WILD.raid.max, Math.round((3 + age(s) * 2.5) * campGrowth(s, t)));
+// de overval die nu naar je dorp trekt (of die je zelf aan het uitvechten bent)
+export const raidNow = (s) => (s && s.terr && s.terr.camp.raid) || null;
 export const boarAlive = (s, id, t) => (s.terr.boar[id] || 0) <= t;
 export const campAlive = (s, t) => s.terr.camp.down <= t;
 
@@ -743,7 +986,9 @@ function nextWildEvent(s, speed) {
       take(s.t + Math.ceil((depLeft(s, d) / rate) * 3600000), { kind: 'depleted', id });
     }
   }
-  if (s.terr.camp.next != null) take(s.terr.camp.next, { kind: 'raid' });
+  const c = s.terr.camp;
+  if (c.raid) take(c.raid.battle ? c.raid.bt + WILD.raid.liveMs : c.raid.at, { kind: 'raidHit' });
+  else if (c.next != null) take(c.next, { kind: 'raid' });
   return ev;
 }
 
@@ -753,7 +998,8 @@ function applyWildEvent(s, ev, speed) {
   else if (ev.kind === 'fight') finishFight(s, ev.f, ev.t, speed);
   else if (ev.kind === 'chopped') chopDone(s, ev.g, ev.t);
   else if (ev.kind === 'depleted') depleted(s, ev.id, ev.t);
-  else if (ev.kind === 'raid') barbarianRaid(s, ev.t, speed);
+  else if (ev.kind === 'raid') raidStart(s, ev.t);
+  else if (ev.kind === 'raidHit') raidAuto(s, ev.t);
 }
 
 // pace = optioneel trager tempo (tegels/s), zodat een heel leger samen aankomt
@@ -765,11 +1011,172 @@ function setPath(g, from, to, t, pace = null) {
   g.pending = true;
 }
 
-// lopen van 'from' naar 'dest', zo nodig via een poort (dan eerst naar de poort, daarna verder)
+// ---------- routes in je gebied ----------
+// Niemand loopt over water of door een muur; een poort is een doorgang (de deuren gaan open). Een route = A* over de
+// tegels (8 richtingen, geen hoeken afsnijden langs een hindernis), daarna zo weinig mogelijk tussenstops waar je
+// rechtdoor kan. Puur en deterministisch (zelfde uitkomst in browser en server); geen Math.hypot.
+let blockCache = null;
+function blockGrid(s) {
+  const key = `${s.terr.seed}|${(s.walls || []).join()}|${(s.gates || []).join()}`;
+  if (blockCache && blockCache.key === key) return blockCache.b;
+  const tiles = territory(s.terr.seed).tiles;
+  const b = new Uint8Array(T_W * T_W);
+  for (let k = 0; k < b.length; k++) if (tiles[k] === TILE.WATER) b[k] = 1;
+  for (const w of s.walls || []) if (w >= 0 && w < b.length) b[w] = 1;
+  for (const w of s.gates || []) if (w >= 0 && w < b.length) b[w] = 0;
+  blockCache = { key, b };
+  return b;
+}
+const blockedAt = (b, i, j) => !inTerr(i, j) || b[tileIndex(i, j)] === 1;
+
+// raakt het lijnstuk een geblokkeerde tegel? (elke tegel waar het door gaat; precies door een hoek = beide buren)
+// skip = tegel die mag (waar de groep nu staat, ook als daar intussen een muur kwam)
+function segFree(b, x0, y0, x1, y1, skip = -1) {
+  let i = Math.floor(x0); let j = Math.floor(y0);
+  const ie = Math.floor(x1); const je = Math.floor(y1);
+  const dx = x1 - x0; const dy = y1 - y0;
+  const si = dx > 0 ? 1 : dx < 0 ? -1 : 0; const sj = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+  const tdx = si ? si / dx : Infinity; const tdy = sj ? sj / dy : Infinity;
+  let tx = si ? ((si > 0 ? i + 1 : i) - x0) / dx : Infinity;
+  let ty = sj ? ((sj > 0 ? j + 1 : j) - y0) / dy : Infinity;
+  const bad = (a, c) => blockedAt(b, a, c) && !(inTerr(a, c) && tileIndex(a, c) === skip);
+  for (let n = 0; n < 4 * T_W; n++) {
+    if (bad(i, j)) return false;
+    if (i === ie && j === je) return true;
+    if (tx < ty - 1e-9) { i += si; tx += tdx; } else if (ty < tx - 1e-9) { j += sj; ty += tdy; } else {
+      if (bad(i + si, j) || bad(i, j + sj)) return false;
+      i += si; j += sj; tx += tdx; ty += tdy;
+    }
+  }
+  return true;
+}
+
+// rechtdoor van a naar c, met wat ruimte opzij (niet rakelings langs een muur of de oever)
+function clearLine(b, a, c, skip) {
+  if (!segFree(b, a.x, a.y, c.x, c.y, skip)) return false;
+  const dx = c.x - a.x; const dy = c.y - a.y; const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.7) return true;
+  const ux = dx / len; const uy = dy / len; const px = -uy * 0.22; const py = ux * 0.22;
+  const ax = a.x + ux * 0.35; const ay = a.y + uy * 0.35; const cx = c.x - ux * 0.35; const cy = c.y - uy * 0.35;
+  return segFree(b, ax + px, ay + py, cx + px, cy + py, skip) && segFree(b, ax - px, ay - py, cx - px, cy - py, skip);
+}
+
+const SQ2 = 1.4142135623730951;
+const DIRS8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, SQ2], [1, -1, SQ2], [-1, 1, SQ2], [-1, -1, SQ2]];
+function octile(i, j, gi, gj) { const a = Math.abs(i - gi); const c = Math.abs(j - gj); return Math.max(a, c) + (SQ2 - 1) * Math.min(a, c); }
+
+// A* van tegel (si, sj) naar (gi, gj); lukt dat niet (ingesloten), dan naar de bereikbare tegel die er het dichtst bij ligt.
+// Vaste werkgeheugens (typed arrays) en een eigen hoop: snel genoeg voor een heel leger in één verzoek op de server.
+const AN = T_W * T_W;
+const A_G = new Float64Array(AN); const A_CAME = new Int32Array(AN); const A_DONE = new Uint8Array(AN);
+const H_F = new Float64Array(AN * 8); const H_H = new Float64Array(AN * 8); const H_K = new Int32Array(AN * 8);
+let hn = 0;
+function hLess(a, c) { return H_F[a] < H_F[c] || (H_F[a] === H_F[c] && (H_H[a] < H_H[c] || (H_H[a] === H_H[c] && H_K[a] < H_K[c]))); }
+function hSwap(a, c) {
+  let x = H_F[a]; H_F[a] = H_F[c]; H_F[c] = x;
+  x = H_H[a]; H_H[a] = H_H[c]; H_H[c] = x;
+  const y = H_K[a]; H_K[a] = H_K[c]; H_K[c] = y;
+}
+function hPush(f, h, k) {
+  let c = hn++; H_F[c] = f; H_H[c] = h; H_K[c] = k;
+  while (c > 0) { const p = (c - 1) >> 1; if (!hLess(c, p)) break; hSwap(c, p); c = p; }
+}
+function hPop() {
+  const k = H_K[0]; hn--;
+  if (hn > 0) {
+    H_F[0] = H_F[hn]; H_H[0] = H_H[hn]; H_K[0] = H_K[hn];
+    let c = 0;
+    for (;;) { const l = 2 * c + 1; const r = l + 1; let m = c; if (l < hn && hLess(l, m)) m = l; if (r < hn && hLess(r, m)) m = r; if (m === c) break; hSwap(c, m); c = m; }
+  }
+  return k;
+}
+// ligt het doel op water of een muur: de dichtstbijzijnde vrije tegel (ringen eromheen, vaste volgorde)
+function freeNear(b, gi, gj) {
+  if (!blockedAt(b, gi, gj)) return [gi, gj];
+  for (let r = 1; r < T_W; r++) {
+    let best = null; let bd = Infinity;
+    for (let dj = -r; dj <= r; dj++) {
+      for (let di = -r; di <= r; di++) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== r || blockedAt(b, gi + di, gj + dj)) continue;
+        const d = di * di + dj * dj;
+        if (d < bd) { bd = d; best = [gi + di, gj + dj]; }
+      }
+    }
+    if (best) return best;
+  }
+  return [gi, gj];
+}
+function aStar(b, si, sj, gi0, gj0) {
+  const [gi, gj] = freeNear(b, Math.max(T_MIN, Math.min(T_MAX - 1, gi0)), Math.max(T_MIN, Math.min(T_MAX - 1, gj0)));
+  A_G.fill(Infinity); A_CAME.fill(-1); A_DONE.fill(0); hn = 0;
+  const start = tileIndex(si, sj); const goal = tileIndex(gi, gj);
+  A_G[start] = 0;
+  const h0 = octile(si, sj, gi, gj);
+  hPush(h0, h0, start);
+  let best = start; let bestH = h0;
+  while (hn > 0) {
+    const k = hPop();
+    if (A_DONE[k]) continue;
+    A_DONE[k] = 1;
+    const i = (k % T_W) + T_MIN; const j = ((k - (k % T_W)) / T_W) + T_MIN;
+    const h = octile(i, j, gi, gj);
+    if (h < bestH || (h === bestH && A_G[k] < A_G[best])) { best = k; bestH = h; }
+    if (k === goal) break;
+    for (let d = 0; d < 8; d++) {
+      const D = DIRS8[d]; const di = D[0]; const dj = D[1];
+      const ni = i + di; const nj = j + dj;
+      if (blockedAt(b, ni, nj)) continue;
+      if (di && dj && (blockedAt(b, i + di, j) || blockedAt(b, i, j + dj))) continue;
+      const nk = tileIndex(ni, nj);
+      const ng = A_G[k] + D[2];
+      if (A_DONE[nk] || ng >= A_G[nk]) continue;
+      if (hn >= H_K.length) continue; // kan niet: elke tegel komt hooguit 8 keer in de hoop
+      A_G[nk] = ng; A_CAME[nk] = k;
+      const nh = octile(ni, nj, gi, gj);
+      hPush(ng + nh, nh, nk);
+    }
+  }
+  const path = [];
+  for (let k = best; k !== -1; k = A_CAME[k]) path.push(k);
+  path.reverse();
+  return { path, reached: best === tileIndex(Math.max(T_MIN, Math.min(T_MAX - 1, gi0)), Math.max(T_MIN, Math.min(T_MAX - 1, gj0))) };
+}
+
+// De route van 'from' naar 'to': een lijst tussenstops (zonder 'from'), de laatste is het eindpunt. Ligt 'to' in het water
+// of is het niet te bereiken, dan eindigt de route zo dicht mogelijk erbij.
+export function routeTo(s, from, to) {
+  if (!s.terr) return [{ x: to.x, y: to.y }];
+  const b = blockGrid(s);
+  const si = Math.floor(from.x); const sj = Math.floor(from.y);
+  const skip = inTerr(si, sj) ? tileIndex(si, sj) : -1;
+  if (clearLine(b, from, to, skip)) return [{ x: to.x, y: to.y }];
+  const { path, reached } = aStar(b, si, sj, Math.floor(to.x), Math.floor(to.y));
+  let end = { x: to.x, y: to.y };
+  if (!reached) {
+    const t = tileOf(path[path.length - 1]);
+    end = { x: Math.min(t.i + 0.8, Math.max(t.i + 0.2, to.x)), y: Math.min(t.j + 0.8, Math.max(t.j + 0.2, to.y)) };
+  }
+  // tegelmiddens van de route (zonder de begintegel), het eindpunt in plaats van het laatste midden
+  const pts = path.slice(1).map((k) => { const t = tileOf(k); return { x: t.i + 0.5, y: t.j + 0.5 }; });
+  if (pts.length) pts[pts.length - 1] = end; else pts.push(end);
+  // zo ver mogelijk rechtdoor: enkel de bochten blijven over
+  const out = [];
+  let a = from; let i = 0;
+  while (i < pts.length) {
+    let k = i;
+    for (let m = pts.length - 1; m > i; m--) if (clearLine(b, a, pts[m], a === from ? skip : -1)) { k = m; break; }
+    out.push(pts[k]); a = pts[k]; i = k + 1;
+  }
+  return out.map((p) => ({ x: Math.round(p.x * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 }));
+}
+
+// lopen van 'from' naar 'dest' langs een route rond water en muren (door een poort naar buiten of binnen)
 function travel(s, g, from, dest, t, pace = null) {
-  const via = gateRoute(s, from, dest);
   if (pace) g.pace = pace; else delete g.pace;
-  if (via) { g.via = [via[1], { x: dest.x, y: dest.y }]; setPath(g, from, via[0], t, pace); } else { delete g.via; setPath(g, from, dest, t, pace); }
+  const pts = routeTo(s, from, dest);
+  const first = pts.shift();
+  if (pts.length) g.via = pts; else delete g.via;
+  setPath(g, from, first, t, pace);
 }
 
 function goHome(s, g, t) {
@@ -785,7 +1192,7 @@ function disband(s, g) {
     if (!n) continue;
     if (k === 'villager') {
       for (let i = 0; i < n; i++) {
-        if (g.job && g.job !== 'idle' && s.villagers[g.job] < slots(s)[g.job]) s.villagers[g.job]++;
+        if (g.job && g.job !== 'idle' && (s.villagers[g.job] || 0) < (slots(s)[g.job] || 0)) s.villagers[g.job] = (s.villagers[g.job] || 0) + 1;
         else s.villagers.idle++;
       }
     } else s.units[k] = (s.units[k] || 0) + n;
@@ -871,7 +1278,7 @@ function ambush(s, g, t) {
   engage(s, g, { type: 'camp', id: 0 }, t);
 }
 
-const foeSide = (s, foe) => (foe.type === 'boar' ? combatants({ boar: 1 }) : combatants({ barbarian: Math.max(1, campSize(s)) }));
+const foeSide = (s, foe, t) => (foe.type === 'boar' ? combatants({ boar: 1 }) : combatants({ barbarian: Math.max(1, campSize(s, t)) }));
 
 // gevecht beginnen, of aansluiten bij een lopend gevecht tegen dezelfde vijand
 function engage(s, g, foe, t) {
@@ -887,7 +1294,7 @@ function engage(s, g, foe, t) {
     f.b = now.b.filter((u) => u.hp > 0).map(({ died, ...u }) => u);
   } else {
     terr.fid = (terr.fid || 0) + 1;
-    f = { id: terr.fid, foe, t0: t, a: mine, b: foeSide(s, foe), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') };
+    f = { id: terr.fid, foe, t0: t, a: mine, b: foeSide(s, foe, t), ma: 1 + COMBAT.smithyBonus * bLevel(s, 'smithy') };
     terr.fights.push(f);
   }
   f.end = fightEnd(f);
@@ -964,10 +1371,13 @@ function finishFight(s, f, t, speed) {
   }
   const c = s.terr.camp;
   if (won) {
+    // een kamp dat lang kon groeien, geeft ook meer buit
+    const grow = campGrowth(s, t);
+    const loot = scaleRes(WILD.camp.loot, ageMult(s) * grow);
     c.down = t + Math.round((WILD.camp.respawnHours * 3600000) / speed);
     c.loss = 0;
-    if (c.next < c.down) c.next = c.down + Math.round(((WILD.raid.minHours * 3600000) / speed) / 2);
-    const loot = scaleRes(WILD.camp.loot, ageMult(s));
+    c.since = c.down; // het nieuwe kamp begint weer klein
+    if (!c.raid) scheduleRaid(s, c.down);
     addRes(s, loot);
     pushLog(s, t, 'camp', `Barbarenkamp verwoest! Buit: ${resText(loot)}. De overvallen stoppen voorlopig.`);
   } else {
@@ -987,29 +1397,64 @@ export function townBaseDef(s) {
   return COMBAT.ageDef * age(s) + COMBAT.villagerDef * totalVillagers(s);
 }
 
-function barbarianRaid(s, t, speed) {
+// Wanneer komt de volgende overval? Om de checkHours een kans die groeit met het kamp (raidChance), vast uit het zaad van
+// je gebied (browser en server zien hetzelfde), nooit binnen quietHours na 'from'.
+function scheduleRaid(s, from) {
+  const c = s.terr.camp; const R = WILD.raid; const day = c.day || 86400000;
+  const step = Math.round((day * R.checkHours) / 24);
+  let t = Math.max(from, c.down || 0) + Math.round((day * R.quietHours) / 24);
+  c.sch = (c.sch || 0) + 1;
+  for (let k = 0; k < 300; k++, t += step) if (wildRand(s, 7000 + c.sch * 300 + k) < raidChance(s, t)) break;
+  c.next = t;
+}
+
+// De barbaren trekken naar je dorp. Ze komen pas na WILD.raid.warnMs (echte tijd) aan: tot dan kan je kiezen om de slag
+// zelf te spelen (de server zet dan c.raid.battle), anders vallen ze automatisch aan (raidAuto).
+function raidStart(s, t) {
   const c = s.terr.camp;
-  const iv = Math.round(((WILD.raid.minHours + (WILD.raid.maxHours - WILD.raid.minHours) * wildRand(s, 100 + c.raids)) * 3600000) / speed);
-  if (!campAlive(s, t)) { c.next = c.down + iv; return; }
-  const n = raidSize(s);
-  c.raids++;
-  c.next = t + iv;
+  c.next = null;
+  if (!campAlive(s, t)) { scheduleRaid(s, t); return; }
+  const n = raidSize(s, t);
+  c.raid = { start: t, at: t + WILD.raid.warnMs, n };
+  pushLog(s, t, 'raid-warn', `${n} barbaren trekken naar je dorp! Verdedig het zelf of laat de slag automatisch verlopen.`);
+}
+
+function raidAuto(s, t) {
+  const n = s.terr.camp.raid.n;
+  const groups = [{ key: 'home', units: { ...s.units } }];
+  const smithy = bLevel(s, 'smithy');
   const r = resolveBattle({
-    attUnits: { barbarian: n }, groups: [{ key: 'home', units: { ...s.units } }], defSmithy: bLevel(s, 'smithy'),
+    attUnits: { barbarian: n }, groups, defSmithy: smithy,
     wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
   });
+  const loot = applyRaid(s, t, r.attWins, r.attLeft, r.groupsLeft[0].units);
+  // recept voor de replay (24 uur achteraf te bekijken in de browser, met de stad zoals ze dan is)
+  const e = s.terr.log[s.terr.log.length - 1];
+  if (e && e.t === t && /^raid-/.test(e.kind)) e.rp = { n, home: groups[0].units, smithy, fate: fateOf(r, groups), loot };
+}
+
+// Uitslag van een overval verwerken (automatisch, of na de slag die je zelf speelde: de server roept dit dan op).
+// home = de soldaten die thuis overblijven. Geeft de buit van de barbaren terug.
+export function applyRaid(s, t, attWins, attLeft, home) {
+  const c = s.terr.camp;
+  const n = c.raid ? c.raid.n : 0;
   s.units = {};
-  for (const [k, v] of Object.entries(r.groupsLeft[0].units)) if (v > 0) s.units[k] = v;
-  if (r.attWins) {
+  for (const [k, v] of Object.entries(home || {})) if (v > 0) s.units[k] = v;
+  let loot = {};
+  if (attWins) {
     const prot = protectAmount(s);
     const avail = {};
     for (const k of RES) avail[k] = Math.max(0, s.res[k] - prot);
-    const loot = computeLoot(avail, (r.attLeft.barbarian || 0) * WILD.raid.carry);
+    loot = computeLoot(avail, ((attLeft && attLeft.barbarian) || 0) * WILD.raid.carry);
     for (const k of RES) s.res[k] -= loot[k];
     pushLog(s, t, 'raid-lost', `${n} barbaren overvielen je stad en stalen ${resText(loot) || 'niets'}. Verwoest hun kamp of bouw je verdediging uit!`);
   } else {
     pushLog(s, t, 'raid-won', `Je stad sloeg een overval van ${n} barbaren af!`);
   }
+  c.raids++;
+  c.raid = null;
+  scheduleRaid(s, t);
+  return loot;
 }
 
 // ---------- acties in het veld ----------
@@ -1027,8 +1472,8 @@ export function doFieldSend(s, spec, from, to, target, now, pace = null) {
   let job = null;
   if (spec && spec.villager !== undefined) {
     job = spec.villager;
-    if (job === 'idle' ? s.villagers.idle < 1 : !(RES.includes(job) && s.villagers[job] > 0)) {
-      job = s.villagers.idle > 0 ? 'idle' : RES.reduce((b, r) => (s.villagers[r] > (b ? s.villagers[b] : 0) ? r : b), null);
+    if (job === 'idle' ? s.villagers.idle < 1 : !(JOBS.includes(job) && s.villagers[job] > 0)) {
+      job = s.villagers.idle > 0 ? 'idle' : JOBS.reduce((b, r) => ((s.villagers[r] || 0) > (b ? s.villagers[b] : 0) ? r : b), null);
     }
     if (!job) throw new GameError('Je hebt geen dorpeling vrij.');
     const n = Math.max(1, Math.min(s.villagers[job], 40, Math.floor(Number(spec.n) || 1)));
@@ -1189,12 +1634,16 @@ export function occupied(s, ignoreId = null) {
   return grid;
 }
 
-export function canPlaceAt(s, type, x, y) {
+// ignoreId: dit gebouw telt niet mee (bij verplaatsen mag het over zijn eigen oude plek schuiven)
+export function canPlaceAt(s, type, x, y, ignoreId = null) {
   const size = BUILDINGS[type].size;
   if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
   const cl = clearedSet(s);
-  for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
-  const grid = occupied(s);
+  // het havenhuis: naast water (mag net buiten je bouwgrond, zie shoreTile); de rest op je bouwgrond
+  if (BUILDINGS[type].shore) { if (!shoreTile(s, x, y, cl)) return false; } else {
+    for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (!isBuildable(s, x + dx, y + dy, cl)) return false;
+  }
+  const grid = occupied(s, ignoreId);
   for (let dx = 0; dx < size; dx++) for (let dy = 0; dy < size; dy++) if (grid.has(`${x + dx},${y + dy}`)) return false;
   if ((s.walls || []).length) {
     const walls = wallSet(s);
@@ -1205,10 +1654,12 @@ export function canPlaceAt(s, type, x, y) {
 
 // ---------- acties (geven een foutmelding terug of null) ----------
 
+export const needAge = (a) => `Vereist het ${AGES[a].name}.`;
+
 export function checkBuild(s, type) {
   const def = BUILDINGS[type];
   if (!def || def.placeable === false) return 'Onbekend gebouw.';
-  if (age(s) < def.age) return `Vereist het ${['', 'eerste', 'tweede', 'derde', 'vierde'][def.age]} tijdperk.`;
+  if (age(s) < def.age) return needAge(def.age);
   if (findType(s, type).length >= def.max) return `Je hebt al het maximum (${def.max}) van dit gebouw.`;
   if (s.builds.length >= maxBuilds(s)) return 'Al je bouwers zijn bezig.';
   if (tooBig(s, levelCost(type, 1))) return 'Je opslag is te klein hiervoor: bouw of verbeter een opslagplaats.';
@@ -1219,11 +1670,31 @@ export function checkBuild(s, type) {
 export function doBuild(s, type, x, y, now, speed) {
   const err = checkBuild(s, type);
   if (err) throw new GameError(err);
-  if (!canPlaceAt(s, type, x, y)) throw new GameError('Daar kan je niet bouwen.');
+  if (!canPlaceAt(s, type, x, y)) throw new GameError(BUILDINGS[type].shore ? 'Het havenhuis moet op vrij land naast het water staan (de vijver bij je dorp).' : 'Daar kan je niet bouwen.');
   pay(s.res, levelCost(type, 1));
   const b = { id: s.nextId++, type, x, y, level: 0 };
   s.buildings.push(b);
-  s.builds.push({ bid: b.id, to: 1, start: now, end: now + levelTime(type, 1, speed) });
+  s.builds.push({ bid: b.id, to: 1, start: now, end: now + buildTime(s, type, 1, speed) });
+  return b;
+}
+
+// Gebouw verplaatsen (gratis): enkel naar vrije bouwgrond. Het stadscentrum staat vast in het midden (plein en straten).
+export function checkMove(s, bid, x, y) {
+  const b = s.buildings.find((q) => q.id === bid);
+  if (!b) return 'Gebouw niet gevonden.';
+  if (b.type === 'tc') return 'Je stadscentrum blijft in het midden van je stad.';
+  if (!isPlaced(b)) return 'Muren verplaats je niet: breek ze af en zet ze opnieuw.';
+  if (!Number.isInteger(x) || !Number.isInteger(y)) return 'Ongeldige plaats.';
+  if (b.x === x && b.y === y) return 'Het gebouw staat daar al.';
+  if (!canPlaceAt(s, b.type, x, y, b.id)) return 'Daar kan het gebouw niet staan.';
+  return null;
+}
+
+export function doMove(s, bid, x, y) {
+  const err = checkMove(s, bid, x, y);
+  if (err) throw new GameError(err);
+  const b = s.buildings.find((q) => q.id === bid);
+  b.x = x; b.y = y;
   return b;
 }
 
@@ -1234,7 +1705,7 @@ export function checkUpgrade(s, bid) {
   if (s.builds.some((j) => j.bid === bid)) return 'Er wordt al aan gewerkt.';
   if (b.level >= def.maxLevel) return 'Maximaal niveau bereikt.';
   const to = b.level + 1;
-  if (age(s) < levelAge(b.type, to)) return `Vereist het ${['', 'eerste', 'tweede', 'derde', 'vierde'][levelAge(b.type, to)]} tijdperk.`;
+  if (age(s) < levelAge(b.type, to)) return needAge(levelAge(b.type, to));
   if (b.type === 'tc' && Object.keys(s.queues).includes('tc')) return 'Wacht tot de training in het stadscentrum klaar is.';
   if (s.builds.length >= maxBuilds(s)) return 'Al je bouwers zijn bezig.';
   const cost = levelCost(b.type, to);
@@ -1254,7 +1725,7 @@ export function doUpgrade(s, bid, now, speed) {
   const b = s.buildings.find((x) => x.id === bid);
   const to = b.level + 1;
   pay(s.res, levelCost(b.type, to));
-  s.builds.push({ bid, to, start: now, end: now + levelTime(b.type, to, speed) });
+  s.builds.push({ bid, to, start: now, end: now + buildTime(s, b.type, to, speed) });
 }
 
 // ---------- afbreken ----------
@@ -1265,6 +1736,7 @@ export function checkDemolish(s, bid) {
   if (b.type === 'tc') return 'Je stadscentrum kan je niet afbreken.';
   if (b.type === 'wall') return 'Muren breek je stuk per stuk af: tik op een muurstuk.';
   if ((s.queues[b.type] || []).length) return 'Er wordt nog getraind in dit gebouw. Wacht tot dat klaar is.';
+  if (b.type === 'academy' && s.research) return 'Er loopt nog een onderzoek. Wacht tot dat klaar is.';
   return null;
 }
 
@@ -1287,15 +1759,26 @@ export function doDemolish(s, bid) {
   s.buildings = s.buildings.filter((x) => x !== b);
   s.builds = s.builds.filter((j) => j.bid !== bid);
   addRes(s, refund);
+  // het havenhuis weg: de bootjes ook (een lopende bouw van een bootje valt weg)
+  if (b.type === 'harbor') { s.boats = 0; s.boatJob = null; }
   // werkplekken die wegvallen: die dorpelingen worden vrij
   const sl = slots(s);
-  for (const r of RES) {
-    if (s.villagers[r] > sl[r]) { s.villagers.idle += s.villagers[r] - sl[r]; s.villagers[r] = sl[r]; }
+  for (const r of JOBS) {
+    if ((s.villagers[r] || 0) > sl[r]) { s.villagers.idle += s.villagers[r] - sl[r]; s.villagers[r] = sl[r]; }
   }
   return refund;
 }
 
-export function checkTrain(s, unit, n, awayPop = 0) {
+// edelmannen die je hebt: thuis, in opleiding, in je gebied en (via awayNobles) onderweg of elders
+export function noblesOwned(s, awayNobles = 0) {
+  let n = (s.units.noble || 0) + awayNobles;
+  for (const it of s.queues.court || []) n += it.n - it.done;
+  for (const g of s.field || []) n += g.units.noble || 0;
+  return n;
+}
+export const noblesMax = (s) => bLevel(s, 'court');
+
+export function checkTrain(s, unit, n, awayPop = 0, awayNobles = 0) {
   const u = UNITS[unit];
   if (!u || u.wild || !u.building) return 'Onbekende eenheid.';
   if (u.civ && u.civ !== s.civ) return 'Dit is een eenheid van een ander volk.';
@@ -1306,13 +1789,18 @@ export function checkTrain(s, unit, n, awayPop = 0) {
   if (lvl < u.bl) return `Vereist ${BUILDINGS[u.building].name} niveau ${u.bl}.`;
   if (unit === 'villager' && s.builds.some((j) => j.bid === 1)) return 'Het stadscentrum wordt verbeterd.';
   if ((s.queues[u.queue || u.building] || []).length >= 8) return 'De wachtrij is vol.';
+  if (u.noble) {
+    if ((s.queues.court || []).length) return 'Er wordt al een edelman opgeleid.';
+    if (n > 1) return 'Je leidt één edelman tegelijk op.';
+    if (noblesOwned(s, awayNobles) + n > noblesMax(s)) return `Je mag ${noblesMax(s)} edelman${noblesMax(s) > 1 ? 'nen' : ''} hebben: verbeter je Adelshof.`;
+  }
   if (homePop(s) + awayPop + n * u.pop > popCap(s)) return 'Niet genoeg bevolkingsruimte. Bouw huizen!';
   if (!canAfford(s.res, u.cost, n)) return 'Niet genoeg grondstoffen.';
   return null;
 }
 
-export function doTrain(s, unit, n, now, speed, awayPop = 0) {
-  const err = checkTrain(s, unit, n, awayPop);
+export function doTrain(s, unit, n, now, speed, awayPop = 0, awayNobles = 0) {
+  const err = checkTrain(s, unit, n, awayPop, awayNobles);
   if (err) throw new GameError(err);
   const u = UNITS[unit];
   pay(s.res, u.cost, n);
@@ -1329,17 +1817,18 @@ export function doAssign(s, alloc, rally) {
   const total = homeVillagers(s);
   let sum = 0;
   const next = {};
-  for (const r of RES) {
-    const v = alloc[r];
+  for (const r of JOBS) {
+    // vissers: wie ze niet meegeeft (oudere browser, bots), houdt ze zoals ze waren
+    const v = alloc[r] === undefined && r === 'fish' ? Math.min(s.villagers.fish || 0, sl.fish) : alloc[r];
     if (!Number.isInteger(v) || v < 0) throw new GameError('Ongeldige verdeling.');
-    if (v > sl[r]) throw new GameError(`Te weinig werkplekken voor ${r}.`);
+    if (v > sl[r]) throw new GameError(r === 'fish' ? 'Te weinig plaats op je bootjes.' : `Te weinig werkplekken voor ${r}.`);
     next[r] = v;
     sum += v;
   }
   if (sum > total) throw new GameError('Zoveel dorpelingen heb je niet.');
-  for (const r of RES) s.villagers[r] = next[r];
+  for (const r of JOBS) s.villagers[r] = next[r];
   s.villagers.idle = total - sum;
-  if (rally && (rally === 'auto' || RES.includes(rally))) s.rally = rally;
+  if (rally && (rally === 'auto' || JOBS.includes(rally))) s.rally = rally;
 }
 
 export function marketRate(s) {
@@ -1370,8 +1859,46 @@ export function addUnits(s, units) {
   for (const k of Object.keys(units || {})) if (units[k] > 0) s.units[k] = (s.units[k] || 0) + units[k];
 }
 
+// ---------- Academie: onderzoek ----------
+
+export const techDone = (s, id) => !!(s.tech && s.tech[id]);
+
+export function checkResearch(s, id) {
+  const T = TECHS[id];
+  if (!T) return 'Onbekend onderzoek.';
+  if (techDone(s, id)) return 'Dit heb je al onderzocht.';
+  const L = bLevel(s, 'academy');
+  if (!L) return 'Bouw eerst een Academie.';
+  if (s.research) return 'Er loopt al een onderzoek.';
+  if (s.builds.some((j) => s.buildings.find((b) => b.id === j.bid && b.type === 'academy'))) return 'De Academie wordt verbouwd.';
+  if (L < T.row) return `Vereist Academie niveau ${T.row} (${AGES[levelAge('academy', T.row)].name}).`;
+  if (T.row > 1) {
+    const prev = TECH_IDS.find((k) => TECHS[k].line === T.line && TECHS[k].row === T.row - 1);
+    if (!techDone(s, prev)) return `Onderzoek eerst ${TECHS[prev].name}.`;
+  }
+  if (tooBig(s, T.cost)) return 'Je opslag is te klein hiervoor: bouw of verbeter een opslagplaats.';
+  if (!canAfford(s.res, T.cost)) return 'Niet genoeg grondstoffen.';
+  return null;
+}
+
+export const researchTime = (id, speed = 1) => Math.max(5000, Math.round((TECHS[id].time * 1000) / speed));
+
+export function doResearch(s, id, now, speed) {
+  const err = checkResearch(s, id);
+  if (err) throw new GameError(err);
+  pay(s.res, TECHS[id].cost);
+  s.research = { id, start: now, end: now + researchTime(id, speed) };
+}
+
+function finishResearch(s) {
+  if (!s.tech) s.tech = {};
+  s.tech[s.research.id] = 1;
+  s.research = null;
+}
+
 export function townScore(s) {
   let pts = 10;
+  for (const id of Object.keys(s.tech || {})) if (TECHS[id]) pts += costValue(TECHS[id].cost) / 50;
   for (const b of s.buildings) {
     for (let L = 1; L <= b.level; L++) {
       if (b.type === 'tc') { if (L >= 2) pts += costValue(AGE_UP[L].cost) / 50; }
@@ -1384,6 +1911,14 @@ export function townScore(s) {
   return Math.round(pts);
 }
 
+// Lichte versie van advance() voor overzichten van veel steden (wereldkaart, ranglijst): enkel de bouwwerken die al klaar
+// zijn, toepassen. Geen productie, training of gebeurtenissen in het gebied (dat kost veel rekentijd per stad).
+export function settleBuilds(s, t) {
+  const done = (s.builds || []).filter((j) => j.end <= t).sort((a, b) => a.end - b.end);
+  for (const j of done) finishBuild(s, j);
+  return s;
+}
+
 export function publicSummary(s) {
   return {
     age: age(s),
@@ -1391,5 +1926,8 @@ export function publicSummary(s) {
     wall: bLevel(s, 'wall'),
     monument: bLevel(s, 'monument'),
     score: townScore(s),
+    loyalty: Math.floor(loyalty(s)),
+    shield: s.loyShield && s.loyShield > s.t ? s.loyShield : 0,
+    vassal: isVassal(s) ? { lord: s.vas.lord, lname: s.vas.lname, ltown: s.vas.ltown, until: s.vas.until } : null,
   };
 }

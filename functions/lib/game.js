@@ -1,29 +1,49 @@
 // Server-side spelmotor: laden/bewaren van steden, legers verwerken, gevechten.
 import {
   advance, addResources, addUnits, bLevel, totalVillagers, protectAmount, GameError, ensureTerritory,
-  towerDefense, townBaseDef, effectiveWall, newTownState,
+  towerDefense, townBaseDef, effectiveWall, newTownState, townScore, raidNow, applyRaid,
 } from '../../public/shared/sim.js';
-import { tileIndex } from '../../public/shared/territory.js';
+import { applyNobles, lordCount, addVassal, liberateByAttack, processVassals } from './vassal.js';
+import { tileIndex, territory } from '../../public/shared/territory.js';
 import {
-  resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits, subtractUnits,
+  resolveBattle, resolveScouting, carryCapacity, computeLoot, countUnits, subtractUnits, fateOf,
 } from '../../public/shared/battle.js';
-import { createBattle, stepTo, queueOrder, battleOutcome, FB } from '../../public/shared/fieldbattle.js';
+import { createBattle, stepTo, queueOrder, battleOutcome, FB, FORMS } from '../../public/shared/fieldbattle.js';
 import {
-  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS,
+  RES, UNITS, CAMP, campUnits, campLoot, campBaseDef, unitValue, CIV_IDS, WAR, bountyOf, TC_POS, WILD, REPLAY,
 } from '../../public/shared/rules.js';
 
 export class ConflictError extends Error {}
 
+// Het seizoen loopt van start_at tot start_at + war_ms. Vrede is er niet meer voor iedereen samen, maar per speler:
+// prep_ms na zijn start (standaard 24 uur) kan niemand hem aanvallen en kan hij zelf geen spelers aanvallen.
 export function worldTimes(w) {
-  const prepEnd = w.start_at + w.prep_ms;
-  const warEnd = prepEnd + w.war_ms;
-  return { startAt: w.start_at, prepEnd, warEnd };
+  return { startAt: w.start_at, warEnd: w.start_at + w.war_ms, peaceMs: w.prep_ms };
+}
+
+// einde van de vrede van een speler (aangemeld vóór de start: vanaf de start van het seizoen)
+export const peaceEnd = (w, playerCreatedAt) => Math.max(playerCreatedAt || 0, w.start_at) + w.prep_ms;
+
+const fmtLeft = (ms) => {
+  const m = Math.max(1, Math.ceil(ms / 60000));
+  return m >= 60 ? `${Math.floor(m / 60)} u ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+};
+
+// Een aanval of verkenning op een speler mag pas aankomen als de vrede van beide spelers voorbij is.
+// Geeft de foutmelding terug, of null als het mag.
+export function peaceBlock(w, attackerCreatedAt, targetCreatedAt, now, arriveAt) {
+  const mine = peaceEnd(w, attackerCreatedAt);
+  const theirs = peaceEnd(w, targetCreatedAt);
+  if (arriveAt >= Math.max(mine, theirs)) return null;
+  if (arriveAt < mine) {
+    return `Je hebt nog vrede (nog ${fmtLeft(mine - now)}): tot dan kan je geen spelers aanvallen. Rovers mag je altijd aanvallen!`;
+  }
+  return `Die speler is net begonnen en heeft nog vrede (nog ${fmtLeft(theirs - now)}). Je leger zou te vroeg aankomen.`;
 }
 
 export function phaseOf(w, now) {
-  const { startAt, prepEnd, warEnd } = worldTimes(w);
+  const { startAt, warEnd } = worldTimes(w);
   if (now < startAt) return 'lobby';
-  if (now < prepEnd) return 'prep';
   if (now < warEnd) return 'war';
   return 'ended';
 }
@@ -42,9 +62,27 @@ export async function loadTown(db, id) {
   return row;
 }
 
-async function saveTown(db, town) {
-  const r = await db.prepare('UPDATE towns SET state = ?, version = version + 1 WHERE id = ? AND version = ?')
-    .bind(JSON.stringify(town.state), town.id, town.version).run();
+// wanneer het eerstvolgende bouwwerk klaar is (voor de melding 'bouwer vrij'); niet voor computerspelers
+export function nextBuildAt(s) {
+  if (!s || s.bot) return null;
+  let m = null;
+  for (const j of s.builds || []) if (m === null || j.end < m) m = j.end;
+  return m;
+}
+
+// Wanneer moet de cron deze stad bekijken voor een overval van de barbaren (notifyRaids in push.js)? Het begin van de
+// volgende overval (melding sturen), of het einde van de lopende (daarna de volgende inplannen). Niet voor bots.
+export function raidNotice(s) {
+  if (!s || s.bot || !s.terr || !s.terr.camp) return null;
+  const c = s.terr.camp;
+  const raid = c.raid;
+  if (raid) return !raid.told ? raid.start : raid.battle ? raid.bt + WILD.raid.liveMs : raid.at;
+  return c.next ?? null;
+}
+
+export async function saveTown(db, town) {
+  const r = await db.prepare('UPDATE towns SET state = ?, build_at = ?, raid_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+    .bind(JSON.stringify(town.state), nextBuildAt(town.state), raidNotice(town.state), town.id, town.version).run();
   if (!r.meta.changes) throw new ConflictError();
   town.version++;
 }
@@ -106,18 +144,30 @@ function damageBuilding(s, type, levels) {
 
 // ---------- legers verwerken ----------
 
-export async function processDue(db, world, now, budget = 30) {
+// Aangekomen legers verwerken (en slagen/vazallen). budget = hooguit zoveel D1-query's; opts.max = hooguit zoveel legers
+// (elk leger kost rekentijd: een stad bijrekenen); opts.mine = { player, town }: enkel legers van of naar deze speler
+// (zolang de cron-worker draait, doet die de rest); opts.light = geen vazallen (doet de cron-worker).
+export async function processDue(db, world, now, budget = 30, opts = {}) {
   let processed = 0;
+  const max = opts.max ?? Infinity;
   await processBattles(db, world, now);
-  for (let loop = 0; loop < 10; loop++) {
-    if (db.ctx.count > budget) break;
-    const due = await db.prepare(
-      `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
-       ORDER BY arrive_at LIMIT 4`,
-    ).bind(now, now).all();
+  const qn = () => (db.ctx ? db.ctx.count : 0);
+  if (!opts.light && qn() < 12) await processVassals(db, world, now);
+  const mine = opts.mine;
+  for (let loop = 0; loop < 10 && processed < max; loop++) {
+    if (qn() > budget) break;
+    const due = await (mine
+      ? db.prepare(
+        `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
+         AND (player_id = ? OR (target_kind = 'town' AND target_id = ?)) ORDER BY arrive_at LIMIT 4`,
+      ).bind(now, now, mine.player, mine.town)
+      : db.prepare(
+        `SELECT * FROM marches WHERE status IN ('out','back','battle') AND arrive_at <= ? AND lock_until < ?
+         ORDER BY arrive_at LIMIT 4`,
+      ).bind(now, now)).all();
     if (!due.results.length) break;
     for (const m of due.results) {
-      if (db.ctx.count > budget) break;
+      if (qn() > budget || processed >= max) break;
       const lock = await db.prepare('UPDATE marches SET lock_until = ? WHERE id = ? AND lock_until < ?')
         .bind(now + 30000, m.id, now).run();
       if (!lock.meta.changes) continue;
@@ -170,7 +220,7 @@ async function resolveMarch(db, world, m, now = m.arrive_at) {
     return;
   }
   if (m.kind === 'support') return arriveSupport(db, m);
-  if (m.kind === 'trade') return arriveTrade(db, world, m, t);
+  if (m.kind === 'trade' || m.kind === 'tribute') return arriveTrade(db, world, m, t);
   if (m.target_kind === 'camp') {
     if (m.kind === 'scout') return scoutCamp(db, world, m, t);
     return attackCamp(db, world, m, t);
@@ -209,8 +259,9 @@ async function arriveTrade(db, world, m, t) {
   if (target) {
     await mutateTown(db, world, m.target_id, t, (s) => addResources(s, m.res));
     const sender = await db.prepare('SELECT name FROM players WHERE id = ?').bind(m.player_id).first();
-    await addReport(db, target.player_id, t, 'trade', `Karavaan van ${sender ? sender.name : '?'} aangekomen`, {
-      type: 'trade', from: sender ? sender.name : '?', res: m.res,
+    const tribute = m.kind === 'tribute';
+    await addReport(db, target.player_id, t, 'trade', `${tribute ? 'Schatting' : 'Karavaan'} van ${sender ? sender.name : '?'} aangekomen`, {
+      type: 'trade', from: sender ? sender.name : '?', res: m.res, tribute,
     });
   }
   await deleteMarch(db, m.id);
@@ -218,28 +269,61 @@ async function arriveTrade(db, world, m, t) {
 
 async function participants(db, m) {
   const attacker = await db.prepare(
-    'SELECT p.id, p.name, t.name AS town, t.state FROM players p JOIN towns t ON t.id = ? WHERE p.id = ?',
+    'SELECT p.id, p.name, p.team_id, p.bot, tm.color, t.name AS town, t.state FROM players p JOIN towns t ON t.id = ? LEFT JOIN teams tm ON tm.id = p.team_id WHERE p.id = ?',
   ).bind(m.from_town, m.player_id).first();
-  const smithy = attacker ? bLevel(JSON.parse(attacker.state), 'smithy') : 0;
-  return { attacker, smithy };
+  const as = attacker ? JSON.parse(attacker.state) : null;
+  return { attacker, smithy: as ? bLevel(as, 'smithy') : 0, tech: (as && as.tech) || null, score: as ? townScore(as) : 0, age: as ? bLevel(as, 'tc') || 1 : 1 };
+}
+
+const sumRes = (o) => RES.reduce((a, r) => a + (o[r] || 0), 0);
+const plusRes = (a, b) => { const o = {}; for (const r of RES) o[r] = (a[r] || 0) + (b[r] || 0); return o; };
+
+// ---------- replay van een automatisch uitgerekende slag (24 uur te bekijken) ----------
+// Het recept: wat createBattle nodig heeft om de slag in de browser na te spelen (computer tegen computer), plus de
+// vaste uitslag (fateOf) zodat setFate de slag daar laat uitkomen. Klein (enkel het stadsbeeld, geen hele stad).
+const marchDir = (m) => ({ x: (m.from_x ?? m.to_x) - m.to_x, y: (m.from_y ?? m.to_y) - m.to_y });
+
+// bewaar het recept; geeft het id (of null: dan is er gewoon geen replay, de slag zelf gaat altijd door)
+async function saveReplay(db, rec, t, who) {
+  try {
+    const ids = [...new Set(who.filter((x) => x))];
+    if (!ids.length) return null;
+    const r = await db.prepare('INSERT INTO replays (created_at, who, data) VALUES (?, ?, ?)').bind(t, `,${ids.join(',')},`, JSON.stringify(rec)).run();
+    const id = r.meta.last_row_id;
+    // af en toe de replays van meer dan 24 uur geleden opruimen
+    if (id % 20 === 0) await db.prepare('DELETE FROM replays WHERE created_at < ?').bind(t - REPLAY.ms).run();
+    return id;
+  } catch (e) {
+    console.error('replay', e && e.message);
+    return null;
+  }
+}
+
+export async function loadReplay(db, id, playerId, now) {
+  const row = await db.prepare('SELECT id, created_at, who, data FROM replays WHERE id = ?').bind(id).first();
+  if (!row || !String(row.who).includes(`,${playerId},`)) throw new GameError('Deze replay bestaat niet (meer).', 404);
+  if (row.created_at < now - REPLAY.ms) throw new GameError('Deze replay is niet meer beschikbaar: je kan een slag tot 24 uur achteraf bekijken.', 410);
+  const rec = JSON.parse(row.data);
+  return { ...rec, id: row.id, at: row.created_at, until: row.created_at + REPLAY.ms, role: rec.attP === playerId ? 'att' : 'def' };
 }
 
 async function attackTown(db, world, m, t, override = null) {
-  const { attacker, smithy } = await participants(db, m);
+  const { attacker, smithy, tech, score, age: attAge } = await participants(db, m);
+  const lc = m.units.noble ? await lordCount(db, m.player_id) : 0;
   const def = await db.prepare(
-    'SELECT t.id, t.name, t.player_id, p.name AS pname FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?',
+    'SELECT t.id, t.name, t.player_id, p.name AS pname, p.bot, tm.color FROM towns t JOIN players p ON p.id = t.player_id LEFT JOIN teams tm ON tm.id = p.team_id WHERE t.id = ?',
   ).bind(m.target_id).first();
   if (!def) { await sendBack(db, m, m.units, {}, t); return; }
   const supRows = (await db.prepare(
-    'SELECT s.*, p.name AS pname FROM support s JOIN players p ON p.id = s.player_id WHERE s.host_town = ?',
+    'SELECT s.*, p.name AS pname, p.bot FROM support s JOIN players p ON p.id = s.player_id WHERE s.host_town = ?',
   ).bind(m.target_id).all()).results;
   for (const r of supRows) r.unitsObj = JSON.parse(r.units);
 
-  const { result: out } = await mutateTown(db, world, m.target_id, t, (s) => {
+  const { result: out, town: defTown } = await mutateTown(db, world, m.target_id, t, (s) => {
     const groups = [{ key: 'home', units: { ...s.units } }, ...supRows.map((r) => ({ key: r.id, units: r.unitsObj }))];
     const b = override ? override.build(groups, s, smithy) : resolveBattle({
       attUnits: m.units, attSmithy: smithy, groups, defSmithy: bLevel(s, 'smithy'),
-      wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s),
+      wall: effectiveWall(s), towerDef: towerDefense(s), baseDef: townBaseDef(s), attTech: tech, defTech: s.tech || null,
     });
     // torens die in de veldslag sneuvelden, verliezen een niveau (of vallen helemaal om)
     for (const id of (override && override.towersLost) || []) {
@@ -253,38 +337,56 @@ async function attackTown(db, world, m, t, override = null) {
     let loot = { food: 0, wood: 0, stone: 0, gold: 0 };
     let wallDamage = 0;
     let monumentDamage = 0;
+    let bounty;
     if (b.attWins) {
       const prot = protectAmount(s);
       const avail = {};
       for (const r of RES) avail[r] = Math.max(0, s.res[r] - prot);
-      loot = computeLoot(avail, carryCapacity(b.attLeft));
+      loot = computeLoot(avail, carryCapacity(b.attLeft, attAge));
       for (const r of RES) s.res[r] -= loot[r];
       wallDamage = damageBuilding(s, 'wall', b.wallDamage);
       monumentDamage = damageBuilding(s, 'monument', b.monumentDamage);
+      // krijgsbuit: de wapens en uitrusting van alle gesneuvelde verdedigers (ook de versterking)
+      const dead = {};
+      for (const g of b.groupsLost) for (const k of Object.keys(g.units)) dead[k] = (dead[k] || 0) + g.units[k];
+      bounty = bountyOf(dead);
+    } else {
+      // de verdediger houdt het slagveld: krijgsbuit van de gesneuvelde aanvallers, meteen in zijn opslag
+      bounty = bountyOf(b.attLost);
+      addResources(s, bounty);
     }
-    return { b, loot, wallDamage, monumentDamage, groups };
+    // automatisch uitgerekend: de stad zoals ze er tijdens de slag bij lag, voor de replay
+    const look = override ? null : { view: townView(s, m.target_id), smithyD: bLevel(s, 'smithy'), techD: s.tech || null, style: { civ: s.civ, age: bLevel(s, 'tc') } };
+    // edelmannen die de slag overleefden, verlagen de trouw
+    const noble = b.attWins && attacker ? applyNobles(s, t, b.attLeft.noble || 0,
+      { playerId: m.player_id, name: attacker.name, townId: m.from_town, town: attacker.town, score }, lc) : null;
+    return { b, loot, wallDamage, monumentDamage, groups, noble, bounty, look };
   });
 
-  const { b, loot, wallDamage, monumentDamage, groups } = out;
+  const { b, loot, wallDamage, monumentDamage, groups, noble, bounty, look } = out;
+  if (noble && noble.conquered) await addVassal(db, def.id, def.player_id, defTown.state, t);
+  // een gewonnen aanval op een heer bevrijdt zijn vazallen uit het team van de aanvaller
+  const freed = b.attWins && attacker ? await liberateByAttack(db, world, def.player_id, attacker.team_id, t) : [];
   // ondersteunende troepen bijwerken
   for (let i = 1; i < groups.length; i++) {
     const left = b.groupsLeft[i].units;
     if (countUnits(left) <= 0) await db.prepare('DELETE FROM support WHERE id = ?').bind(groups[i].key).run();
     else await db.prepare('UPDATE support SET units = ? WHERE id = ?').bind(JSON.stringify(left), groups[i].key).run();
   }
-  await sendBack(db, m, b.attLeft, loot, t);
+  // wie wint, brengt de krijgsbuit mee naar huis (bovenop wat zijn troepen dragen)
+  await sendBack(db, m, b.attLeft, b.attWins ? plusRes(loot, bounty) : loot, t);
 
-  // punten: waarde van gesneuvelde vijanden / 50
+  // punten: waarde van gesneuvelde vijanden (WAR.killPts) + buit (WAR.lootPts)
   const defLostValue = b.groupsLost.reduce((a, g) => a + unitValue(g.units), 0);
-  await addKillPts(db, m.player_id, defLostValue / 50);
+  await addKillPts(db, m.player_id, defLostValue / WAR.killPts + sumRes(loot) / WAR.lootPts);
   const attLostValue = unitValue(b.attLost);
   const groupValues = groups.map((g) => unitValue(g.units));
   const totalGroupValue = groupValues.reduce((a, v) => a + v, 0);
   const defOwners = [def.player_id, ...supRows.map((r) => r.player_id)];
   if (totalGroupValue > 0) {
-    for (let i = 0; i < groups.length; i++) await addKillPts(db, defOwners[i], (attLostValue / 50) * (groupValues[i] / totalGroupValue));
+    for (let i = 0; i < groups.length; i++) await addKillPts(db, defOwners[i], (attLostValue / WAR.killPts) * (groupValues[i] / totalGroupValue));
   } else {
-    await addKillPts(db, def.player_id, attLostValue / 50);
+    await addKillPts(db, def.player_id, attLostValue / WAR.killPts);
   }
 
   const defUnits = {};
@@ -297,21 +399,33 @@ async function attackTown(db, world, m, t, override = null) {
     type: 'battle', attWins: b.attWins, A: b.A, D: b.D,
     attacker: { name: attacker ? attacker.name : '?', town: attacker ? attacker.town : '?' },
     defender: { name: def.pname, town: def.name },
-    attUnits: m.units, attLost: b.attLost, defUnits, defLost, loot, wallDamage, monumentDamage,
-    supporters: supRows.map((r) => r.pname),
+    attUnits: m.units, attLost: b.attLost, defUnits, defLost, loot, bounty, wallDamage, monumentDamage,
+    supporters: supRows.map((r) => r.pname), noble, freed: freed.length,
   };
   data.live = !!(override && override.live);
+  // replay (enkel als er een echte speler bij is: computer tegen computer bekijkt niemand)
+  const humans = [attacker && !attacker.bot ? m.player_id : 0, def.bot ? 0 : def.player_id, ...supRows.map((r) => (r.bot ? 0 : r.player_id))];
+  if (look && humans.some((x) => x)) {
+    data.replay = await saveReplay(db, {
+      v: 1, kind: 'town', title: def.name, attP: m.player_id,
+      att: m.units, defGroups: groups.map((g) => ({ key: g.key, units: g.units })),
+      smithyA: smithy, smithyD: look.smithyD, techA: tech || null, techD: look.techD, dir: marchDir(m), view: look.view, style: look.style,
+      side: { att: { name: data.attacker.name, color: (attacker && attacker.color) || '#2e6fb5' }, def: { name: def.pname, color: def.color || '#c0392b' } },
+      fate: fateOf(b, groups), res: { attWins: b.attWins, attLost: b.attLost, defLost, loot, bounty: bounty || null, wallDamage, monumentDamage },
+    }, t, humans);
+  }
+  const conq = noble && noble.conquered;
   await addReport(db, m.player_id, t, 'attack',
-    b.attWins ? `Overwinning bij ${def.name}` : `Nederlaag bij ${def.name}`, data);
+    conq ? `${def.name} is nu je vazal!` : b.attWins ? `Overwinning bij ${def.name}` : `Nederlaag bij ${def.name}`, data);
   await addReport(db, def.player_id, t, 'defense',
-    b.attWins ? `${data.attacker.name} heeft ${def.name} geplunderd` : `${def.name} hield stand tegen ${data.attacker.name}`, data);
+    conq ? `${def.name} is nu vazal van ${data.attacker.name}` : b.attWins ? `${data.attacker.name} heeft ${def.name} geplunderd` : `${def.name} hield stand tegen ${data.attacker.name}`, data);
   const notified = new Set([def.player_id, m.player_id]);
   for (const r of supRows) {
     if (notified.has(r.player_id)) continue;
     notified.add(r.player_id);
     await addReport(db, r.player_id, t, 'defense', `Je troepen vochten mee in ${def.name}`, data);
   }
-  return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost, loot };
+  return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost, loot, bounty, replay: data.replay || null };
 }
 
 function freshCamp(level) {
@@ -327,7 +441,7 @@ async function loadCamp(db, id, t) {
 }
 
 async function attackCamp(db, world, m, t, override = null) {
-  const { attacker, smithy } = await participants(db, m);
+  const { attacker, smithy, tech, age: attAge } = await participants(db, m);
   for (let i = 0; i < 4; i++) {
     const c = await loadCamp(db, m.target_id, t);
     if (!c) { await sendBack(db, m, m.units, {}, t); return; }
@@ -335,25 +449,33 @@ async function attackCamp(db, world, m, t, override = null) {
     const b = override ? override.build(groups, null, smithy, campBaseDef(c.level)) : resolveBattle({ attUnits: m.units, attSmithy: smithy, groups, baseDef: campBaseDef(c.level) });
     let loot = { food: 0, wood: 0, stone: 0, gold: 0 };
     c.state.units = b.groupsLeft[0].units;
+    const bounty = b.attWins ? bountyOf(b.groupsLost[0].units) : null;
     if (b.attWins) {
-      loot = computeLoot(c.state.res, carryCapacity(b.attLeft));
+      loot = computeLoot(c.state.res, carryCapacity(b.attLeft, attAge));
       for (const r of RES) c.state.res[r] -= loot[r];
     }
     if (!c.state.refresh_at) c.state.refresh_at = t + Math.round(CAMP.respawnHours * 3600000 / world.speed);
     const r = await db.prepare('UPDATE camps SET state = ?, version = version + 1 WHERE id = ? AND version = ?')
       .bind(JSON.stringify(c.state), c.id, c.version).run();
     if (!r.meta.changes) continue;
-    await sendBack(db, m, b.attLeft, loot, t);
-    await addKillPts(db, m.player_id, unitValue(b.groupsLost[0].units) / 100);
+    await sendBack(db, m, b.attLeft, bounty ? plusRes(loot, bounty) : loot, t);
+    await addKillPts(db, m.player_id, unitValue(b.groupsLost[0].units) / WAR.campKillPts);
     const name = `Roverskamp (niveau ${c.level})`;
+    const replay = !override && attacker && !attacker.bot ? await saveReplay(db, {
+      v: 1, kind: 'camp', title: name, attP: m.player_id, level: c.level, campSeed: 50000 + c.id,
+      att: m.units, defGroups: groups.map((g) => ({ key: g.key, units: g.units })), smithyA: smithy, techA: tech || null, dir: marchDir(m),
+      view: { seed: 50000 + c.id, camp: true },
+      side: { att: { name: attacker.name, color: attacker.color || '#2e6fb5' }, def: { name: 'Rovers', color: '#7a1b12' } },
+      fate: fateOf(b, groups), res: { attWins: b.attWins, attLost: b.attLost, defLost: b.groupsLost[0].units, loot, bounty: bounty || null },
+    }, t, [m.player_id]) : null;
     await addReport(db, m.player_id, t, 'attack', b.attWins ? `${name} verslagen` : `Nederlaag bij ${name}`, {
       type: 'battle', camp: true, attWins: b.attWins, A: b.A, D: b.D,
       attacker: { name: attacker ? attacker.name : '?', town: attacker ? attacker.town : '?' },
       defender: { name: 'Rovers', town: name },
-      attUnits: m.units, attLost: b.attLost, defUnits: groups[0].units, defLost: b.groupsLost[0].units, loot,
-      wallDamage: 0, monumentDamage: 0, supporters: [], live: !!(override && override.live),
+      attUnits: m.units, attLost: b.attLost, defUnits: groups[0].units, defLost: b.groupsLost[0].units, loot, bounty,
+      wallDamage: 0, monumentDamage: 0, supporters: [], live: !!(override && override.live), replay,
     });
-    return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost: b.groupsLost[0].units, loot };
+    return { attWins: b.attWins, attLeft: b.attLeft, attLost: b.attLost, defLost: b.groupsLost[0].units, loot, bounty, replay };
   }
   return null;
 }
@@ -404,15 +526,21 @@ async function scoutTown(db, world, m, t) {
 
 // ---------- hulpfuncties voor handlers ----------
 
-export async function awayPop(db, playerId) {
-  let p = 0;
+// troepen die onderweg of bij bondgenoten zijn: bevolking en edelmannen
+export async function awayInfo(db, playerId) {
+  let p = 0; let nobles = 0;
   const ms = (await db.prepare(`SELECT units FROM marches WHERE player_id = ?`).bind(playerId).all()).results;
   const ss = (await db.prepare(`SELECT units FROM support WHERE player_id = ?`).bind(playerId).all()).results;
   for (const row of [...ms, ...ss]) {
     const u = JSON.parse(row.units);
     for (const k of Object.keys(u)) if (UNITS[k]) p += UNITS[k].pop * (u[k] || 0);
+    nobles += u.noble || 0;
   }
-  return p;
+  return { pop: p, nobles };
+}
+
+export async function awayPop(db, playerId) {
+  return (await awayInfo(db, playerId)).pop;
 }
 
 export function freshCampState(level) {
@@ -505,7 +633,9 @@ async function startBattle(db, world, b, now) {
   const m = await loadMarch(db, b.march_id);
   if (!m) { await db.prepare('DELETE FROM battles WHERE id = ?').bind(b.id).run(); return; }
   const att = await db.prepare('SELECT t.state FROM towns t WHERE t.id = ?').bind(m.from_town).first();
-  const smithyA = att ? bLevel(JSON.parse(att.state), 'smithy') : 0;
+  const attS = att ? JSON.parse(att.state) : null;
+  const smithyA = attS ? bLevel(attS, 'smithy') : 0;
+  const techA = (attS && attS.tech) || null;
   let setup;
   if (b.target_kind === 'town') {
     const town = await loadTown(db, b.target_id);
@@ -516,7 +646,7 @@ async function startBattle(db, world, b, now) {
     const sup = (await db.prepare('SELECT id, units FROM support WHERE host_town = ?').bind(b.target_id).all()).results;
     const defGroups = [{ key: 'home', units: { ...s.units } }, ...sup.map((r) => ({ key: r.id, units: JSON.parse(r.units) }))];
     setup = {
-      kind: 'town', att: m.units, defGroups, smithyA, smithyD: bLevel(s, 'smithy'), town: s, townId: town.id,
+      kind: 'town', att: m.units, defGroups, smithyA, smithyD: bLevel(s, 'smithy'), town: s, townId: town.id, techA, techD: s.tech || null,
       style: { civ: s.civ, age: bLevel(s, 'tc') },
       // de stad zoals ze getekend wordt (enkel wat de browser nodig heeft)
       view: {
@@ -528,7 +658,7 @@ async function startBattle(db, world, b, now) {
   } else {
     const c = await loadCamp(db, b.target_id, now);
     if (!c) return autoBattle(db, world, b, now);
-    setup = { kind: 'camp', att: m.units, defGroups: [{ key: 'camp', units: { ...c.state.units } }], smithyA, level: c.level, campSeed: 50000 + c.id, view: { seed: 50000 + c.id, camp: true } };
+    setup = { kind: 'camp', att: m.units, defGroups: [{ key: 'camp', units: { ...c.state.units } }], smithyA, techA, level: c.level, campSeed: 50000 + c.id, view: { seed: 50000 + c.id, camp: true } };
   }
   // de aanvaller komt uit de richting van zijn eigen stad
   const dir = { x: (m.from_x ?? m.to_x) - m.to_x, y: (m.from_y ?? m.to_y) - m.to_y };
@@ -578,18 +708,22 @@ export async function startPractice(db, world, player, role, now) {
   const ang = ((now / 1000) % 360) * (Math.PI / 180);
   const dir = { x: Math.round(Math.cos(ang) * 1000) / 1000, y: Math.round(Math.sin(ang) * 1000) / 1000 };
   let town; let seed; let title;
+  const t = await loadTown(db, me.id);
+  ensureTerritory(t.state, t.id);
+  advance(t.state, gameTime(world, now), world.speed);
+  const myTech = t.state.tech || null; const mySmithy = bLevel(t.state, 'smithy');
   if (role === 'att') {
     const civ = CIV_IDS[(player.id + Math.floor(now / 60000)) % CIV_IDS.length];
     town = practiceTown(now, civ); seed = 70000 + player.id; title = 'Oefendorp';
   } else {
-    const t = await loadTown(db, me.id);
-    ensureTerritory(t.state, t.id);
-    advance(t.state, gameTime(world, now), world.speed);
     town = t.state; seed = t.id; title = `${me.name} (oefenslag)`;
   }
+  // je eigen onderzoek en smidse doen mee (zo zie je wat ze uithalen); de computer heeft er geen
   const state = createBattle({
     kind: 'town', att: PRACTICE.att, defGroups: [{ key: 'home', units: { ...PRACTICE.def } }], town, townId: seed, dir,
     aiAtt: role !== 'att', aiDef: role !== 'def', now,
+    techA: role === 'att' ? myTech : null, techD: role === 'def' ? myTech : null,
+    smithyA: role === 'att' ? mySmithy : 0, smithyD: role === 'def' ? mySmithy : 0,
   });
   // de computer krijgt een kleur die duidelijk verschilt van de jouwe
   const rgb = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); const v = m ? parseInt(m[1], 16) : 0; return [v >> 16, (v >> 8) & 255, v & 255]; };
@@ -614,6 +748,94 @@ export async function startPractice(db, world, player, role, now) {
   return publicBattle(b, role);
 }
 
+// ---------- overval van de barbaren: de slag zelf spelen (binnen de 15 minuten dat ze naar je dorp trekken) ----------
+const townView = (s, seed) => ({
+  seed, civ: s.civ || null,
+  buildings: s.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+  walls: s.walls || [], gates: s.gates || [], cl: (s.terr && s.terr.cl) || [], lots: (s.terr && s.terr.lots) || [],
+});
+
+export async function startRaid(db, world, player, now) {
+  const busy = await db.prepare("SELECT id FROM battles WHERE (att_player = ? OR def_player = ?) AND status != 'done' LIMIT 1").bind(player.id, player.id).first();
+  const me = await db.prepare('SELECT t.id, t.name, tm.color FROM towns t JOIN players p ON p.id = t.player_id LEFT JOIN teams tm ON tm.id = p.team_id WHERE t.player_id = ?').bind(player.id).first();
+  if (!me) throw new GameError('Je hebt nog geen stad.');
+  const town = await loadTown(db, me.id);
+  ensureTerritory(town.state, town.id);
+  advance(town.state, gameTime(world, now), world.speed);
+  const s = town.state;
+  const raid = raidNow(s);
+  if (!raid) throw new GameError('Er trekken geen barbaren naar je dorp.');
+  if (raid.battle) {
+    const b = await loadBattle(db, raid.battle);
+    if (b && b.status !== 'done') return publicBattle(b, 'def');
+    throw new GameError('Je verdedigde je dorp al.');
+  }
+  if (busy) throw new GameError('Je zit al in een slag. Rond die eerst af.');
+  if (now >= raid.at) throw new GameError('De barbaren zijn er al: het gevecht liep automatisch.');
+  if (!countUnits(s.units)) throw new GameError('Je hebt geen soldaten thuis. Je muur, torens en dorpelingen verdedigen je dorp dan automatisch.');
+  // de barbaren komen uit de richting van hun kamp
+  const camp = territory(s.terr.seed).camp;
+  const dir = camp ? { x: camp.x - (TC_POS.x + 1), y: camp.y - (TC_POS.y + 1) } : { x: -1, y: 0 };
+  const att = { barbarian: raid.n };
+  const home = { ...s.units };
+  const state = createBattle({
+    kind: 'town', att, defGroups: [{ key: 'home', units: home }], town: s, townId: town.id, dir,
+    aiAtt: true, aiDef: false, now, techD: s.tech || null, smithyD: bLevel(s, 'smithy'),
+  });
+  state.meta = {
+    raid: true, attInit: att, defInit: { home }, style: { civ: s.civ, age: bLevel(s, 'tc') }, level: 0, view: townView(s, town.id),
+    att: { name: 'Barbaren', color: '#6b4a2b' }, def: { name: player.name, color: me.color || '#2e6fb5' },
+  };
+  const ins = await db.prepare(
+    `INSERT INTO battles (march_id, att_player, def_player, target_kind, target_id, title, status, choose_until, att_mode, def_mode, state, created_at, updated_at)
+     VALUES (0, 0, ?, 'raid', ?, ?, 'live', ?, 'auto', 'manual', ?, ?, ?)`,
+  ).bind(player.id, town.id, me.name, now, JSON.stringify(state), now, now).run();
+  const id = ins.meta.last_row_id;
+  // de overval wacht nu op de slag (geen automatisch gevecht meer, behalve als vangnet na WILD.raid.liveMs)
+  Object.assign(raid, { battle: id, bt: now, init: home });
+  try {
+    await saveTown(db, town);
+  } catch (e) {
+    await db.prepare('DELETE FROM battles WHERE id = ?').bind(id).run();
+    if (e instanceof ConflictError) throw new GameError('Het is druk, probeer opnieuw.', 409);
+    throw e;
+  }
+  return publicBattle(await loadBattle(db, id), 'def');
+}
+
+// einde van de slag tegen de barbaren: overlevenden thuis, buit van de barbaren, logboek (zoals het automatische gevecht)
+async function finishRaid(db, world, b, state, now, abandoned) {
+  const o = battleOutcome(state);
+  let attWins = o.attWins; let attLeft = o.attLeft; let survived = (o.defLeft && o.defLeft.home) || {};
+  if (abandoned && state.over == null) {
+    // niemand keek nog: de rest van de slag automatisch
+    const rr = resolveBattle({ attUnits: attLeft, groups: [{ key: 'home', units: survived }] });
+    attWins = rr.attWins; attLeft = rr.attLeft; survived = rr.groupsLeft[0].units;
+  }
+  const init = (state.meta.defInit && state.meta.defInit.home) || {};
+  let loot = {}; let applied = false;
+  await mutateTown(db, world, b.target_id, now, (s) => {
+    const raid = raidNow(s);
+    applied = !!(raid && raid.battle === b.id);
+    if (!applied) return; // al automatisch afgehandeld (vangnet)
+    const before = raid.init || init;
+    // overlevenden van de slag + wat er intussen bij kwam (getraind) of wegging (op pad gestuurd)
+    const home = {};
+    for (const k of new Set([...Object.keys(s.units), ...Object.keys(before)])) {
+      const cur = s.units[k] || 0;
+      home[k] = Math.max(0, Math.min(cur, (survived[k] || 0) + Math.max(0, cur - (before[k] || 0))));
+    }
+    loot = applyRaid(s, now, attWins, attLeft, home);
+  });
+  b.status = 'done';
+  b.result = {
+    raid: true, auto: abandoned, attWins, attLost: subtractUnits(state.meta.attInit, attLeft), defLost: subtractUnits(init, survived),
+    loot, retreat: o.retreat, late: !applied,
+  };
+  b.state = state;
+  await saveBattle(db, b, now);
+}
+
 // eerst de slag 'claimen' (met versiecontrole), zodat ze nooit twee keer uitgerekend wordt
 async function claimBattle(db, b, now) {
   b.status = 'done';
@@ -627,7 +849,7 @@ async function autoBattle(db, world, b, now) {
   let r = null;
   if (m) r = b.target_kind === 'town' ? await attackTown(db, world, m, now) : await attackCamp(db, world, m, now);
   b.status = 'done';
-  b.result = { auto: true, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {} };
+  b.result = { auto: true, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, bounty: r ? r.bounty || null : null, replay: (r && r.replay) || null };
   b.state = null;
   await saveBattle(db, b, now);
 }
@@ -670,6 +892,7 @@ async function finishBattle(db, world, b, now, abandoned = false) {
     await saveBattle(db, b, now);
     return;
   }
+  if (b.target_kind === 'raid') { await finishRaid(db, world, b, state, now, abandoned); return; }
   const m = await loadMarch(db, b.march_id);
   const o = battleOutcome(state);
   let r = null;
@@ -684,7 +907,7 @@ async function finishBattle(db, world, b, now, abandoned = false) {
     r = b.target_kind === 'town' ? await attackTown(db, world, m, now, override) : await attackCamp(db, world, m, now, override);
   }
   b.status = 'done';
-  b.result = { auto: abandoned, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, retreat: o.retreat };
+  b.result = { auto: abandoned, attWins: !!(r && r.attWins), attLost: r ? r.attLost : {}, defLost: r ? r.defLost : {}, loot: r ? r.loot : {}, bounty: r ? r.bounty || null : null, retreat: o.retreat };
   await saveBattle(db, b, now);
 }
 
@@ -693,7 +916,7 @@ async function tickBattle(db, world, b, now) {
   if (b.status === 'choose' && now >= b.choose_until) { await startBattle(db, world, b, now); return; }
   if (b.status !== 'live') return;
   // slag van een oudere versie: automatisch afronden
-  if (!b.state || b.state.v !== 2) { await finishBattle(db, world, b, now, true); return; }
+  if (!b.state || b.state.v !== FB.v) { await finishBattle(db, world, b, now, true); return; }
   // de server rekent iets achter op de klok, zodat bevelen van beide spelers op tijd binnen zijn
   stepTo(b.state, now - FB.delay, FB.maxTicksPerCall);
   if (b.state.over != null) await finishBattle(db, world, b, now);
@@ -706,7 +929,7 @@ function battleRole(b, playerId) {
   return null;
 }
 
-export async function battleView(db, world, id, playerId, now) {
+export async function battleView(db, world, id, playerId, now, have = null) {
   const b = await loadBattle(db, id);
   if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
   const role = battleRole(b, playerId);
@@ -717,9 +940,9 @@ export async function battleView(db, world, id, playerId, now) {
     // iemand anders bewaarde net (de tegenstander peilde of gaf een bevel): toon gewoon de nieuwste stand
     if (e.status !== 409) throw e;
     const fresh = await loadBattle(db, id);
-    if (fresh) return publicBattle(fresh, role);
+    if (fresh) return publicBattle(fresh, role, have);
   }
-  return publicBattle(b, role);
+  return publicBattle(b, role, have);
 }
 
 // een wijziging aan de slag opnieuw proberen als iemand anders net bewaarde
@@ -729,27 +952,31 @@ async function retry(fn) {
   }
 }
 
-export function publicBattle(b, role) {
+// have = t0 van de slag die de browser al kent: dan zonder de vaste delen (raster, binnenkant, stadsbeeld),
+// zo blijft elke peiling klein
+export function publicBattle(b, role, have = null) {
+  let state = b.state;
+  if (state && have != null && Number(have) === state.t0) state = { ...state, grid: undefined, ins: undefined, meta: undefined, lite: 1 };
   return {
     id: b.id, title: b.title, status: b.status, role, kind: b.target_kind, chooseUntil: b.choose_until,
-    attMode: b.att_mode, defMode: b.def_mode, state: b.state, result: b.result,
+    attMode: b.att_mode, defMode: b.def_mode, state, result: b.result,
   };
 }
 
-export async function setBattleMode(db, world, id, playerId, mode, now) {
-  return retry(() => setBattleModeOnce(db, world, id, playerId, mode, now));
+export async function setBattleMode(db, world, id, playerId, mode, now, have = null) {
+  return retry(() => setBattleModeOnce(db, world, id, playerId, mode, now, have));
 }
 
-async function setBattleModeOnce(db, world, id, playerId, mode, now) {
+async function setBattleModeOnce(db, world, id, playerId, mode, now, have) {
   const b = await loadBattle(db, id);
   if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
   const role = battleRole(b, playerId);
   if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
   if (mode !== 'manual' && mode !== 'auto') throw new GameError('Kies zelf of automatisch.');
-  if (b.status === 'done') return publicBattle(b, role);
+  if (b.status === 'done') return publicBattle(b, role, have);
   if (role === 'att') b.att_mode = mode; else b.def_mode = mode;
   // tijdens de slag: de computer neemt het over (of geeft het bevel terug)
-  if (b.status === 'live' && b.state && b.state.v === 2) {
+  if (b.status === 'live' && b.state && b.state.v === FB.v) {
     stepTo(b.state, now - FB.delay, FB.maxTicksPerCall);
     queueOrder(b.state, role === 'att' ? 0 : 1, null, { ai: mode === 'auto' });
   }
@@ -759,10 +986,10 @@ async function setBattleModeOnce(db, world, id, playerId, mode, now) {
       if (!pid || mode) return true;
       return !isOnline(await db.prepare('SELECT last_seen FROM players WHERE id = ?').bind(pid).first(), now);
     };
-    if (await decided(b.att_player, b.att_mode) && await decided(b.def_player, b.def_mode)) { await startBattle(db, world, b, now); return publicBattle(b, role); }
+    if (await decided(b.att_player, b.att_mode) && await decided(b.def_player, b.def_mode)) { await startBattle(db, world, b, now); return publicBattle(b, role, have); }
   }
   await saveBattle(db, b, now);
-  return publicBattle(b, role);
+  return publicBattle(b, role, have);
 }
 
 export async function battleOrder(db, world, id, playerId, body, now) {
@@ -774,9 +1001,9 @@ async function battleOrderOnce(db, world, id, playerId, body, now) {
   if (!b) throw new GameError('Deze veldslag bestaat niet (meer).', 404);
   const role = battleRole(b, playerId);
   if (!role) throw new GameError('Dit is niet jouw veldslag.', 403);
-  if (b.status !== 'live') return publicBattle(b, role);
+  if (b.status !== 'live') return publicBattle(b, role, body.have);
   if ((role === 'att' ? b.att_mode : b.def_mode) !== 'manual') throw new GameError('Je laat deze slag automatisch verlopen.');
-  if (!b.state || b.state.v !== 2) return publicBattle(b, role);
+  if (!b.state || b.state.v !== FB.v) return publicBattle(b, role, body.have);
   stepTo(b.state, now - FB.delay, FB.maxTicksPerCall);
   const ids = Array.isArray(body.ids) ? body.ids.slice(0, 300).map(Number).filter(Number.isFinite) : null;
   const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
@@ -787,14 +1014,19 @@ async function battleOrderOnce(db, world, id, playerId, body, now) {
   else if (body.stop) o.stop = true;
   else if (num(body.target) != null) o.target = num(body.target);
   else if (num(body.wall) != null) o.wall = num(body.wall);
-  else if (num(body.x) != null && num(body.y) != null) { o.x = num(body.x); o.y = num(body.y); }
-  else throw new GameError('Ongeldig bevel.');
+  else if (typeof body.form === 'string') { if (!FORMS[body.form]) throw new GameError('Onbekende formatie.'); o.form = body.form; }
+  else if (num(body.x) != null && num(body.y) != null) {
+    o.x = num(body.x); o.y = num(body.y);
+    // richting en breedte van een getrokken lijn (optioneel)
+    if (num(body.fx) != null && num(body.fy) != null) { o.fx = Math.max(-1, Math.min(1, num(body.fx))); o.fy = Math.max(-1, Math.min(1, num(body.fy))); }
+    if (num(body.w) != null) o.w = Math.max(0, Math.min(40, num(body.w)));
+  } else throw new GameError('Ongeldig bevel.');
   const cid = typeof body.cid === 'string' ? body.cid.slice(0, 24) : null;
   // uitvoeren op de tik waarop de speler tikte (de server loopt iets achter, dus dat is meestal nog niet voorbij)
   queueOrder(b.state, role === 'att' ? 0 : 1, ids, o, num(body.at) ?? b.state.n, cid);
   if (b.state.over != null) await finishBattle(db, world, b, now);
   else await saveBattle(db, b, now);
-  return publicBattle(b, role);
+  return publicBattle(b, role, body.have);
 }
 
 export async function myBattles(db, playerId, now) {

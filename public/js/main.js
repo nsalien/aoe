@@ -1,13 +1,14 @@
 // Hoofdprogramma: aanmelden, spelstatus, tekenlus en alle knoppen.
-import { get, post } from './api.js';
+import { get, post, early } from './api.js';
+import * as S3 from './sprite3d.js';
 import { TownView } from './town.js';
 import { WorldView } from './world.js';
 import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
-import { BattleView, askHtml } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, campAlive, tcDoor, doFieldSend, doFieldOrder, doFieldSplit } from '../shared/sim.js';
-import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, WILD, fmtDuration } from '../shared/rules.js';
+import { BattleView, askHtml, raidReplay } from './battleview.js';
+import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots } from '../shared/sim.js';
+import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, fmtDuration, JOBS } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -33,6 +34,8 @@ const app = {
   knownHostile: new Set(),
   chat: { chan: 'team', seen: store.get('rvs-chat-seen') || {}, last: {} },
   bbMin: !!store.get('rvs-buildbar-min'),
+  bbTab: ['build', 'army', 'advice'].includes(store.get('rvs-buildbar-tab')) ? store.get('rvs-buildbar-tab') : 'build',
+  adviceIdx: {}, // per soort + niveau: welk gebouw de vorige tik toonde (volgende tik = het volgende)
   now() { return Date.now() + this.offset; },
 };
 window.__app = app; // handig bij het debuggen in de console
@@ -61,8 +64,10 @@ async function initPush() {
     const reg = await navigator.serviceWorker.register('/sw.js');
     const sub = await reg.pushManager.getSubscription();
     if (sub && Notification.permission === 'granted') {
-      await post('/push/subscribe', sub.toJSON());
+      const r = await post('/push/subscribe', sub.toJSON());
       app.pushOn = true;
+      app.pushEndpoint = sub.endpoint;
+      app.pushPrefs = r.prefs || null;
       renderPanel(true);
     }
   } catch (e) { console.warn('meldingen', e); }
@@ -103,8 +108,10 @@ async function enablePush() {
       sub = await within(reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64(key) }), 20000,
         'De meldingendienst van je gsm antwoordde niet. Controleer je internet en probeer opnieuw.');
     }
-    await post('/push/subscribe', sub.toJSON());
+    const sr = await post('/push/subscribe', sub.toJSON());
     app.pushOn = true;
+    app.pushEndpoint = sub.endpoint;
+    app.pushPrefs = sr.prefs || null;
     const r = await post('/push/test', {});
     app.pushNote = r.sent ? 'Gelukt! Je kreeg net een proefmelding.' : 'Aangezet, maar de proefmelding kon niet verstuurd worden. Probeer "Proefmelding".';
     toast(r.sent ? 'Meldingen staan aan. Je kreeg net een proefmelding.' : 'Meldingen staan aan.', 'ok', 'bell');
@@ -122,6 +129,22 @@ async function enablePush() {
     renderPanel(true);
     refreshPushCards();
   }
+}
+
+// één soort melding aan of uit op dit toestel (aanval op je stad of een clanlid, bouwer vrij, je leger komt aan)
+async function setPushPref(k) {
+  if (!app.pushPrefs || !app.pushEndpoint || !(k in app.pushPrefs)) return;
+  const before = { ...app.pushPrefs };
+  app.pushPrefs = { ...before, [k]: !before[k] }; // meteen tonen; de server bevestigt
+  refreshPushCards();
+  try {
+    const r = await post('/push/prefs', { endpoint: app.pushEndpoint, [k]: app.pushPrefs[k] });
+    if (r.prefs) app.pushPrefs = r.prefs;
+  } catch (e) {
+    app.pushPrefs = before;
+    toast(e.message, 'err', 'bell');
+  }
+  refreshPushCards();
 }
 
 async function disablePush() {
@@ -142,9 +165,10 @@ let authWorld = null;
 let battle = null;
 
 // ---------- meldingen ----------
-function toast(msg, type = '', ic = null) {
+function toast(msg, type = '', ic = null, action = null) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
+  if (action) { const [a, arg] = action.split(':'); el.dataset.action = a; if (arg) el.dataset.chan = arg; el.classList.add('tap'); }
   const name = ic || (type === 'err' ? 'bell' : type === 'ok' ? 'star' : 'scroll');
   el.innerHTML = `${UI.icon(name)}<span>${UI.esc(msg)}</span>`;
   const box = $('#toasts');
@@ -155,8 +179,11 @@ function toast(msg, type = '', ic = null) {
 
 // ---------- opstarten ----------
 async function boot() {
+  // /state loopt al (index.html); de 3D-beelden van vorige keer worden ondertussen uit de cache gehaald
+  const stateP = early('state', '/state');
+  stateP.catch(() => {});
   try {
-    app.info = await get('/info');
+    app.info = await early('info', '/info');
   } catch (e) {
     showAuth(`Kan de server niet bereiken: ${e.message}`);
     return;
@@ -166,7 +193,8 @@ async function boot() {
     return;
   }
   try {
-    const data = await get('/state');
+    // kort wachten op de 3D-beelden: zo start de stad meteen in 3D (anders eerst alles in 2D, dat kost extra werk)
+    const [data] = await Promise.all([stateP, Promise.race([S3.preloaded, new Promise((r) => setTimeout(r, 2500))])]);
     startGame(data);
   } catch (e) {
     if (e.status === 401) showAuth();
@@ -187,7 +215,8 @@ function showAuth(msg) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   let html = msg || '';
   if (w && !msg) {
-    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>.`, prep: `${UI.icon('dove')} Vredestijd tot <b>${f(w.prepEnd)}</b>.`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>!`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
+    const peace = `${UI.icon('dove')} Nieuwe spelers krijgen ${UI.peaceText(w.peaceMs)} vrede.`;
+    const phase = { lobby: `Het seizoen start op <b>${f(w.startAt)}</b>. ${peace}`, war: `${UI.icon('swords')} Oorlog tot <b>${f(w.warEnd)}</b>! ${peace}`, ended: `${UI.icon('flag')} Het seizoen is afgelopen.` }[w.phase];
     html = `${phase}<br>${app.info.players} heerser(s) in de vallei · teams van ${w.teamSize}`;
     $('#joinCodeRow').hidden = !w.needsCode;
   }
@@ -227,10 +256,15 @@ function startGame(data) {
   if (!town) {
     town = new TownView($('#townCanvas'));
     world = new WorldView($('#worldCanvas'));
-    town.onSelect = (b) => { app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
+    town.onSelect = (b) => { app.pickStack = town.pickStack; app.selBuilding = b ? b.id : null; app.selWall = b && b.type === 'wall' ? town.selWall : null; renderPanel(); openPanelMobile(!!b); };
     town.onGate = async (i, j) => { const r = await act('/gate', { i, j }, 'Poort gebouwd'); if (r) setMode(null); };
     town.onPlace = placeBuilding;
     town.onCancelPlace = cancelPlace;
+    town.onMove = moveBuilding;
+    town.onMoveWalls = moveWalls;
+    town.onNotice = (msg, ic) => toast(msg, '', ic || 'move');
+    town.onMoveChange = renderMoveHint;
+    town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; };
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
     town.onSelChange = (sel) => {
       const g = sel && (sel.type === 'group' || sel.type === 'unit') ? sel.id : null;
@@ -262,6 +296,8 @@ function startGame(data) {
   town.centerOn(tc);
   setInterval(tick, 1000);
   setInterval(poll, 20000);
+  // de wereldkaart alvast op de achtergrond voorbereiden (anders hapert het even als je ze voor het eerst opent)
+  setTimeout(() => { if (!app.map) loadMap(true); }, 6000);
   initPush();
   // geopend vanuit een melding: het adres opruimen (de aftelbalk toont de rest)
   if (location.search) history.replaceState(null, '', location.pathname);
@@ -289,12 +325,12 @@ function applyState(data, first = false) {
   if (fieldQueue.length) setBaseState(data.town.state);
   const off = data.now - Date.now();
   if (first || Math.abs(off - app.offset) > 1500) app.offset = off;
-  app.canAct = data.world.phase === 'prep' || data.world.phase === 'war';
+  app.canAct = data.world.phase === 'war';
+  app.inPeace = app.now() < data.me.peaceEnd;
   town.setTown(data.town.id, data.team.color);
   computeLive(true);
   world.setMarches(data.marches);
   if (prevPhase && prevPhase !== data.world.phase) {
-    if (data.world.phase === 'war') toast('De oorlog is begonnen! Je kan nu vijandelijke steden aanvallen.', 'err', 'swords');
     if (data.world.phase === 'ended') { toast('Het seizoen is voorbij!', '', 'flag'); openModal('leaderboard'); }
   }
   // nieuwe rapporten
@@ -302,13 +338,12 @@ function applyState(data, first = false) {
   app.seenReports = data.unseenReports;
   const br = $('#badgeReports');
   br.hidden = !data.unseenReports; br.textContent = data.unseenReports;
-  // chat
-  const chatNew = ['team', 'world'].some((c) => (data.chat[c] || 0) > (app.chat.seen[c] || 0));
-  $('#badgeChat').hidden = !chatNew;
+  // chat: ongelezen berichten (team en iedereen) duidelijk tonen, met een melding bij een nieuw bericht
+  chatState(data.chat, first);
   handleBattles(data, first);
   // inkomende aanvallen
   for (const m of data.marches) {
-    if (!m.ally && m.status === 'out' && !app.knownHostile.has(m.id)) {
+    if (!m.ally && m.status === 'out' && (m.kind === 'attack' || m.kind === 'scout') && !app.knownHostile.has(m.id)) {
       app.knownHostile.add(m.id);
       if (!first) toast(`${m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err', 'swords');
     }
@@ -318,13 +353,15 @@ function applyState(data, first = false) {
 
 // ---------- veldslagen ----------
 const knownBattles = new Map();
+// zit je in een echte slag? (een replay bekijken telt niet: een aanval die binnenkomt, verschijnt er gewoon boven)
+const inLiveBattle = () => !!(battle && battle.open && !battle.rp);
 const askedBattles = new Set();
 
 function battleView() {
   if (!battle) {
     battle = new BattleView({
       now: () => app.now(), get, post, toast, unitThumb: UI.unitThumb, practice: (role) => startPractice(role),
-      openReports: () => openModal('reports'),
+      openReports: () => openModal('reports'), openReplay: (id) => openReplay(id),
       onClose: () => { renderAlert(); setTimeout(refresh, 400); },
     });
     window.__battle = battle; // handig bij het debuggen in de console
@@ -341,6 +378,24 @@ async function startPractice(role) {
   } catch (e) { toast(e.message, 'err', 'swords'); }
 }
 
+// replay van een automatisch verlopen slag (24 uur): het recept van de server, de browser speelt de slag na
+async function openReplay(id) {
+  try {
+    const { replay } = await get(`/replay?id=${id}`);
+    closeModal(); hideAsk();
+    battleView().showReplay(replay);
+  } catch (e) { toast(e.message, 'err', 'swords'); }
+}
+
+// replay van een overval van de barbaren (het recept staat in het logboek van je stad)
+function openRaidReplay(lid) {
+  const s = app.live;
+  const e = s && s.terr && (s.terr.log || []).find((x) => x.id === lid);
+  if (!e || !e.rp) { toast('Deze replay is niet meer beschikbaar.', 'err', 'swords'); return; }
+  closeModal(); hideAsk();
+  battleView().showReplay(raidReplay(s, e, { town: app.data.town.name, name: app.data.me.name, color: app.data.team.color }));
+}
+
 function openBattle(id, b = null) {
   hideAsk();
   battleView().show(id, b);
@@ -351,17 +406,17 @@ function handleBattles(data, first) {
     const prev = knownBattles.get(b.id);
     knownBattles.set(b.id, b.status);
     const mine = b.role === 'att' ? b.attMode : b.defMode;
-    if (b.kind === 'practice') continue; // oefenslag: geen meldingen, die open je zelf
+    if (b.kind === 'practice' || b.kind === 'raid') continue; // oefenslag en overval: geen meldingen, die open je zelf
     if (!prev && b.status !== 'done' && b.role === 'def') toast(`${b.title} wordt aangevallen${b.attName ? ` door ${b.attName}` : ''}!`, 'err', 'swords');
-    if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !(battle && battle.open)) { askedBattles.add(b.id); showAsk(b); }
+    if (b.status === 'choose' && !mine && !askedBattles.has(b.id) && !inLiveBattle()) { askedBattles.add(b.id); showAsk(b); }
     // de tegenpartij koos om zelf te besturen: bekijk of neem alsnog het bevel over
-    if (b.status === 'live' && prev && prev !== 'live' && mine !== 'manual' && !(battle && battle.open)) {
+    if (b.status === 'live' && prev && prev !== 'live' && mine !== 'manual' && !inLiveBattle()) {
       toast(`De slag bij ${b.title} is begonnen. Klik bovenaan om mee te kijken.`, '', 'swords');
     }
-    if (b.status === 'live' && mine === 'manual' && !(battle && battle.open) && prev !== 'live') openBattle(b.id);
+    if (b.status === 'live' && mine === 'manual' && !inLiveBattle() && prev !== 'live') openBattle(b.id);
   }
   const ask = $('#battleAsk');
-  if (ask && !ask.hidden) {
+  if (ask && !ask.hidden && ask.dataset.id !== 'raid') {
     const b = (data.battles || []).find((x) => x.id === Number(ask.dataset.id));
     if (!b || b.status !== 'choose') hideAsk();
   }
@@ -399,6 +454,11 @@ async function chooseBattle(id, mode) {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('#battleAsk [data-bact="choose"]');
   if (el) chooseBattle(Number(el.dataset.id), el.dataset.mode);
+  const rd = e.target.closest('#battleAsk [data-bact="raid"]');
+  if (rd && !rd.disabled) {
+    if (rd.dataset.mode === 'manual') defendRaid();
+    else { hideAsk(); toast('Je soldaten, muur en torens vechten de overval automatisch uit.', '', 'hourglass'); }
+  }
 });
 
 function activeBattle() {
@@ -415,8 +475,9 @@ function computeLive(force) {
   const sig = [
     s.builds.map((j) => `${j.bid}:${j.to}`).join(','),
     Object.entries(s.queues).map(([k, q]) => `${k}${q.length}:${q[0].done}`).join(','),
-    s.buildings.map((b) => b.level).join(''),
+    s.buildings.map((b) => `${b.level}@${b.x},${b.y}`).join(''),
     JSON.stringify(s.units), JSON.stringify(s.villagers), s.rally,
+    s.research ? s.research.id : '', Object.keys(s.tech || {}).join(','), Math.floor(s.loy ?? 100), s.vas ? s.vas.until : '',
     (s.nodes || []).map((n) => `${n.id}${n.claimed ? 'c' : ''}`).join(','),
     (s.harvests || []).map((h) => h.id).join(','),
     (s.field || []).map((g) => `${g.id}${g.pending ? 'p' : ''}${g.work ? g.work.type : ''}${g.order ? g.order.type : ''}`).join(','),
@@ -434,18 +495,19 @@ function computeLive(force) {
 }
 
 // nieuwe gebeurtenissen in je gebied (everzwijn gevangen, overval, ...) als melding tonen
-const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star' };
+const LOG_ICON = { boar: 'target', 'boar-lost': 'target', camp: 'swords', 'camp-lost': 'swords', 'raid-warn': 'swords', 'raid-lost': 'bell', 'raid-won': 'shield', dep: 'star' };
 function announceLog(terr) {
   if (app.lastLid == null || terr.lid < app.lastLid) { app.lastLid = terr.lid; return; }
   if (terr.lid === app.lastLid) return;
-  for (const e of terr.log) if (e.id > app.lastLid) toast(e.text, /lost/.test(e.kind) ? 'err' : 'ok', LOG_ICON[e.kind] || 'star');
+  // 'raid-warn': daarvoor verschijnt het keuzevenster (offerRaid)
+  for (const e of terr.log) if (e.id > app.lastLid && e.kind !== 'raid-warn') toast(e.text, /lost/.test(e.kind) ? 'err' : 'ok', LOG_ICON[e.kind] || 'star');
   app.lastLid = terr.lid;
 }
 
 async function poll() {
   if (document.hidden || !app.data || fieldQueue.length) return;
   try {
-    const data = await get('/state');
+    const data = await get(statePath());
     applyState(data);
     if (app.view === 'world' && Date.now() - app.mapAt > 40000) loadMap();
   } catch (e) {
@@ -454,18 +516,19 @@ async function poll() {
 }
 
 async function refresh() {
-  try { applyState(await get('/state')); } catch (e) { toast(e.message, 'err'); }
+  try { applyState(await get(statePath())); } catch (e) { toast(e.message, 'err'); }
 }
 
-async function loadMap() {
+// quiet: op de achtergrond (na het opstarten), zodat de wereldkaart klaar is als je ze opent
+async function loadMap(quiet = false) {
   try {
     const map = await get('/map');
     app.map = map;
     app.mapAt = Date.now();
     world.setWorld(app.data.world.seed, app.data.world.size);
-    world.setData(map, app.data.town.id, app.data.me.teamId);
+    world.setData(map, app.data.town.id, app.data.me.teamId, quiet && app.view !== 'world');
     if (app.view === 'world') renderPanel();
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) { if (!quiet) toast(e.message, 'err'); }
 }
 
 let tickN = 0;
@@ -483,18 +546,27 @@ function tick() {
   renderAlert();
   const w = app.data.world;
   const now = app.now();
-  if ((w.phase === 'prep' && now >= w.prepEnd) || (w.phase === 'war' && now >= w.warEnd) || (w.phase === 'lobby' && now >= w.startAt)) {
+  if (app.inPeace && now >= app.data.me.peaceEnd) {
+    app.inPeace = false;
+    toast('Je vrede is voorbij! Je kan nu vijandelijke steden aanvallen, en zij jou.', 'err', 'swords');
+    renderAll();
+  }
+  if ((w.phase === 'war' && now >= w.warEnd) || (w.phase === 'lobby' && now >= w.startAt)) {
     w.phase = 'x';
     refresh();
   }
+  // de barbaren trekken naar je dorp: één keer vanzelf het keuzevenster (daarna via de balk bovenaan)
+  const rd = raidIncoming();
+  if (rd && app.raidAsked !== rd.start) offerRaid(rd);
   const ask = $('#battleAsk');
+  if (ask && !ask.hidden && ask.dataset.id === 'raid' && !rd) hideAsk();
   if (ask && !ask.hidden) {
     const until = Number(ask.dataset.until);
     const sec = Math.max(0, Math.ceil((until - now) / 1000));
     for (const el of ask.querySelectorAll('[data-askend]')) el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
     if (now > until + 1500) { hideAsk(); refresh(); }
   }
-  if (tickN % 5 === 0 && (app.data.battles || []).some((b) => b.status !== 'done') && !(battle && battle.open)) poll();
+  if (tickN % 5 === 0 && (app.data.battles || []).some((b) => b.status !== 'done') && !inLiveBattle()) poll();
   // legers die net aankwamen: even later opnieuw ophalen
   if (app.data.marches.some((m) => m.arriveAt <= now && m.arriveAt > now - 1000)) setTimeout(refresh, 1500);
 }
@@ -551,7 +623,7 @@ function renderResBar() {
 }
 
 function renderPhase() {
-  const p = UI.phaseHtml(app.data.world, app.now());
+  const p = UI.phaseHtml(app.data.world, app.now(), app.data.me.peaceEnd);
   const el = $('#phase');
   el.className = `phase ${p.cls}`;
   setHTML(el, p.html);
@@ -568,11 +640,12 @@ function renderAlert() {
     return;
   }
   const hostile = app.data.marches.filter((m) => !m.ally && m.status === 'out' && m.arriveAt > app.now()).sort((a, b) => a.arriveAt - b.arriveAt);
+  // overval van de barbaren: eerst kiezen (zelf verdedigen of automatisch), dat kan maar 15 minuten
   const raid = raidIncoming();
-  if (!hostile.length && raid) {
+  if (raid) {
     el.hidden = false;
-    el.dataset.action = 'raidGo';
-    setHTML(el, `${UI.icon('bell')} Barbaren op weg naar je dorp! Aankomst over <span data-end="${raid}">${fmtDuration(raid - app.now())}</span>`);
+    el.dataset.action = 'raidAsk';
+    setHTML(el, `${UI.icon('swords')} ${raid.n} barbaren vallen aan! Kies binnen <span data-end="${raid.at}">${fmtDuration(raid.at - app.now())}</span>`);
     return;
   }
   if (!hostile.length) { el.hidden = true; return; }
@@ -583,13 +656,36 @@ function renderAlert() {
   setHTML(el, `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`);
 }
 
-// komt er een overval van het barbarenkamp aan? (tijdstip van aankomst of null)
+// trekken de barbaren naar je dorp (en heb je nog niet gekozen om zelf te verdedigen)? { start, at, n } of null
 function raidIncoming() {
-  const s = app.live;
-  if (!s || !s.terr || s.terr.camp.next == null) return null;
-  const now = app.now();
-  const at = s.terr.camp.next;
-  return campAlive(s, now) && now >= at - WILD.raid.warnMs && now < at ? at : null;
+  const r = raidNow(app.live);
+  return r && !r.battle && app.now() < r.at ? r : null;
+}
+
+// keuzevenster bij een overval: zelf verdedigen (een slag in je eigen stad) of automatisch
+function offerRaid(raid) {
+  if (inLiveBattle()) return;
+  let el = $('#battleAsk');
+  if (el && !el.hidden && el.dataset.id !== 'raid') return; // eerst de andere keuze
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'battleAsk'; el.className = 'bt-ask';
+    document.body.appendChild(el);
+  }
+  app.raidAsked = raid.start;
+  el.dataset.id = 'raid';
+  el.dataset.until = raid.at;
+  el.innerHTML = UI.raidAskHtml(app.live, raid, app.now());
+  el.hidden = false;
+}
+
+async function defendRaid() {
+  try {
+    const r = await post('/raid/defend', {});
+    knownBattles.set(r.battle.id, 'live');
+    openBattle(r.battle.id, r.battle);
+    refresh();
+  } catch (e) { toast(e.message, 'err', 'swords'); }
 }
 
 // uitleg bovenaan als je een dorpeling, soldaat of groep gekozen hebt
@@ -598,7 +694,9 @@ function renderSelHint() {
   const box = $('#selActions');
   const sel = town.sel;
   const g = sel && (sel.type === 'group' || sel.type === 'unit') ? town.selGroup() : null;
-  if (!sel || app.placing || ((sel.type === 'group' || sel.type === 'unit') && !g)) { box.hidden = true; return; }
+  const wrap = $('#buildwrap');
+  if (!sel || app.placing || ((sel.type === 'group' || sel.type === 'unit') && !g)) { box.hidden = true; wrap.classList.remove('has-sel'); return; }
+  wrap.classList.add('has-sel'); // op een smalle gsm: tabbladen enkel als icoon (de knoppen moeten ernaast passen)
   const out = (sel.type === 'group' && !(g.order && g.order.type === 'home' && g.pending)) || sel.type === 'unit'
     || ((sel.type === 'kind' || sel.type === 'army' || sel.type === 'groups') && sel.ids.length);
   box.hidden = false;
@@ -765,8 +863,59 @@ function renderBuildBar(force = false) {
   renderBuildToggle();
   if (!force && isBusy('buildbar')) { pending.buildbar = true; return; }
   pending.buildbar = false;
-  setHTML(bb, UI.buildBarHtml(app.live, app.placing || (app.mode === 'wallremove' ? 'wall' : app.mode), app.data.team.color));
+  const tab = bbTabNow();
+  bb.dataset.tab = tab;
+  if (tab === 'army') setHTML(bb, UI.armyBarHtml(app, app.live));
+  else if (tab === 'advice') setHTML(bb, UI.adviceBarHtml(app, app.live));
+  else setHTML(bb, UI.buildBarHtml(app.live, app.placing || (app.mode === 'wallremove' ? 'wall' : app.mode), app.data.team.color));
 }
+
+// welk tabblad onderaan: tijdens het bouwen of muren plaatsen altijd 'Bouwen'
+const bbTabNow = () => (app.placing || app.mode ? 'build' : app.bbTab);
+
+// naar een gebouw gaan (camera erheen) en het kiezen: het paneel toont dan wat het kost en de knop Verbeteren
+function focusBuilding(b) {
+  if (app.view !== 'town') switchView('town');
+  town.clearSel();
+  if (b.type === 'wall') town.centerOnWalls(); else town.centerOn(b);
+  app.selBuilding = b.id; town.selected = b.id;
+  app.selWall = null; town.selWall = null; app.pickStack = null; town.lastPick = null;
+  renderPanel();
+  openPanelMobile(true);
+}
+
+// Sluitknop bovenaan het schuifpaneel (gsm): een breed pijltje naar beneden (liggend: naar rechts, het paneel komt dan van
+// rechts). Hoort bij de inhoud zelf, zodat hij bij elke verversing blijft staan; op pc verborgen (CSS).
+const SHEET_CLOSE = '<button class="sheet-close" data-action="closeSheet" aria-label="Sluiten" title="Sluiten">'
+  + '<svg class="sc-down" viewBox="0 0 72 20" aria-hidden="true"><path d="M6 5L36 15L66 5"/></svg>'
+  + '<svg class="sc-right" viewBox="0 0 16 30" aria-hidden="true"><path d="M4 4L12 15L4 26"/></svg></button>';
+
+// paneel wegschuiven; daarna het gekozen gebouw (of de gekozen stad) loslaten, anders blijft het gemarkeerd zonder uitleg
+function closeSheet() {
+  const panel = $('#panel');
+  panel.classList.remove('open');
+  clearTimeout(app.sheetTimer);
+  app.sheetTimer = setTimeout(() => {
+    if (panel.classList.contains('open')) return;
+    if (app.selBuilding == null && !app.selWall && !(world && world.selected)) return;
+    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null; app.pickStack = null;
+    if (world) world.selected = null;
+    renderPanel();
+  }, 280);
+}
+
+// over de sluitknop naar beneden vegen (liggend: naar rechts) sluit ook
+let sheetDrag = null;
+document.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest && e.target.closest('.sheet-close');
+  sheetDrag = b ? { x: e.clientX, y: e.clientY } : null;
+});
+document.addEventListener('pointermove', (e) => {
+  if (!sheetDrag) return;
+  const side = matchMedia('(orientation: landscape) and (max-height: 540px)').matches;
+  if ((side ? e.clientX - sheetDrag.x : e.clientY - sheetDrag.y) > 28) { sheetDrag = null; closeSheet(); }
+});
+document.addEventListener('pointerup', () => { sheetDrag = null; });
 
 function renderPanel(force = false) {
   const panel = $('#panel');
@@ -783,6 +932,7 @@ function renderPanel(force = false) {
   } else {
     html = UI.worldPanelHtml(app, world.selected);
   }
+  html = SHEET_CLOSE + html;
   if (newContext) {
     // ander gebouw of andere weergave: alles vervangen en zacht laten inschuiven
     app.panelKey = key;
@@ -824,16 +974,32 @@ function renderLightBtn() {
 // is het zijpaneel een schuifpaneel? (gsm rechtop of liggend; zie de CSS)
 const sheetPanel = () => window.innerWidth <= 900 || matchMedia('(orientation: landscape) and (max-height: 540px)').matches;
 
-// bouwmenu in- of uitklappen (onthouden per toestel)
+// tabbladen onderaan (Bouwen, Mijn leger, Bouwadvies) en in- of uitklappen (onthouden per toestel)
 function renderBuildToggle() {
   const min = !!app.bbMin && !app.placing && !app.mode;
   const wrap = $('#buildwrap');
   wrap.classList.toggle('min', min);
-  const btn = $('#bbToggle');
-  btn.setAttribute('aria-expanded', String(!min));
-  btn.title = min ? 'Bouwmenu tonen' : 'Bouwmenu inklappen';
-  const html = `${UI.icon('hammer')} Bouwen <i class="chev"></i>`;
-  if (btn.innerHTML !== html) btn.innerHTML = html;
+  const tab = bbTabNow();
+  const live = app.live;
+  const soldiers = live ? UI.armySummary(live, app.data).reduce((a, r) => a + r.total, 0) : 0;
+  const ready = live ? UI.adviceReady(live) : 0;
+  // [id, tabblad, icoon, naam, korte naam (smalle gsm), getal, uitleg]
+  const tabs = [
+    ['bbToggle', 'build', 'hammer', 'Bouwen', 'Bouwen', '', 'Bouwmenu'],
+    ['bbArmy', 'army', 'swords', 'Mijn leger', 'Leger', soldiers ? `<b class="bdg">${UI.fmt(soldiers)}</b>` : '', 'Mijn leger: hoeveel soldaten je hebt en waar ze zijn'],
+    ['bbAdvice', 'advice', 'up', 'Bouwadvies', 'Advies', ready ? `<b class="bdg go">${ready}</b>` : '', 'Bouwadvies: wat je nog kan verbeteren en waar je bouwers mee bezig zijn'],
+  ];
+  for (const [id, t, ic, label, short, badge, title] of tabs) {
+    const btn = $(`#${id}`);
+    if (!btn) continue;
+    const on = t === tab;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', String(on));
+    btn.setAttribute('aria-expanded', String(on && !min));
+    btn.title = on && !min ? `${title} (tik om in te klappen)` : title;
+    const html = `${UI.icon(ic)}<span class="lb long">${label}</span><span class="lb short">${short}</span>${badge}${on ? '<i class="chev"></i>' : ''}`;
+    if (btn.innerHTML !== html) btn.innerHTML = html;
+  }
 }
 
 function openPanelMobile(open) {
@@ -843,8 +1009,17 @@ function openPanelMobile(open) {
 
 // ---------- tekenlus ----------
 let lastT = performance.now();
+let modalEl = null;
+const pacer = new FX.Pacer();
 function frame(t) {
+  // hooguit ±60 beelden per seconde, ook op een scherm van 90/120 Hz (zie FX.Pacer)
+  if (!pacer.ok(t)) { requestAnimationFrame(frame); return; }
+  // achter een open venster (vervaagd) is 60 beelden per seconde verspilling: 5 per seconde volstaat
+  if (!modalEl) modalEl = $('#modal');
+  const behind = !!(modalEl && !modalEl.hidden);
+  if (behind && t - lastT < 200) { requestAnimationFrame(frame); return; }
   const dt = t - lastT; lastT = t;
+  if (town) town.throttled = behind; // dan zegt de beeldsnelheid niets over het toestel
   if (battle && battle.open) {
     // het slagveld tekent zichzelf; de stad hoeft dan niet mee te tekenen
   } else if (!$('#game').hidden && app.data) {
@@ -894,7 +1069,54 @@ async function placeBuilding(type, x, y, keep) {
   if (!r || !keep) cancelPlace();
 }
 
+// Gebouw verplaatsen: meteen in de browser (zelfde regels als de server), dan de server. Weigert die, dan terug.
+async function moveBuilding(id, x, y) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const base = app.serverState || app.data.town.state;
+  try {
+    const c = structuredClone(base);
+    doMove(c, id, x, y);
+    setBaseState(c);
+    computeLive(true);
+    renderAll();
+  } catch (e) { toast(e.message, 'err'); return; }
+  const r = await act('/move', { id, x, y }, 'Gebouw verplaatst');
+  if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
+}
+
+// balk bovenaan tijdens het verplaatsen: wat je moet doen, 'Zet hier' (enkel als de plek mag) en 'Stoppen'
+function renderMoveHint(m) {
+  const hint = $('#placeHint');
+  if (!m) { hint.hidden = true; return; }
+  const walls = m.kind === 'walls';
+  const b = !walls && app.live && app.live.buildings.find((x) => x.id === m.id);
+  const name = walls ? m.label : b ? BUILDINGS[b.type].name : 'Gebouw';
+  const mouse = town.cam.lastType === 'mouse';
+  const what = walls ? 'de muur' : 'het gebouw';
+  const how = m.ok ? 'Mag hier staan.' : m.same ? (mouse ? 'Klik op de nieuwe plek.' : `Tik op de nieuwe plek of sleep ${what}.`) : 'Daar kan het niet staan.';
+  hint.hidden = false;
+  setHTML(hint, `<span><b>${UI.esc(name)} verplaatsen</b> <span class="muted">${how}</span></span>
+    <button class="btn small primary" data-action="moveHere" ${m.ok ? '' : 'disabled'}>Zet hier</button><button class="btn small" data-action="moveStop">Stoppen</button>`);
+}
+
+// muurstukken of een poort verplaatsen: meteen in de browser, dan de server (weigert die, dan terug)
+async function moveWalls(tiles, dx, dy) {
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  const base = app.serverState || app.data.town.state;
+  try {
+    const c = structuredClone(base);
+    doMoveWalls(c, tiles, dx, dy);
+    setBaseState(c);
+    app.selWall = null; town.selWall = null; app.selBuilding = null; town.selected = null;
+    computeLive(true);
+    renderAll();
+  } catch (e) { toast(e.message, 'err'); return; }
+  const r = await act('/walls/move', { tiles, dx, dy }, 'Muur verplaatst');
+  if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
+}
+
 function cancelPlace() {
+  if (town && town.moveB) town.cancelMove();
   app.placing = null;
   town.placing = null;
   $('#placeHint').hidden = true;
@@ -905,11 +1127,13 @@ let allocTimer = null;
 function changeVillagers(res, d) {
   const live = app.live;
   const alloc = { ...(app.pendingAlloc || live.villagers) };
-  const total = RES.reduce((a, k) => a + live.villagers[k], live.villagers.idle);
-  const slotsNow = slotsOf(live);
-  let used = RES.reduce((a, k) => a + alloc[k], 0);
+  const total = JOBS.reduce((a, k) => a + (live.villagers[k] || 0), live.villagers.idle);
+  // dezelfde plaatsen als de server (ook de vissers: 2 per bootje)
+  const slotsNow = townSlots(live);
+  if (alloc[res] == null) alloc[res] = 0;
+  let used = JOBS.reduce((a, k) => a + (alloc[k] || 0), 0);
   let step = d;
-  if (step > 0) step = Math.min(step, total - used, slotsNow[res] - alloc[res]);
+  if (step > 0) step = Math.min(step, total - used, (slotsNow[res] || 0) - alloc[res]);
   else step = Math.max(step, -alloc[res]);
   if (!step) return;
   alloc[res] += step;
@@ -932,19 +1156,10 @@ async function sendAlloc() {
   if (!a) return;
   const seq = allocSeq;
   allocBusy = true;
-  const r = await act('/villagers', { food: a.food, wood: a.wood, stone: a.stone, gold: a.gold });
+  const r = await act('/villagers', { food: a.food, wood: a.wood, stone: a.stone, gold: a.gold, fish: a.fish || 0 });
   allocBusy = false;
   if (seq === allocSeq || !r) app.pendingAlloc = null;
   renderPanel(true);
-}
-
-function slotsOf(live) {
-  const out = { food: 5, wood: 5, stone: 2, gold: 2 };
-  for (const b of live.buildings) {
-    const s = BUILDINGS[b.type].slots;
-    if (s && b.level > 0) for (const k of Object.keys(s)) out[k] += s[k] * b.level;
-  }
-  return out;
 }
 
 function switchView(v) {
@@ -954,8 +1169,14 @@ function switchView(v) {
   $('#worldCanvas').hidden = v !== 'world';
   if (v === 'world') {
     cancelPlace();
+    // de eerste keer: op je eigen stad (ook als de kaart al op de achtergrond geladen werd)
+    const first = !app.worldSeen;
+    app.worldSeen = true;
     if (!app.map) loadMap().then(() => world.centerOnTile(app.data.town.x, app.data.town.y));
-    else if (Date.now() - app.mapAt > 20000) loadMap();
+    else {
+      if (first) world.centerOnTile(app.data.town.x, app.data.town.y);
+      if (Date.now() - app.mapAt > 20000) loadMap();
+    }
   }
   renderAll();
 }
@@ -964,7 +1185,7 @@ const sendCtx = { target: null, kind: null };
 
 function townTarget(id) {
   const t = app.map && app.map.towns.find((x) => x.id === id);
-  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y };
+  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y, peaceEnd: t.peaceEnd };
 }
 
 function openSend(target, kind) {
@@ -1001,7 +1222,7 @@ async function openModal(type, arg) {
   const body = $('#modalBody');
   $('#modal').hidden = false;
   clearInterval(chatTimer);
-  if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world);
+  if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world, app.data.me.peaceEnd);
   if (type === 'send') {
     body.innerHTML = UI.sendHtml(app, app.live, sendCtx.target, sendCtx.kind);
     updateSendSummary();
@@ -1025,7 +1246,10 @@ async function openModal(type, arg) {
     try {
       app.team = (await get('/team')).members;
       body.innerHTML = UI.teamHtml(app, app.team, app.chat.chan);
+      renderChatBadges();
       loadChat();
+      // meteen naar de chat scrollen als je via 'nieuwe berichten' kwam
+      const ch = body.querySelector('.chat'); if (ch && (app.chat.unread || {})[app.chat.chan]) ch.scrollIntoView({ block: 'start' });
       chatTimer = setInterval(loadChat, 8000);
     } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
@@ -1066,9 +1290,68 @@ async function loadChat() {
       app.chat.seen[chan] = messages[messages.length - 1].id;
       store.set('rvs-chat-seen', app.chat.seen);
     }
-    const chatNew = ['team', 'world'].some((c) => (app.data.chat[c] || 0) > (app.chat.seen[c] || 0));
-    $('#badgeChat').hidden = !chatNew;
+    if (app.chat.unread) app.chat.unread[chan] = 0;
+    renderChatBadges();
   } catch { /* stil */ }
+}
+
+// /state vraagt meteen hoeveel chatberichten nieuwer zijn dan wat deze browser al zag
+function statePath() {
+  const s = app.chat.seen || {};
+  return `/state?cw=${s.world || 0}&ct=${s.team || 0}`;
+}
+
+// Ongelezen chat. chat = { world, team: laatste id per kanaal, newWorld/newTeam: zoveel nieuwer van anderen (max. 9),
+// lastWorld/lastTeam: laatste bericht { name, text, me } }.
+function chatState(chat, first) {
+  if (!chat) return;
+  const seen = app.chat.seen;
+  // eerste keer op dit toestel: oude berichten tellen niet als nieuw
+  if (seen.world == null && seen.team == null) { seen.world = chat.world || 0; seen.team = chat.team || 0; store.set('rvs-chat-seen', seen); }
+  const open = app.modal === 'team';
+  const prev = app.chat.last || {};
+  const unread = { world: 0, team: 0 };
+  for (const [c, n, last] of [['world', chat.newWorld, chat.lastWorld], ['team', chat.newTeam, chat.lastTeam]]) {
+    const id = chat[c] || 0;
+    if (id <= (seen[c] || 0)) continue;
+    if (!n || (open && app.chat.chan === c)) { seen[c] = id; store.set('rvs-chat-seen', seen); continue; } // enkel eigen berichten, of je leest mee
+    unread[c] = n;
+    // een nieuw bericht sinds de vorige peiling: kort tonen wie wat schreef (tik = naar de chat)
+    if (!first && prev[c] != null && id > prev[c] && last && !last.me) {
+      toast(`${c === 'team' ? 'Teamchat' : 'Iedereen'} · ${last.name}: ${last.text}`, 'chatmsg', 'chat', `openChat:${c}`);
+    }
+  }
+  app.chat.last = { world: chat.world || 0, team: chat.team || 0 };
+  app.chat.unread = unread;
+  renderChatBadges();
+}
+
+function renderChatBadges() {
+  const u = app.chat.unread || { world: 0, team: 0 };
+  const total = (u.world || 0) + (u.team || 0);
+  const txt = total >= 9 ? '9+' : String(total);
+  const b = $('#badgeChat');
+  b.hidden = !total; b.textContent = txt;
+  b.classList.toggle('pulse', total > 0);
+  const pill = $('#chatPill');
+  if (pill) {
+    pill.hidden = !total;
+    if (total) {
+      const where = u.team && u.world ? '' : u.team ? ' in de teamchat' : ' van iedereen';
+      setHTML(pill, `${UI.icon('chat')}<span>${txt} ${total === 1 ? 'nieuw bericht' : 'nieuwe berichten'}<span class="where">${where}</span></span>`);
+      pill.dataset.chan = u.team ? 'team' : 'world';
+    }
+  }
+  // ook in de titel van het tabblad (zie je in een ander tabblad of op de taakbalk)
+  const base = document.title.replace(/^\(\d\+?\) /, '');
+  document.title = total ? `(${txt}) ${base}` : base;
+  // aantallen op de tabbladen in de chat
+  for (const t of document.querySelectorAll('.chat .tab[data-chan]')) {
+    const n = u[t.dataset.chan] || 0;
+    let bd = t.querySelector('.bdg');
+    if (n && !bd) { bd = document.createElement('b'); bd.className = 'bdg'; t.appendChild(bd); }
+    if (bd) { if (n) bd.textContent = n >= 9 ? '9+' : String(n); else bd.remove(); }
+  }
 }
 
 // ---------- gebeurtenissen ----------
@@ -1108,11 +1391,13 @@ const actions = {
     else world.centerOnTile(app.data.town.x, app.data.town.y);
   },
   togglePanel() { $('#panel').classList.toggle('open'); },
+  closeSheet() { closeSheet(); },
   place(el) {
     const type = el.dataset.type;
     if (app.placing === type) { cancelPlace(); return; }
     const err = el.classList.contains('locked') || el.classList.contains('poor') ? el.title.split(': ').slice(1).join(': ') : null;
     if (err) { toast(err, 'err'); return; }
+    if (town.moveB) town.cancelMove();
     app.placing = type;
     if (app.mode) setMode(null);
     town.clearSel();
@@ -1121,7 +1406,12 @@ const actions = {
     app.selBuilding = null;
     const hint = $('#placeHint');
     hint.hidden = false;
-    hint.innerHTML = `Kies een plek voor: <b>${BUILDINGS[type].name}</b> <span class="muted">(shift = meerdere)</span><button class="btn small" data-action="cancelPlace">Annuleren</button>`;
+    // het havenhuis: enkel aan het water (blauwe tegels); kijk meteen naar de dichtste plek
+    const shore = BUILDINGS[type].shore;
+    const anyShore = shore ? town.showShore() : true;
+    hint.innerHTML = shore
+      ? (anyShore ? `Kies een <b>blauwe plek aan het water</b> voor het ${BUILDINGS[type].name.toLowerCase()}.` : 'Er is geen vrij land aan het water dicht genoeg bij je stad.') + '<button class="btn small" data-action="cancelPlace">Annuleren</button>'
+      : `Kies een plek voor: <b>${BUILDINGS[type].name}</b> <span class="muted">(shift = meerdere)</span><button class="btn small" data-action="cancelPlace">Annuleren</button>`;
     openPanelMobile(false);
     renderBuildBar();
     renderPanel();
@@ -1138,6 +1428,32 @@ const actions = {
     const r = await act('/walls', { tiles: [[Number(el.dataset.i), Number(el.dataset.j)]], remove: true }, app.selWall && app.selWall.gate ? 'Poort afgebroken' : 'Muurstuk afgebroken');
     if (r) { town.selWall = null; app.selWall = null; renderPanel(true); }
   },
+  moveBuilding(el) {
+    const b = app.live && app.live.buildings.find((x) => x.id === Number(el.dataset.id));
+    if (!b || !town) return;
+    if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+    cancelPlace();
+    if (app.mode) setMode(null);
+    openPanelMobile(false);
+    town.startMove(b);
+  },
+  moveWall(el) {
+    const live = app.live;
+    if (!live || !town) return;
+    if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+    const i = Number(el.dataset.i); const j = Number(el.dataset.j); const what = el.dataset.what;
+    const gate = gateList(live).find((g) => g.tiles.some(([a, b]) => a === i && b === j));
+    let tiles; let label;
+    if (what === 'run') { tiles = wallRun(live, i, j); label = `Muur (${tiles.length} stukken)`; }
+    else if (gate && (what === 'gate' || what === 'one')) { tiles = gate.tiles.map(([a, b]) => [a, b]); label = 'Poort'; }
+    else { tiles = [[i, j]]; label = 'Muurstuk'; }
+    cancelPlace();
+    if (app.mode) setMode(null);
+    openPanelMobile(false);
+    town.startWallMove(tiles, i, j, label);
+  },
+  moveHere() { if (town) town.dropMove(); },
+  moveStop() { if (town) town.cancelMove(); },
   async demolish(el) {
     const stop = el.dataset.stop === '1';
     if (!confirm(stop ? `De bouw van ${el.dataset.name} stoppen? Je krijgt de helft van de grondstoffen terug.` : `${el.dataset.name} afbreken? Je krijgt een deel van de grondstoffen terug.`)) return;
@@ -1184,11 +1500,9 @@ const actions = {
     const d = tcDoor();
     fieldOrder({ action: 'send', spec: { units }, to: { x: d.gx + 0.8, y: d.gy + 1.8 } }).then((r) => { if (r) openPanelMobile(false); });
   },
-  raidGo() {
-    if (app.view !== 'town') switchView('town');
-    const c = app.live.terr && app.live.terr.camp;
-    town.centerOn(app.live.buildings.find((b) => b.type === 'tc'));
-    if (c) toast('Hoe sterker je muur, torens en leger thuis, hoe beter je de barbaren afslaat.', '', 'shield');
+  raidAsk() {
+    const raid = raidIncoming();
+    if (raid) offerRaid(raid);
   },
   harvest(el) { harvestNode(Number(el.dataset.id), null); },
   vill(el) { changeVillagers(el.dataset.res, Number(el.dataset.d)); },
@@ -1203,6 +1517,17 @@ const actions = {
     if (n < 1) { toast('Kies een aantal.', 'err'); return; }
     act('/train', { unit: el.dataset.unit, count: n }, 'Training gestart');
   },
+  research(el) {
+    act('/research', { id: el.dataset.id }, 'Onderzoek gestart');
+  },
+  buildBoat() {
+    act('/boat', {}, 'Het bootje wordt gebouwd: vrije dorpelingen gaan meteen aan boord.');
+  },
+  async ransom() {
+    if (!confirm('Losgeld betalen? Je bent meteen vrij.')) return;
+    const r = await act('/vassal/ransom', {}, 'Losgeld betaald: je bent weer vrij!');
+    if (r) refresh();
+  },
   trade() {
     act('/trade', { give: $('#tr-give').value, get: $('#tr-get').value, amount: Math.floor(Number($('#tr-amount').value) || 0) }, 'Ruil voltooid');
   },
@@ -1210,8 +1535,16 @@ const actions = {
     const r = await act('/recall', { id: Number(el.dataset.id) }, 'Troepen keren terug');
     if (r) refresh();
   },
+  // een ander gebouw op de plek waar je tikte (rij 'Ook op deze plek' in het paneel)
+  pickBuilding(el) {
+    const id = Number(el.dataset.id);
+    if (!app.live.buildings.some((x) => x.id === id)) return;
+    app.selBuilding = id; town.selected = id; app.selWall = null; town.selWall = null;
+    town.lastPick = null;
+    renderPanel();
+  },
   deselect() {
-    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null;
+    app.selBuilding = null; town.selected = null; app.selWall = null; town.selWall = null; app.pickStack = null;
     if (world) world.selected = null;
     renderPanel();
   },
@@ -1226,7 +1559,7 @@ const actions = {
     const o = sel.obj;
     const target = sel.kind === 'camp'
       ? { kind: 'camp', id: o.id, name: `Roverskamp (niveau ${o.level})`, x: o.x, y: o.y }
-      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y };
+      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd };
     openSend(target, el.dataset.kind);
   },
   async sendTo(el) {
@@ -1255,11 +1588,19 @@ const actions = {
     }
   },
   openReport(el) { showReport(Number(el.dataset.id)); },
+  replay(el) { openReplay(Number(el.dataset.id)); },
+  raidReplay(el) { openRaidReplay(Number(el.dataset.id)); },
   async readAll() {
     await post('/reports/read-all').catch(() => {});
     app.data.unseenReports = 0; app.seenReports = 0;
     $('#badgeReports').hidden = true;
     openModal('reports');
+  },
+  // naar de chat (knop 'nieuwe berichten' of een melding): het kanaal met ongelezen berichten
+  openChat(el) {
+    const u = app.chat.unread || {};
+    app.chat.chan = (el && el.dataset.chan) || (u.team ? 'team' : u.world ? 'world' : app.chat.chan);
+    openModal('team');
   },
   chatTab(el) {
     app.chat.chan = el.dataset.chan;
@@ -1280,6 +1621,7 @@ const actions = {
   practice(el) { startPractice(el.dataset.role); },
   pushOn() { enablePush(); },
   pushOff() { disablePush(); },
+  pushPref(el) { setPushPref(el.dataset.k); },
   async pushTest() {
     try {
       const r = await post('/push/test', {});
@@ -1300,10 +1642,31 @@ const actions = {
       renderArrival();
     } catch (e) { toast(e.message, 'err'); }
   },
-  toggleBuildbar() {
-    app.bbMin = !app.bbMin;
+  // tabblad onderaan: een ander tabblad opent dat; hetzelfde (open) tabblad klapt het menu in
+  bbTab(el) {
+    const t = el.dataset.tab;
+    if (t !== 'build' && (app.placing || app.mode)) setMode(null);
+    if (t === bbTabNow() && !app.bbMin) app.bbMin = true;
+    else { app.bbTab = t; app.bbMin = false; }
     store.set('rvs-buildbar-min', app.bbMin);
-    renderBuildToggle();
+    store.set('rvs-buildbar-tab', app.bbTab);
+    renderBuildBar(true);
+    updateTimers();
+  },
+  // bouwadvies: naar het gebouw (een gebundelde kaart toont bij elke tik het volgende gebouw van die soort)
+  adviceGo(el) {
+    const live = app.live;
+    let b = null;
+    if (el.dataset.id) b = live.buildings.find((x) => x.id === Number(el.dataset.id));
+    else {
+      const key = `${el.dataset.type}|${el.dataset.level}`;
+      const list = live.buildings.filter((x) => x.type === el.dataset.type && x.level === Number(el.dataset.level) && !live.builds.some((j) => j.bid === x.id));
+      if (!list.length) return;
+      const i = ((app.adviceIdx[key] ?? -1) + 1) % list.length;
+      app.adviceIdx[key] = i;
+      b = list[i];
+    }
+    if (b) focusBuilding(b);
   },
   async alertGo(el) {
     switchView('world');
@@ -1338,6 +1701,7 @@ document.addEventListener('keydown', (e) => {
   if (battle && battle.open) return; // het slagveld heeft zijn eigen toetsen
   if (e.key === 'Escape') {
     if (!$('#modal').hidden) closeModal();
+    else if (town && town.moveB) town.cancelMove();
     else if (app.placing) cancelPlace();
     else if (app.mode) setMode(null);
     else if (town && town.sel) actions.cancelVillager();

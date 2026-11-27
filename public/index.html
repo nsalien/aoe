@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2a2015">
   <title>Rijken van de Vallei</title>
-  <meta name="description" content="Bouw samen met je bondgenoot een rijk op, en trek na drie weken vrede ten strijde.">
+  <meta name="description" content="Bouw samen met je bondgenoot een rijk op. Na 24 uur vrede trek je ten strijde.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M10 58V26h8v8h6V26h8v8h0V26h8v8h6v-8h8v32z' fill='%23b9b1a1'/%3E%3Cpath d='M28 58V44a4 4 0 0 1 8 0v14z' fill='%233d2a1a'/%3E%3Cpath d='M32 6v18' stroke='%233b2a18' stroke-width='2'/%3E%3Cpath d='M33 6h14l-4 5 4 5H33z' fill='%23d64545'/%3E%3C/svg%3E">
   <link rel="manifest" href="/manifest.webmanifest">
   <!-- iPhone/iPad: 'Zet op beginscherm' geeft een app met eigen icoon, volledig scherm en zonder adresbalk -->
@@ -14,10 +14,42 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Rijken">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <!-- meteen beginnen: de spelgegevens ophalen en alle scripts tegelijk laden (niet één na één) -->
+  <script>(function () { var o = { credentials: "same-origin" }; var q = ""; try { var c = JSON.parse(localStorage.getItem("rvs-chat-seen")) || {}; q = "?cw=" + (c.world || 0) + "&ct=" + (c.team || 0); } catch (e) { /* privé-venster */ } try { window.__boot = { info: fetch("/api/info", o), state: fetch("/api/state" + q, o) }; } catch (e) { /* oude browser */ } })();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="modulepreload" href="/js/main.js">
+  <link rel="modulepreload" href="/js/api.js">
+  <link rel="modulepreload" href="/js/sprite3d.js">
+  <link rel="modulepreload" href="/js/town.js">
+  <link rel="modulepreload" href="/js/world.js">
+  <link rel="modulepreload" href="/js/ui.js">
+  <link rel="modulepreload" href="/js/fx.js">
+  <link rel="modulepreload" href="/js/dom.js">
+  <link rel="modulepreload" href="/js/battleview.js">
+  <link rel="modulepreload" href="/shared/sim.js">
+  <link rel="modulepreload" href="/shared/rules.js">
+  <link rel="modulepreload" href="/js/models3d.js">
+  <link rel="modulepreload" href="/js/propmodels.js">
+  <link rel="modulepreload" href="/js/art.js">
+  <link rel="modulepreload" href="/js/iso.js">
+  <link rel="modulepreload" href="/js/troops.js">
+  <link rel="modulepreload" href="/shared/territory.js">
+  <link rel="modulepreload" href="/js/nature.js">
+  <link rel="modulepreload" href="/js/figures.js">
+  <link rel="modulepreload" href="/shared/worldgen.js">
+  <link rel="modulepreload" href="/js/towndress.js">
+  <link rel="modulepreload" href="/js/groundhd.js">
+  <link rel="modulepreload" href="/shared/skirmish.js">
+  <link rel="modulepreload" href="/js/worldmap.js">
+  <link rel="modulepreload" href="/shared/fieldbattle.js">
+  <link rel="modulepreload" href="/shared/battle.js">
+  <link rel="modulepreload" href="/js/icons.js">
+  <link rel="modulepreload" href="/js/siegeview.js">
+  <link rel="modulepreload" href="/js/render3d.js">
+  <link rel="modulepreload" href="/js/figmodels.js">
 </head>
 <body>
   <div id="splash" class="splash"><div class="splash-inner"><div class="splash-crest" data-icon="castle"></div><div class="splash-title">Rijken van de Vallei</div><div class="splash-bar"><i></i></div></div></div>
@@ -29,7 +61,7 @@
       <div class="logo">
         <span class="logo-crest" data-icon="castle"></span>
         <h1>Rijken van de Vallei</h1>
-        <p class="tagline">Drie weken bouwen. Eén week oorlog.</p>
+        <p class="tagline">Eén dag vrede. Daarna oorlog.</p>
       </div>
       <div id="authInfo" class="auth-info"></div>
       <div class="tabs" role="tablist">
@@ -67,7 +99,7 @@
       <button class="navbtn active" data-action="view" data-view="town" title="Mijn stad"><span class="ni" data-icon="castle"></span><span>Stad</span></button>
       <button class="navbtn" data-action="view" data-view="world" title="Wereldkaart"><span class="ni" data-icon="map"></span><span>Wereld</span></button>
       <button class="navbtn" data-action="reports" title="Rapporten"><span class="ni" data-icon="scroll"></span><span>Rapporten</span><b id="badgeReports" class="badge" hidden></b></button>
-      <button class="navbtn" data-action="team" title="Team en chat"><span class="ni" data-icon="team"></span><span>Team</span><b id="badgeChat" class="badge dot" hidden></b></button>
+      <button class="navbtn" data-action="team" title="Team en chat"><span class="ni" data-icon="team"></span><span>Team</span><b id="badgeChat" class="badge" hidden></b></button>
       <button class="navbtn" data-action="leaderboard" title="Ranglijst"><span class="ni" data-icon="trophy"></span><span>Ranglijst</span></button>
       <button class="navbtn" data-action="help" title="Hoe speel je?"><span class="ni" data-icon="book"></span><span>Hulp</span></button>
       <button class="navbtn bottom" data-action="logout" title="Afmelden"><span class="ni" data-icon="door"></span><span>Uit</span></button>
@@ -77,6 +109,7 @@
       <canvas id="worldCanvas" hidden></canvas>
       <div class="vignette" aria-hidden="true"></div>
       <div id="viewTitle" class="view-title"></div>
+      <button id="chatPill" class="chat-pill" data-action="openChat" hidden></button>
       <div class="hud">
         <button class="hudbtn" data-action="zoom" data-dir="1" title="Inzoomen" data-icon="plus"></button>
         <button class="hudbtn" data-action="zoom" data-dir="-1" title="Uitzoomen" data-icon="minus"></button>
@@ -86,7 +119,11 @@
       <div id="placeHint" class="place-hint" hidden></div>
       <div id="buildwrap" class="buildwrap">
         <div class="bb-row">
-          <button id="bbToggle" class="bb-toggle" data-action="toggleBuildbar" aria-expanded="true"></button>
+          <div class="bb-tabs" role="tablist">
+            <button id="bbToggle" class="bb-toggle" data-action="bbTab" data-tab="build" role="tab"></button>
+            <button id="bbArmy" class="bb-toggle" data-action="bbTab" data-tab="army" role="tab"></button>
+            <button id="bbAdvice" class="bb-toggle" data-action="bbTab" data-tab="advice" role="tab"></button>
+          </div>
           <div id="selActions" class="sel-actions" hidden></div>
         </div>
         <div id="buildbar" class="buildbar"></div>

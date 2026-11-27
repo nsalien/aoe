@@ -37,14 +37,16 @@
     <p class="note"><b>Let op:</b> dit wist alle spelers, steden en berichten en maakt een nieuwe wereld.</p>
     <div class="grid">
       <label>Startmoment<input id="r-start" class="field" type="datetime-local"></label>
-      <label>Vredestijd (dagen)<input id="r-prep" class="field" type="number" step="0.01" value="21"></label>
-      <label>Oorlog (dagen)<input id="r-war" class="field" type="number" step="0.01" value="7"></label>
+      <label>Vrede per speler (uren)<input id="r-prep" class="field" type="number" step="0.01" min="0" value="24"></label>
+      <label>Lengte seizoen (dagen)<input id="r-war" class="field" type="number" step="0.01" value="28"></label>
       <label>Spelsnelheid<input id="r-speed" class="field" type="number" step="0.1" value="1"></label>
       <label>Spelers per team<input id="r-team" class="field" type="number" min="1" max="8" value="2"></label>
+      <label>Computerspelers (bots)<input id="r-bots" class="field" type="number" min="0" max="12" value="4"></label>
+      <label>Niveau van de bots<select id="r-botlevel" class="field"><option value="1">Makkelijk</option><option value="2" selected>Normaal</option><option value="3">Sterk</option></select></label>
       <label>Deelnamecode (optioneel)<input id="r-code" class="field" placeholder="bv. vrienden2026"></label>
       <label>Seed (optioneel)<input id="r-seed" class="field" type="number" placeholder="willekeurig"></label>
     </div>
-    <p class="note">Snelheid 1 = normaal (bouwtijden van minuten tot uren). Om te testen kan je bv. snelheid 50 met 0,05 dagen vrede gebruiken.</p>
+    <p class="note">Snelheid 1 = normaal (bouwtijden van minuten tot uren). Elke speler heeft vrede vanaf zijn start (of de start van het seizoen): zo lang kan niemand hem aanvallen en kan hij zelf geen spelers aanvallen. Om te testen kan je bv. snelheid 50 met 0,1 uur vrede gebruiken.</p>
     <div class="actions"><button class="btn danger" id="btnReset">Wereld (opnieuw) aanmaken</button></div>
   </div>
 
@@ -53,13 +55,21 @@
     <p class="note">Laat velden leeg om ze niet te wijzigen.</p>
     <div class="grid">
       <label>Startmoment<input id="u-start" class="field" type="datetime-local"></label>
-      <label>Vredestijd (dagen)<input id="u-prep" class="field" type="number" step="0.01"></label>
-      <label>Oorlog (dagen)<input id="u-war" class="field" type="number" step="0.01"></label>
+      <label>Vrede per speler (uren)<input id="u-prep" class="field" type="number" step="0.01" min="0"></label>
+      <label>Lengte seizoen (dagen)<input id="u-war" class="field" type="number" step="0.01"></label>
       <label>Spelsnelheid<input id="u-speed" class="field" type="number" step="0.1"></label>
       <label>Spelers per team<input id="u-team" class="field" type="number" min="1" max="8"></label>
+      <label>Computerspelers (bots)<input id="u-bots" class="field" type="number" min="0" max="12"></label>
+      <label>Niveau van de bots<select id="u-botlevel" class="field"><option value="">ongewijzigd</option><option value="1">Makkelijk</option><option value="2">Normaal</option><option value="3">Sterk</option></select></label>
       <label>Deelnamecode<input id="u-code" class="field" placeholder="leeg = ongewijzigd"></label>
     </div>
     <div class="actions"><button class="btn primary" id="btnUpdate">Aanpassen</button></div>
+  </div>
+
+  <div class="box">
+    <h2>Clan verplaatsen</h2>
+    <p class="note">Zet alle steden van een clan op een andere, willekeurige plek op de kaart, zo ver mogelijk van de andere steden (de steden zelf blijven zoals ze zijn).</p>
+    <div class="row"><input id="relTeam" class="field grow" placeholder="naam van de clan, bv. Rozenwacht"><button class="btn" id="btnRelocate">Verplaatsen</button></div>
   </div>
 
   <div class="box">
@@ -87,10 +97,10 @@ async function status() {
     const s = await call('GET', '/admin/status');
     if (!s.world) { $('#status').textContent = 'Er is nog geen wereld. Maak er hieronder een aan.'; return; }
     const w = s.world;
-    $('#status').innerHTML = `<p><b>Fase:</b> ${w.phase} · <b>snelheid</b> ${w.speed} · <b>teams van</b> ${w.team_size} · <b>code</b> ${w.join_code || '—'} · <b>seed</b> ${w.seed}</p>
-      <p>Start: ${f(w.startAt)}<br>Oorlog vanaf: ${f(w.prepEnd)}<br>Einde: ${f(w.warEnd)}</p>
+    $('#status').innerHTML = `<p><b>Fase:</b> ${w.phase} · <b>snelheid</b> ${w.speed} · <b>teams van</b> ${w.team_size} · <b>code</b> ${w.join_code || '—'} · <b>seed</b> ${w.seed} · <b>bots</b> ${w.bots} (${['', 'makkelijk', 'normaal', 'sterk'][w.bot_level] || '?'})</p>
+      <p>Start: ${f(w.startAt)}<br>Vrede per speler: ${+(w.peaceMs / 3600000).toFixed(2)} uur<br>Einde: ${f(w.warEnd)}</p>
       <p><b>${s.players.length} spelers</b>, ${s.marches} legers onderweg</p>
-      <pre>${s.players.map((p) => `${p.team || '?'} — ${p.name.replace(/[<>&]/g, '')} (laatst gezien ${p.last_seen ? f(p.last_seen) : 'nooit'}, ${p.kill_pts} gevechtspunten)`).join('\n') || 'Nog geen spelers.'}</pre>`;
+      <pre>${s.players.map((p) => `${p.team || '?'} — ${p.name.replace(/[<>&]/g, '')}${p.bot ? ' (computer)' : ` (laatst gezien ${p.last_seen ? f(p.last_seen) : 'nooit'}`}, ${p.kill_pts} gevechtspunten${p.bot ? '' : ')'}`).join('\n') || 'Nog geen spelers.'}</pre>`;
     $('#u-start').value = toLocal(w.startAt);
   } catch (e) { $('#status').textContent = 'Fout: ' + e.message; }
 }
@@ -98,7 +108,7 @@ $('#btnStatus').onclick = status;
 $('#btnReset').onclick = async () => {
   if (!confirm('Alles wissen en een nieuw seizoen starten?')) return;
   try {
-    const body = { startAt: new Date($('#r-start').value).getTime(), prepDays: $('#r-prep').value, warDays: $('#r-war').value, speed: $('#r-speed').value, teamSize: $('#r-team').value, joinCode: $('#r-code').value, seed: $('#r-seed').value };
+    const body = { startAt: new Date($('#r-start').value).getTime(), peaceHours: $('#r-prep').value, seasonDays: $('#r-war').value, speed: $('#r-speed').value, teamSize: $('#r-team').value, joinCode: $('#r-code').value, seed: $('#r-seed').value, bots: $('#r-bots').value, botLevel: $('#r-botlevel').value };
     const r = await call('POST', '/admin/reset', body);
     alert(`Nieuwe wereld aangemaakt (seed ${r.seed}, ${r.camps} roverskampen).`);
     status();
@@ -108,7 +118,7 @@ $('#btnUpdate').onclick = async () => {
   try {
     const body = {};
     if ($('#u-start').value) body.startAt = new Date($('#u-start').value).getTime();
-    for (const [id, k] of [['u-prep', 'prepDays'], ['u-war', 'warDays'], ['u-speed', 'speed'], ['u-team', 'teamSize']]) if ($('#' + id).value) body[k] = $('#' + id).value;
+    for (const [id, k] of [['u-prep', 'peaceHours'], ['u-war', 'seasonDays'], ['u-speed', 'speed'], ['u-team', 'teamSize'], ['u-bots', 'bots'], ['u-botlevel', 'botLevel']]) if ($('#' + id).value) body[k] = $('#' + id).value;
     if ($('#u-code').value) body.joinCode = $('#u-code').value;
     await call('POST', '/admin/update', body);
     alert('Aangepast.');
@@ -117,6 +127,14 @@ $('#btnUpdate').onclick = async () => {
 };
 $('#btnMsg').onclick = async () => {
   try { await call('POST', '/admin/message', { text: $('#msg').value }); $('#msg').value = ''; alert('Verstuurd.'); } catch (e) { alert('Fout: ' + e.message); }
+};
+$('#btnRelocate').onclick = async () => {
+  const team = $('#relTeam').value.trim();
+  if (!team || !confirm(`Alle steden van ${team} naar een nieuwe plek verplaatsen?`)) return;
+  try {
+    const r = await call('POST', '/admin/relocate', { team });
+    alert(`${r.team}: ${r.moved.map((m) => `${m.name} (${m.from.x}, ${m.from.y}) → (${m.to.x}, ${m.to.y})`).join(', ')}. Dichtste andere stad: ${r.dist} tegels.`);
+  } catch (e) { alert('Fout: ' + e.message); }
 };
 if ($('#key').value) status();
 </script>
