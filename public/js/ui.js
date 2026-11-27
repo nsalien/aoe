@@ -1579,6 +1579,7 @@ export function helpHtml(w, peaceEnd) {
   const f = (t) => new Date(t).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   const pt = peaceText(w.peaceMs);
   return `<div class="help"><h2>${icon('book')} Hoe speel je?</h2>
+    <p class="small"><button class="btn small" data-action="news">${icon('news')} Nieuws: wat is er onlangs veranderd?</button></p>
     <div class="timeline"><div class="tp">${icon('dove')} Vrede (${pt})<br><small>${f(peaceEnd - w.peaceMs)}</small></div><div class="tw">${icon('swords')} Oorlog<br><small>${f(peaceEnd)}</small></div></div>
     <p>Het seizoen eindigt op <b>${f(w.warEnd)}</b>. Het team met de meeste punten wint.</p>
     <h3>1. Bouw je economie</h3>

@@ -303,6 +303,30 @@ function startGame(data) {
   if (location.search) history.replaceState(null, '', location.pathname);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
   maybeShowIntro();
+  setTimeout(checkNews, 4000);
+}
+
+// ---------- nieuws (updates.js wordt pas na het opstarten geladen) ----------
+const newsSeen = () => Number(store.get('rvs-news-seen')) || 0;
+// wanneer deze speler begon (artikels van daarvoor zijn voor hem geen nieuws)
+const joinedAt = () => (app.data ? app.data.me.peaceEnd - app.data.world.peaceMs : 0);
+function markNewsSeen(id) {
+  if (id > newsSeen()) store.set('rvs-news-seen', id);
+  const b = $('#badgeNews'); if (b) b.hidden = true;
+}
+async function checkNews() {
+  try {
+    const N = await import('./updates.js');
+    const fresh = N.unreadUpdates(newsSeen(), joinedAt());
+    const b = $('#badgeNews');
+    if (b) { b.hidden = !fresh.length; b.textContent = fresh.length; b.classList.toggle('pulse', fresh.length > 0); }
+    // één keer per artikel een melding (tik = lezen)
+    const top = fresh[0];
+    if (top && top.id > (Number(store.get('rvs-news-told')) || 0)) {
+      store.set('rvs-news-told', top.id);
+      toast(`Nieuw in het spel: ${top.title}`, 'chatmsg', 'news', 'news');
+    }
+  } catch { /* geen nieuws: niet erg */ }
 }
 
 function maybeShowIntro() {
@@ -1230,6 +1254,15 @@ async function openModal(type, arg) {
   $('#modal').hidden = false;
   clearInterval(chatTimer);
   if (type === 'help') body.innerHTML = UI.helpHtml(app.data.world, app.data.me.peaceEnd);
+  if (type === 'updates') {
+    body.innerHTML = `<h2>${UI.icon('news')} Nieuws uit de vallei</h2><p class="empty">Laden…</p>`;
+    try {
+      const N = await import('./updates.js');
+      body.innerHTML = N.updatesHtml({ seen: newsSeen(), joinedAt: joinedAt() });
+      const top = N.latestUpdate();
+      if (top) markNewsSeen(top.id);
+    } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
+  }
   if (type === 'send') {
     body.innerHTML = UI.sendHtml(app, app.live, sendCtx.target, sendCtx.kind);
     updateSendSummary();
@@ -1465,6 +1498,7 @@ const actions = {
   team() { openModal('team'); },
   leaderboard() { openModal('leaderboard'); },
   help() { openModal('help'); },
+  news() { openModal('updates'); },
   closeModal,
   async logout() {
     if (!confirm('Wil je afmelden?')) return;
