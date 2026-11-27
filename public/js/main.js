@@ -168,7 +168,7 @@ let battle = null;
 function toast(msg, type = '', ic = null, action = null) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  if (action) { const [a, arg] = action.split(':'); el.dataset.action = a; if (arg) el.dataset.chan = arg; el.classList.add('tap'); }
+  if (action) { const [a, arg] = action.split(':'); el.dataset.action = a; if (arg) { el.dataset.chan = arg; el.dataset.id = arg; } el.classList.add('tap'); }
   const name = ic || (type === 'err' ? 'bell' : type === 'ok' ? 'star' : 'scroll');
   el.innerHTML = `${UI.icon(name)}<span>${UI.esc(msg)}</span>`;
   const box = $('#toasts');
@@ -319,7 +319,14 @@ function maybeShowIntro() {
 // ---------- spelstatus ----------
 function applyState(data, first = false) {
   const prevPhase = app.data && app.data.world.phase;
+  const prevTeam = app.data && app.data.me.teamId;
   app.data = data;
+  // van clan gewisseld (ook als de andere kant je verzoek aanvaardde of je clan je buitenzette): bondgenoten en kaart opnieuw
+  if (prevTeam != null && prevTeam !== data.me.teamId) {
+    app.team = null;
+    if (!app.chat.resetTeam) { app.chat.resetTeam = true; app.chat.last.team = null; toast(`Je zit nu in ${data.team.name}.`, 'ok', 'flag'); }
+    setTimeout(() => loadMap(true), 0);
+  }
   app.serverState = data.town.state;
   UI.setCiv(data.town.state.civ);
   if (fieldQueue.length) setBaseState(data.town.state);
@@ -345,7 +352,7 @@ function applyState(data, first = false) {
   for (const m of data.marches) {
     if (!m.ally && m.status === 'out' && (m.kind === 'attack' || m.kind === 'scout') && !app.knownHostile.has(m.id)) {
       app.knownHostile.add(m.id);
-      if (!first) toast(`${m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err', 'swords');
+      if (!first) toast(`${m.betray ? `Verraad! Je bondgenoot ${m.player}` : m.player} stuurt een ${m.kind === 'scout' ? 'verkenning' : 'aanval'} naar ${m.to.name}!`, 'err', 'swords');
     }
   }
   renderAll();
@@ -653,7 +660,7 @@ function renderAlert() {
   el.hidden = false;
   el.dataset.action = 'alertGo';
   el.dataset.x = m.to.x; el.dataset.y = m.to.y;
-  setHTML(el, `${UI.icon('bell')} ${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`);
+  setHTML(el, `${UI.icon('bell')} ${m.betray ? `Verraad door ${UI.esc(m.player)}! ` : ''}${m.kind === 'scout' ? 'Verkenners' : 'Aanval'} op ${UI.esc(m.to.name)} over <span data-end="${m.arriveAt}">${fmtDuration(m.arriveAt - app.now())}</span>${hostile.length > 1 ? ` (+${hostile.length - 1})` : ''}`);
 }
 
 // trekken de barbaren naar je dorp (en heb je nog niet gekozen om zelf te verdedigen)? { start, at, n } of null
@@ -1244,12 +1251,14 @@ async function openModal(type, arg) {
   if (type === 'team') {
     body.innerHTML = `<h2>${UI.icon('team')} Team</h2><p class="empty">Laden…</p>`;
     try {
-      app.team = (await get('/team')).members;
-      body.innerHTML = UI.teamHtml(app, app.team, app.chat.chan);
+      const r = await get('/team');
+      app.team = r.members; app.clan = r.clan;
+      body.innerHTML = UI.teamHtml(app, app.team, app.chat.chan, app.clan);
       renderChatBadges();
       loadChat();
-      // meteen naar de chat scrollen als je via 'nieuwe berichten' kwam
-      const ch = body.querySelector('.chat'); if (ch && (app.chat.unread || {})[app.chat.chan]) ch.scrollIntoView({ block: 'start' });
+      // meteen naar de chat scrollen als je via 'nieuwe berichten' of 'Bericht' kwam
+      const ch = body.querySelector('.chat');
+      if (ch && (arg === 'chat' || (app.chat.unread || {})[app.chat.chan])) ch.scrollIntoView({ block: 'start' });
       chatTimer = setInterval(loadChat, 8000);
     } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
@@ -1278,6 +1287,9 @@ async function showReport(id) {
 
 async function loadChat() {
   const chan = app.chat.chan;
+  if (chan === 'dm') return loadDm();
+  const form = $('#chatForm');
+  if (form) { form.hidden = false; form.elements.text.placeholder = 'Schrijf een bericht…'; }
   try {
     const { messages } = await get(`/chat?channel=${chan}`);
     const el = $('#chatMsgs');
@@ -1295,6 +1307,74 @@ async function loadChat() {
   } catch { /* stil */ }
 }
 
+// privéberichten: zonder gekozen speler de lijst met gesprekken, anders het gesprek (wat aan jou gericht was, is dan gelezen)
+async function loadDm() {
+  const el = $('#chatMsgs');
+  const form = $('#chatForm');
+  const other = app.chat.dm;
+  if (form) { form.hidden = !other; form.elements.text.placeholder = 'Privébericht…'; }
+  try {
+    if (!other) {
+      const list = await get('/dm/list');
+      if (!el || app.chat.chan !== 'dm' || app.chat.dm) return;
+      setHTML(el, UI.dmListHtml(list));
+      return;
+    }
+    const conv = await get(`/dm?with=${other}`);
+    if (!el || app.chat.chan !== 'dm' || app.chat.dm !== other) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setHTML(el, UI.dmConvHtml(conv));
+    if (atBottom || el.dataset.loaded !== `dm${other}`) el.scrollTop = el.scrollHeight;
+    el.dataset.loaded = `dm${other}`;
+    if (conv.unreadLeft != null && app.chat.unread) { app.chat.unread.dm = conv.unreadLeft; renderChatBadges(); }
+  } catch (e) { if (el && other) setHTML(el, `<p class="req">${UI.esc(e.message)}</p>`); }
+}
+
+// een privégesprek openen (vanuit de kaart, het Team-venster of een melding)
+function openDm(id) {
+  app.chat.chan = 'dm';
+  app.chat.dm = id || null;
+  if (app.modal === 'team') {
+    for (const t of document.querySelectorAll('.chat .tab')) t.classList.toggle('active', t.dataset.chan === 'dm');
+    const m = $('#chatMsgs');
+    if (m) { resetHTML(m); m.innerHTML = '<p class="empty">Laden…</p>'; delete m.dataset.loaded; }
+    loadChat();
+    const ch = document.querySelector('#modalBody .chat'); if (ch) ch.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (id) setTimeout(() => { const i = $('#chatForm') && $('#chatForm').elements.text; if (i && matchMedia('(pointer: fine)').matches) i.focus(); }, 300);
+  } else openModal('team', 'chat');
+}
+
+// na een wissel van clan: alles opnieuw (kleur, bondgenoten, kaart) en het Team-venster bijwerken
+async function afterClanChange(msg) {
+  if (msg) toast(msg, 'ok', 'flag');
+  app.chat.resetTeam = true; app.chat.last.team = null; // nieuwe clanchat: de oude berichten daar tellen niet als nieuw
+  await refresh();
+  await loadMap(true).catch(() => {});
+  if (app.view === 'world') renderPanel();
+  if (app.modal === 'team') openModal('team');
+}
+
+// Team-venster bijwerken zonder het te sluiten (na een uitnodiging, verzoek, ...)
+async function reloadClan() {
+  try {
+    const r = await get('/team');
+    app.team = r.members; app.clan = r.clan;
+    const a = $('#clanAsk'); const l = $('#clanList');
+    if (a) setHTML(a, UI.clanAskHtml(app.clan));
+    if (l) setHTML(l, UI.clanListHtml(app, app.clan));
+  } catch { /* stil */ }
+}
+
+async function clanCall(path, body, el) {
+  if (el) el.disabled = true;
+  try {
+    const r = await post(path, body);
+    if (r.joined || r.team) await afterClanChange(r.msg);
+    else { toast(r.msg || 'Gedaan.', 'ok', 'flag'); await reloadClan(); }
+    return r;
+  } catch (e) { toast(e.message, 'err'); if (el) el.disabled = false; return null; }
+}
+
 // /state vraagt meteen hoeveel chatberichten nieuwer zijn dan wat deze browser al zag
 function statePath() {
   const s = app.chat.seen || {};
@@ -1308,6 +1388,7 @@ function chatState(chat, first) {
   const seen = app.chat.seen;
   // eerste keer op dit toestel: oude berichten tellen niet als nieuw
   if (seen.world == null && seen.team == null) { seen.world = chat.world || 0; seen.team = chat.team || 0; store.set('rvs-chat-seen', seen); }
+  if (app.chat.resetTeam) { app.chat.resetTeam = false; seen.team = chat.team || 0; store.set('rvs-chat-seen', seen); }
   const open = app.modal === 'team';
   const prev = app.chat.last || {};
   const unread = { world: 0, team: 0 };
@@ -1321,14 +1402,28 @@ function chatState(chat, first) {
       toast(`${c === 'team' ? 'Teamchat' : 'Iedereen'} · ${last.name}: ${last.text}`, 'chatmsg', 'chat', `openChat:${c}`);
     }
   }
-  app.chat.last = { world: chat.world || 0, team: chat.team || 0 };
+  // privéberichten: de server weet wat gelezen is (ook op een ander toestel)
+  unread.dm = chat.newDm || 0;
+  const ld = chat.lastDm;
+  const reading = open && app.chat.chan === 'dm' && ld && app.chat.dm === ld.from;
+  if (reading) unread.dm = 0;
+  if (!first && ld && ld.id > (prev.dm || 0) && !reading) toast(`Privé · ${ld.name}: ${ld.text}`, 'chatmsg', 'chat', `dmOpen:${ld.from}`);
+  // uitnodigingen voor jou en verzoeken om bij je clan te komen
+  const cl = app.data && app.data.clan ? app.data.clan : { invites: 0, requests: 0 };
+  const pc = app.chat.clan || { invites: 0, requests: 0 };
+  if (!first && cl.invites > pc.invites) toast('Een clan nodigt je uit! Antwoord in het Team-venster.', 'chatmsg', 'flag', 'openChat:team');
+  if (!first && cl.requests > pc.requests) toast('Iemand vraagt om bij jullie clan te komen. Antwoord in het Team-venster.', 'chatmsg', 'flag', 'openChat:team');
+  if (open && (cl.invites !== pc.invites || cl.requests !== pc.requests)) reloadClan();
+  app.chat.clan = { invites: cl.invites, requests: cl.requests };
+  unread.clan = cl.invites + cl.requests;
+  app.chat.last = { world: chat.world || 0, team: chat.team || 0, dm: ld ? Math.max(ld.id, prev.dm || 0) : prev.dm || 0 };
   app.chat.unread = unread;
   renderChatBadges();
 }
 
 function renderChatBadges() {
   const u = app.chat.unread || { world: 0, team: 0 };
-  const total = (u.world || 0) + (u.team || 0);
+  const total = (u.world || 0) + (u.team || 0) + (u.dm || 0) + (u.clan || 0);
   const txt = total >= 9 ? '9+' : String(total);
   const b = $('#badgeChat');
   b.hidden = !total; b.textContent = txt;
@@ -1337,9 +1432,11 @@ function renderChatBadges() {
   if (pill) {
     pill.hidden = !total;
     if (total) {
-      const where = u.team && u.world ? '' : u.team ? ' in de teamchat' : ' van iedereen';
-      setHTML(pill, `${UI.icon('chat')}<span>${txt} ${total === 1 ? 'nieuw bericht' : 'nieuwe berichten'}<span class="where">${where}</span></span>`);
-      pill.dataset.chan = u.team ? 'team' : 'world';
+      const kinds = ['team', 'world', 'dm', 'clan'].filter((k) => u[k]);
+      const where = kinds.length > 1 ? '' : { team: ' in de clanchat', world: ' van iedereen', dm: ' (privé)', clan: '' }[kinds[0]] || '';
+      const what = kinds.length === 1 && kinds[0] === 'clan' ? (u.clan === 1 ? 'uitnodiging of verzoek' : 'uitnodigingen of verzoeken') : total === 1 ? 'nieuw bericht' : 'nieuwe berichten';
+      setHTML(pill, `${UI.icon(kinds.length === 1 && kinds[0] === 'clan' ? 'flag' : 'chat')}<span>${txt} ${what}<span class="where">${where}</span></span>`);
+      pill.dataset.chan = u.clan ? 'team' : u.dm ? 'dm' : u.team ? 'team' : 'world';
     }
   }
   // ook in de titel van het tabblad (zie je in een ander tabblad of op de taakbalk)
@@ -1559,7 +1656,7 @@ const actions = {
     const o = sel.obj;
     const target = sel.kind === 'camp'
       ? { kind: 'camp', id: o.id, name: `Roverskamp (niveau ${o.level})`, x: o.x, y: o.y }
-      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd };
+      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd, player: o.player, betray: el.dataset.betray === '1' };
     openSend(target, el.dataset.kind);
   },
   async sendTo(el) {
@@ -1575,9 +1672,10 @@ const actions = {
     const { units, res } = readSend();
     const kind = el.dataset.kind;
     const t = sendCtx.target;
+    if (t.betray && !confirm(`${t.player || 'Deze speler'} is je bondgenoot. Wil je hem echt verraden en ${kind === 'scout' ? 'verkennen' : 'aanvallen'}?`)) return;
     el.disabled = true;
     try {
-      await post('/march', { kind, targetKind: t.kind, targetId: t.id, units, res });
+      await post('/march', { kind, targetKind: t.kind, targetId: t.id, units, res, betray: !!t.betray });
       toast(kind === 'trade' ? 'De karavaan vertrekt!' : 'Je troepen zijn vertrokken!', 'ok');
       closeModal();
       await refresh();
@@ -1599,14 +1697,39 @@ const actions = {
   // naar de chat (knop 'nieuwe berichten' of een melding): het kanaal met ongelezen berichten
   openChat(el) {
     const u = app.chat.unread || {};
-    app.chat.chan = (el && el.dataset.chan) || (u.team ? 'team' : u.world ? 'world' : app.chat.chan);
-    openModal('team');
+    app.chat.chan = (el && el.dataset.chan) || (u.team ? 'team' : u.world ? 'world' : u.dm ? 'dm' : app.chat.chan);
+    if (app.chat.chan === 'dm') app.chat.dm = null;
+    openModal('team', u.clan ? null : 'chat');
+  },
+  // privébericht aan een speler (of de lijst met gesprekken)
+  dmOpen(el) { openDm(Number(el.dataset.id) || null); },
+  dmBack() { openDm(null); },
+  clanAnswer(el) {
+    const accept = el.dataset.accept === '1';
+    const r = app.clan && [...app.clan.invites, ...app.clan.requests].find((x) => x.id === Number(el.dataset.id));
+    if (accept && r && r.kind === 'invite' && !confirm(`Bij ${r.team ? r.team.name : 'deze clan'} gaan? Je verlaat dan ${app.data.team.name}. Troepen bij je bondgenoten komen naar huis.`)) return;
+    clanCall('/clan/answer', { id: Number(el.dataset.id), accept }, el);
+  },
+  clanInvite(el) { clanCall('/clan/invite', { player: Number(el.dataset.id) }, el); },
+  clanRequest(el) {
+    if (!confirm(`Vragen om bij ${el.dataset.name} te komen? Aanvaarden ze, dan verlaat je meteen ${app.data.team.name}.`)) return;
+    clanCall('/clan/request', { team: Number(el.dataset.id) }, el);
+  },
+  clanLeave(el) {
+    const name = ($('#clanNewName') && $('#clanNewName').value.trim()) || '';
+    if (!confirm(`Wil je ${app.data.team.name} echt verlaten? Je troepen bij je bondgenoten komen naar huis, en die van hen bij jou.`)) return;
+    clanCall('/clan/leave', { name }, el);
+  },
+  clanKick(el) {
+    if (!confirm(`${el.dataset.name} uit de clan zetten? Hij viel een clanlid aan.`)) return;
+    clanCall('/clan/kick', { player: Number(el.dataset.id) }, el);
   },
   chatTab(el) {
+    if (el.dataset.chan === 'dm') { openDm(app.chat.chan === 'dm' ? null : app.chat.dm); return; }
     app.chat.chan = el.dataset.chan;
     for (const t of document.querySelectorAll('.chat .tab')) t.classList.toggle('active', t === el);
     const m = $('#chatMsgs');
-    if (m) { m.innerHTML = '<p class="empty">Laden…</p>'; delete m.dataset.loaded; }
+    if (m) { resetHTML(m); m.innerHTML = '<p class="empty">Laden…</p>'; delete m.dataset.loaded; }
     loadChat();
   },
   async mapTo(el) {
@@ -1738,7 +1861,13 @@ document.addEventListener('submit', async (e) => {
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
-  try { await post('/chat', { channel: app.chat.chan, text }); loadChat(); } catch (err) { toast(err.message, 'err'); }
+  try {
+    if (app.chat.chan === 'dm') {
+      if (!app.chat.dm) { input.value = text; return; }
+      await post('/dm', { to: app.chat.dm, text });
+    } else await post('/chat', { channel: app.chat.chan, text });
+    loadChat();
+  } catch (err) { input.value = text; toast(err.message, 'err'); }
 });
 
 // Op een iPhone/iPad: uitleg om het spel als app op het beginscherm te zetten (in plaats van de Android-app).
