@@ -13,6 +13,35 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 3,
+    at: '2026-11-27T15:00:00+01:00',
+    tag: 'Grafisch',
+    icon: 'swords',
+    title: 'Nieuwe oorlogsolifant en stormram',
+    intro: 'De oorlogsolifant van de Perzen en de stormram zagen er nog uit als oude tekeningen tussen de andere troepen. '
+      + 'Ze zijn helemaal opnieuw gemaakt in dezelfde 3D-stijl als de rest van je leger.',
+    body: [
+      {
+        h: 'De oorlogsolifant', icon: 'crown',
+        p: [
+          'Een echte reus: gerimpelde huid, slagtanden met gouden punten en een kleed in de kleur van je clan, met gouden franje '
+          + 'en een kopkleed. Op zijn rug staat een houten torentje met een <b>boogschutter</b>, en op zijn nek zit de berijder.',
+          'Hij stapt poot per poot en zwaait met zijn slurf. In een gevecht stoot hij met zijn slagtanden en steekt hij kop en slurf '
+          + 'in de lucht, terwijl de schutter in het torentje zijn boog spant.',
+        ],
+      },
+      {
+        h: 'De stormram', icon: 'shield',
+        p: [
+          'Een overdekte ram op vier spaakwielen, met een dak van huiden, schilden en een vaandel in de kleur van je clan. '
+          + 'Vooraan steekt een zware stam met een ijzeren <b>ramskop</b>.',
+          'Als hij rijdt, draaien de wielen. Bij een aanval zwaait de stam aan zijn kettingen naar achter en beukt hij tegen '
+          + 'de poort. Je ziet hem zo in je stad, in de veldslag en in de oefenslag.',
+        ],
+      },
+    ],
+  },
+  {
     id: 2,
     at: '2026-11-27T12:00:00+01:00',
     tag: 'Leger',
