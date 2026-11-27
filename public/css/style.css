@@ -338,6 +338,7 @@ h1, h2, h3, .cinzel { font-family: 'Cinzel', Georgia, serif; }
 .kv dd { margin: 0; font-weight: 600; text-align: right; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .actions .btn { flex: 1; }
+.actions.wrapbtns .btn { flex: 1 1 auto; }
 .empty { font-size: 13px; color: var(--muted); font-style: italic; }
 .sep { border: 0; border-top: 1px solid #d3bb8a; margin: 10px 0; }
 select.field { padding: 6px 8px; }
@@ -374,6 +375,37 @@ table.bt td img { width: 24px; height: 24px; vertical-align: middle; margin-righ
 .chat form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #d3bb8a; }
 .chat .tabs { padding: 8px 8px 0; margin: 0; }
 .members { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 14px; }
+/* clans: uitnodigingen, verzoeken, andere clans, verraad, privéberichten */
+.btn.tiny { padding: 2px 6px; font-size: 11.5px; border-radius: 5px; gap: 3px; }
+.btn.tiny svg { width: 13px; height: 13px; }
+.clan-ask { border: 2px solid var(--gold); background: rgba(242, 201, 90, 0.16); }
+.clan-ask .row { flex-wrap: wrap; }
+.clan-ask .row .grow { flex: 1 1 240px; }
+.clan-ask .row + .row { padding-top: 6px; border-top: 1px dashed #d3bb8a; }
+.clan-row { padding: 8px 0; border-top: 1px dashed #d3bb8a; }
+.clan-row:first-of-type { border-top: 0; }
+.clan-members { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 5px; }
+.clan-mem { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.clan-mem i.on { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; }
+.traitor-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; vertical-align: middle; }
+.traitor-tag svg { width: 12px; height: 12px; }
+.card.traitor { border-color: var(--red); box-shadow: inset 0 0 0 1px rgba(178, 55, 42, 0.35); }
+details.betray { margin: 4px 0 8px; padding: 6px 10px; border: 1px dashed #c99a8f; border-radius: 8px; background: rgba(178, 55, 42, 0.05); }
+details.betray summary { cursor: pointer; font-weight: 700; color: var(--red); display: flex; align-items: center; gap: 6px; }
+details.betray summary svg { width: 16px; height: 16px; }
+.msg.sys { color: #6b5536; font-style: italic; font-size: 12.5px; padding: 3px 8px; border-left: 3px solid var(--gold); background: rgba(217, 164, 58, 0.1); border-radius: 4px; }
+.msg.sys time { margin: 0 4px 0 0; }
+.msg.me b { color: #2f5e8c; }
+.dm-conv { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 9px; border: 1px solid #e0cb9d; border-radius: 8px; background: rgba(255, 252, 242, 0.8); font: inherit; font-size: 13px; color: inherit; cursor: pointer; }
+.dm-conv:hover { background: #fff6dd; }
+.dm-conv.unread { border-color: var(--red); }
+.dm-conv .bdg { min-width: 18px; height: 18px; line-height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; text-align: center; }
+.dm-conv .pill { font-size: 10.5px; padding: 0 6px; }
+.dm-new { display: flex; flex-wrap: wrap; gap: 5px; }
+.dm-new .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dm-head { position: sticky; top: -8px; z-index: 1; display: flex; align-items: center; gap: 8px; margin: -8px -10px 4px; padding: 6px 10px; background: #f6ebd0; border-bottom: 1px solid #d3bb8a; font-size: 13px; }
+.dm-head .pill { font-size: 10.5px; padding: 0 6px; }
+.chat form[hidden] { display: none; }
 .lb { width: 100%; border-collapse: collapse; font-size: 14px; }
 .lb td, .lb th { padding: 6px 8px; border-bottom: 1px dashed #d3bb8a; text-align: left; }
 .lb td.n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }

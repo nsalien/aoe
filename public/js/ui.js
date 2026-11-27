@@ -5,7 +5,7 @@ import {
   RES, RES_NAMES, BUILDINGS, BUILD_ORDER, UNITS, ARMY_UNITS, AGES, AGE_UP, MARKET, BONUS, WILD, FIELD, CIVS, CIV_IDS, CASTLE_LEVEL, levelCost, levelTime,
   JOBS, FISH, GATHER_RATE,
   LAND, landCost, WALL_TILE, TOWER, GATE, TECHS, TECH_LINES, TECH_LINE_IDS, techAt, LOYALTY, VASSAL, ransomCost, MAX_AGE, gearOf,
-  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf, REPLAY,
+  fmtDuration, campUnits, campLoot, unitTime, COMBAT, levelAge, WAR, carryMult, bountyOf, REPLAY, CLAN,
 } from '../shared/rules.js';
 import {
   age, slots, popCap, capacity, homePop, rates, checkBuild, checkUpgrade, checkTrain, findType, bLevel,
@@ -1147,9 +1147,16 @@ export function worldPanelHtml(app, sel) {
       <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
       <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
   } else if (ally) {
+    const peace = now < d.me.peaceEnd || now < (t.peaceEnd || 0);
     html += `<p class="desc">${icon('team')} Dit is je bondgenoot. Help elkaar met troepen en grondstoffen!</p>
-      <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
-      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
+      <div class="actions wrapbtns"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
+      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button>
+      <button class="btn" data-action="dmOpen" data-id="${t.playerId}">${icon('chat')} Bericht</button></div>
+      <details class="betray"><summary>${icon('swords')} Verraad…</summary>
+      <p class="small muted">Je kan je bondgenoot ook aanvallen terwijl hij nog in je clan zit. Hij en je clan zien je leger aankomen, en de clan kan je daarna ${CLAN.traitorMs / 86400000} dagen lang buitenzetten.</p>
+      <div class="actions wrapbtns"><button class="btn danger" data-action="send" data-kind="attack" data-betray="1" ${!peace && app.canAct ? '' : 'disabled'}>${icon('swords')} Bondgenoot aanvallen</button>
+      <button class="btn" data-action="send" data-kind="scout" data-betray="1" ${!peace && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>
+      ${peace ? `<p class="small req">${icon('dove')} Nog vrede: aanvallen kan pas na ${clockTime((Math.max(d.me.peaceEnd, t.peaceEnd || 0)) - (app.offset || 0))}.</p>` : ''}</details>`;
   } else {
     // vrede: een aanval mag pas aankomen als de vrede van beide spelers voorbij is
     const mine = now < d.me.peaceEnd;
@@ -1164,6 +1171,12 @@ export function worldPanelHtml(app, sel) {
     }
     html += `<div class="actions"><button class="btn danger" data-action="send" data-kind="attack" ${!mine && app.canAct ? '' : 'disabled'}>${icon('swords')} Aanvallen</button>
       <button class="btn" data-action="send" data-kind="scout" ${!mine && app.canAct ? '' : 'disabled'}>${icon('magnifier')} Verkennen</button></div>`;
+    // onderhandelen en clans: een bericht sturen, uitnodigen in je clan of vragen om bij de zijne te komen
+    if (!t.bot) {
+      html += `<div class="actions wrapbtns"><button class="btn" data-action="dmOpen" data-id="${t.playerId}">${icon('chat')} Bericht</button>
+        <button class="btn" data-action="clanInvite" data-id="${t.playerId}" data-name="${esc(t.player)}">${icon('plus')} In je clan uitnodigen</button>
+        ${team ? `<button class="btn" data-action="clanRequest" data-id="${team.id}" data-name="${esc(team.name)}">${icon('flag')} Vraag om bij ${esc(team.name)} te komen</button>` : ''}</div>`;
+    }
   }
   return html + `<div class="actions"><button class="btn ghost" data-action="deselect">← Overzicht</button></div>`;
 }
@@ -1181,7 +1194,8 @@ function marchItem(m) {
   const [ic, nm] = KIND[m.kind] || ['•', m.kind];
   const hostile = !m.ally;
   const back = m.status === 'back';
-  const label = hostile ? `<b style="color:var(--red)">${nm} van ${esc(m.player)}</b> op ${esc(m.to.name)}`
+  const label = hostile ? `<b style="color:var(--red)">${m.betray ? 'Verraad! ' : ''}${nm} van ${esc(m.player)}</b> op ${esc(m.to.name)}`
+    : m.betray && !back ? `<b style="color:var(--red)">Verraad:</b> ${m.own ? '' : `${esc(m.player)}: `}${nm} → ${esc(m.to.name)}`
     : back ? `${m.own ? '' : `${esc(m.player)}: `}Terug van ${esc(m.to.name)}` : `${m.own ? '' : `${esc(m.player)}: `}${nm} → ${esc(m.to.name)}`;
   const fight = m.status === 'battle' ? ` <b style="color:var(--red)">· veldslag bezig</b>` : '';
   return `<div class="qitem"><span class="qicon">${icon(back ? 'home' : ic)}</span>
@@ -1297,6 +1311,7 @@ export function sendHtml(app, live, target, kind) {
   const dist = Math.hypot(target.x - me.x, target.y - me.y);
   const titles = { attack: `${icon('swords')} Aanvallen`, scout: `${icon('magnifier')} Verkennen`, support: `${icon('shield')} Troepen sturen`, trade: `${icon('cart')} Grondstoffen sturen` };
   let html = `<h2>${titles[kind]}: ${esc(target.name)}</h2><p class="desc">Afstand: ${dist.toFixed(1)} tegels.</p>`;
+  if (target.betray) html += `<p class="req">${icon('swords')} <b>Verraad.</b> ${esc(target.player || 'Deze speler')} is je bondgenoot. Hij en je clan zien je leger aankomen${kind === 'attack' ? `, en de clan kan je ${CLAN.traitorMs / 86400000} dagen lang buitenzetten` : ''}.</p>`;
   if (kind === 'trade') {
     const L = bLevel(live, 'market');
     if (!L) return html + '<p class="req">Je hebt een markt nodig om karavanen te sturen.</p>';
@@ -1418,41 +1433,129 @@ export function reportDetailHtml(r) {
       <p class="small muted">De stad is nu ${LOYALTY.shieldMs / 3600000} uur beschermd tegen edelmannen.</p>`;
   }
   if (d.type === 'info') return `<p class="outcome">Bericht van de spelleider</p><p>${esc(d.text)}</p>`;
+  if (d.type === 'clan') return `<p class="outcome">${icon('flag')} Clan</p><p>${esc(d.text)}</p>`;
   return '<p>Onbekend rapport.</p>';
 }
 
 // ---------- team en chat ----------
-export function teamHtml(app, team, chan) {
+const agoText = (t) => {
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 5) return '<span style="color:var(--green)">● online</span>';
+  if (m < 60) return `${m} min geleden`;
+  if (m < 1440) return `${Math.floor(m / 60)} u geleden`;
+  return `${Math.floor(m / 1440)} d geleden`;
+};
+const clanPill = (t) => (t ? `<span class="pill" style="background:${t.color || '#888'}">${esc(t.name)}</span>` : '');
+
+export function teamHtml(app, team, chan, clan) {
   const d = app.data;
-  const ago = (t) => {
-    const m = Math.floor((Date.now() - t) / 60000);
-    if (m < 5) return '<span style="color:var(--green)">● online</span>';
-    if (m < 60) return `${m} min geleden`;
-    if (m < 1440) return `${Math.floor(m / 60)} u geleden`;
-    return `${Math.floor(m / 1440)} d geleden`;
-  };
+  const c = clan || { clans: [], invites: [], requests: [], sent: [], max: 4, alone: (team || []).length <= 1, switchAt: 0 };
   return `<h2>${icon('team')} <span style="color:${d.team.color}">${esc(d.team.name)}</span></h2>
-    <p class="desc">Jullie zijn automatisch aan elkaar gekoppeld als bondgenoten. Bondgenoten kunnen elkaar niet aanvallen, maar wel troepen en grondstoffen sturen.</p>
-    <div class="members">${(team || []).map((m) => `<div class="card" style="margin:0">
-      <h3>${esc(m.player)}${m.me ? ' (jij)' : ''}<span class="right">${ago(m.lastSeen)}</span></h3>
+    <p class="desc">Bondgenoten helpen elkaar met troepen en grondstoffen. Je kan je clan verlaten, andere spelers uitnodigen of vragen om bij hun clan te komen, en iedereen een privébericht sturen.</p>
+    <div id="clanAsk">${clanAskHtml(c)}</div>
+    <div class="members">${(team || []).map((m) => `<div class="card${m.traitor ? ' traitor' : ''}" style="margin:0">
+      <h3>${esc(m.player)}${m.me ? ' (jij)' : ''}${m.traitor ? ` <span class="traitor-tag" title="Viel de laatste dagen een clanlid aan">${icon('swords')} verrader</span>` : ''}<span class="right">${agoText(m.lastSeen)}</span></h3>
       <div class="small">${esc(m.town)} · (${m.x}, ${m.y}) · ${AGES[m.age].short}tijd · ${fmt(m.score + m.killPts)} ptn</div>
       ${costHtml(m.res)}
       <div class="small muted" style="margin-top:4px">${m.villagers} dorpelingen · ${unitsText(m.units)}</div>
-      <div class="actions">${m.me ? '' : `<button class="btn small" data-action="mapTo" data-x="${m.x}" data-y="${m.y}" data-id="${m.townId}">Op kaart</button>
+      <div class="actions wrapbtns">${m.me ? '' : `<button class="btn small" data-action="mapTo" data-x="${m.x}" data-y="${m.y}" data-id="${m.townId}">Op kaart</button>
         <button class="btn small green" data-action="sendTo" data-kind="support" data-id="${m.townId}">Troepen</button>
-        <button class="btn small" data-action="sendTo" data-kind="trade" data-id="${m.townId}">Karavaan</button>`}</div>
+        <button class="btn small" data-action="sendTo" data-kind="trade" data-id="${m.townId}">Karavaan</button>
+        <button class="btn small" data-action="dmOpen" data-id="${m.playerId}">${icon('chat')} Bericht</button>
+        ${m.traitor ? `<button class="btn small danger" data-action="clanKick" data-id="${m.playerId}" data-name="${esc(m.player)}">Uit de clan zetten</button>` : ''}`}</div>
     </div>`).join('')}</div>
     <div class="chat"><div class="tabs">
-      <button class="tab ${chan === 'team' ? 'active' : ''}" data-action="chatTab" data-chan="team">Teamchat</button>
-      <button class="tab ${chan === 'world' ? 'active' : ''}" data-action="chatTab" data-chan="world">Iedereen</button></div>
+      <button class="tab ${chan === 'team' ? 'active' : ''}" data-action="chatTab" data-chan="team">Clanchat</button>
+      <button class="tab ${chan === 'world' ? 'active' : ''}" data-action="chatTab" data-chan="world">Iedereen</button>
+      <button class="tab ${chan === 'dm' ? 'active' : ''}" data-action="chatTab" data-chan="dm">Privé</button></div>
       <div class="msgs" id="chatMsgs"><p class="empty">Laden…</p></div>
       <form id="chatForm"><input class="field" name="text" maxlength="300" placeholder="Schrijf een bericht…" autocomplete="off"><button class="btn primary">Stuur</button></form>
-    </div>`;
+    </div>
+    <div id="clanList">${clanListHtml(app, c)}</div>`;
+}
+
+// bovenaan het Team-venster: uitnodigingen voor jou en verzoeken om bij jouw clan te komen
+export function clanAskHtml(c) {
+  const left = (r) => `<span class="small muted">nog ${fmtDuration(Math.max(0, r.until - Date.now()))}</span>`;
+  let html = '';
+  if (c.invites.length) {
+    html += `<div class="card clan-ask"><h3>${icon('flag')} Uitnodiging${c.invites.length > 1 ? 'en' : ''}</h3>
+      <p class="small muted" style="margin:0 0 6px">Aanvaarden = je verlaat je huidige clan en komt meteen bij de nieuwe.</p>
+      ${c.invites.map((r) => `<div class="row"><span class="grow">${clanPill(r.team)} nodigt je uit${r.by ? ` (door ${esc(r.by)})` : ''} · ${r.team ? r.team.count : '?'}/${c.max} leden · ${left(r)}</span>
+        <button class="btn small green" data-action="clanAnswer" data-id="${r.id}" data-accept="1">Aanvaarden</button>
+        <button class="btn small" data-action="clanAnswer" data-id="${r.id}">Weigeren</button></div>`).join('')}</div>`;
+  }
+  if (c.requests.length) {
+    html += `<div class="card clan-ask"><h3>${icon('people')} Wil${c.requests.length > 1 ? 'len' : ''} bij jullie clan komen</h3>
+      ${c.requests.map((r) => `<div class="row"><span class="grow"><b>${esc(r.player.name)}</b> vraagt om toe te treden · ${left(r)}</span>
+        <button class="btn small" data-action="dmOpen" data-id="${r.player.id}">${icon('chat')}</button>
+        <button class="btn small green" data-action="clanAnswer" data-id="${r.id}" data-accept="1">Aanvaarden</button>
+        <button class="btn small" data-action="clanAnswer" data-id="${r.id}">Weigeren</button></div>`).join('')}</div>`;
+  }
+  return html;
+}
+
+// onderaan: alle clans in de vallei (toetreding vragen, uitnodigen, bericht), wat je stuurde, en je clan verlaten
+export function clanListHtml(app, c) {
+  const d = app.data;
+  const now = Date.now();
+  const mine = c.clans.find((x) => x.id === d.me.teamId);
+  const full = mine && mine.members.length >= c.max;
+  const invited = new Set(c.sent.filter((r) => r.kind === 'invite').map((r) => r.player.id));
+  const asked = new Set(c.sent.filter((r) => r.kind === 'request').map((r) => r.team && r.team.id));
+  const wait = c.switchAt > now;
+  const others = c.clans.filter((x) => x.id !== d.me.teamId).sort((a, b) => a.bot - b.bot || a.name.localeCompare(b.name));
+  let html = `<div class="card"><h3>${icon('flag')} Clans in de vallei</h3><p class="small muted" style="margin:0 0 4px">Hooguit ${c.max} leden per clan. Vraag om toe te treden, nodig spelers uit of stuur ze een bericht om te onderhandelen.</p>`;
+  html += others.length ? others.map((t) => {
+    const tFull = t.members.length >= c.max;
+    const btn = t.bot ? '<span class="small muted">computerclan</span>'
+      : asked.has(t.id) ? '<span class="small muted">gevraagd</span>'
+        : `<button class="btn small" data-action="clanRequest" data-id="${t.id}" data-name="${esc(t.name)}" ${tFull ? 'disabled title="Deze clan is vol"' : ''}>Vraag toetreding</button>`;
+    return `<div class="clan-row"><div class="row"><span class="grow">${clanPill(t)} <span class="small muted">${t.members.length}/${c.max}</span></span>${btn}</div>
+      <div class="clan-members">${t.members.map((m) => `<span class="clan-mem">${m.online ? '<i class="on"></i>' : ''}${esc(m.name)}${m.bot ? ' <span class="bot-tag">computer</span>' : `
+        <button class="btn tiny" data-action="dmOpen" data-id="${m.id}" title="Privébericht">${icon('chat')}</button>${invited.has(m.id) ? '<span class="small muted">uitgenodigd</span>'
+          : `<button class="btn tiny" data-action="clanInvite" data-id="${m.id}" data-name="${esc(m.name)}" ${full ? 'disabled title="Je clan is vol"' : ''}>${icon('plus')} Uitnodigen</button>`}`}</span>`).join('')}</div></div>`;
+  }).join('') : '<p class="empty">Er zijn nog geen andere clans.</p>';
+  html += '</div>';
+  if (c.sent.length) {
+    html += `<div class="card"><h3>${icon('hourglass')} Wacht op antwoord</h3>${c.sent.map((r) => `<div class="row"><span class="grow">${r.kind === 'invite'
+      ? `Jullie nodigden <b>${esc(r.player.name)}</b> uit${r.by ? ` (${esc(r.by)})` : ''}` : `Je vroeg om bij ${clanPill(r.team)} te komen`}</span>
+      <button class="btn small" data-action="clanAnswer" data-id="${r.id}">Intrekken</button></div>`).join('')}</div>`;
+  }
+  html += `<div class="card"><h3>${icon('door')} Clan verlaten</h3>${c.alone
+    ? '<p class="small muted" style="margin:0">Je bent alleen in je clan. Vraag om bij een andere clan te komen, of nodig spelers uit.</p>'
+    : `<p class="small muted" style="margin:0 0 6px">Je sticht dan je eigen clan. Je troepen bij je bondgenoten komen naar huis (en die van hen bij jou). Wil je naar een andere clan, aanvaard dan gewoon een uitnodiging: dan wissel je meteen.</p>
+      <div class="row"><input class="field grow" id="clanNewName" maxlength="24" placeholder="Naam nieuwe clan (mag leeg)"><button class="btn danger small" data-action="clanLeave" ${wait ? 'disabled' : ''}>Verlaten</button></div>`}
+    ${wait ? `<p class="small req" style="margin:6px 0 0">Je wisselde net van clan: opnieuw wisselen kan over ${fmtDuration(c.switchAt - now)}.</p>` : ''}
+    <p class="small muted" style="margin:6px 0 0">Je kan ook een bondgenoot aanvallen (verraad): tik zijn stad aan op de wereldkaart. De clan kan een verrader daarna ${CLAN.traitorMs / 86400000} dagen lang buitenzetten.</p></div>`;
+  return html;
 }
 
 export function chatMsgsHtml(msgs) {
   if (!msgs.length) return '<p class="empty">Nog geen berichten. Zeg hallo!</p>';
-  return msgs.map((m) => `<div class="msg"><b>${esc(m.name)}</b><time>${new Date(m.created_at).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</time><br>${esc(m.text)}</div>`).join('');
+  return msgs.map((m) => (m.player_id === 0
+    ? `<div class="msg sys"><time>${new Date(m.created_at).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</time> ${m.name !== 'Clan' ? `<b>${esc(m.name)}</b>: ` : ''}${esc(m.text)}</div>`
+    : `<div class="msg${m.me ? ' me' : ''}"><b>${esc(m.name)}</b><time>${new Date(m.created_at).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</time><br>${esc(m.text)}</div>`)).join('');
+}
+
+// privé: de lijst met gesprekken en alle spelers om een nieuw gesprek te beginnen
+export function dmListHtml(list) {
+  const day = (t) => { const x = new Date(t); return new Date().toDateString() === x.toDateString() ? x.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }) : x.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' }); };
+  const talked = new Set(list.convs.map((c) => c.with));
+  const rest = list.players.filter((p) => !talked.has(p.id));
+  return `${list.convs.length ? list.convs.map((c) => `<button class="dm-conv${c.unread ? ' unread' : ''}" data-action="dmOpen" data-id="${c.with}">
+      <span class="grow"><b>${esc(c.name)}</b> ${clanPill(c.team ? { name: c.team, color: c.color } : null)}<br><span class="small muted">${c.me ? 'Jij: ' : ''}${esc(c.text)}</span></span>
+      <span class="small muted">${day(c.at)}</span>${c.unread ? `<b class="bdg">${c.unread}</b>` : ''}</button>`).join('')
+    : '<p class="empty">Nog geen privégesprekken. Onderhandel met een speler: kies hieronder met wie.</p>'}
+    ${rest.length ? `<p class="small muted" style="margin:8px 0 2px">Nieuw gesprek met:</p><div class="dm-new">${rest.map((p) => `<button class="btn tiny" data-action="dmOpen" data-id="${p.id}"><i class="dot" style="background:${p.color || '#888'}"></i>${esc(p.name)}</button>`).join('')}</div>` : ''}`;
+}
+
+// privé: één gesprek
+export function dmConvHtml(conv) {
+  const w = conv.with;
+  return `<div class="dm-head"><button class="btn tiny" data-action="dmBack">${icon('back')} Gesprekken</button>
+    <span class="grow">met <b>${esc(w.name)}</b> ${clanPill(w.team ? { name: w.team, color: w.color } : null)}${w.ally ? ' <span class="small muted">bondgenoot</span>' : ''}</span></div>
+    ${conv.messages.length ? chatMsgsHtml(conv.messages) : `<p class="empty">Nog geen berichten met ${esc(w.name)}. Alleen jullie twee lezen dit gesprek.</p>`}`;
 }
 
 // ---------- ranglijst ----------
@@ -1551,7 +1654,12 @@ export function helpHtml(w, peaceEnd) {
     Wie de slag wint, raapt de wapens en uitrusting van de gesneuvelde vijanden op: <b>krijgsbuit</b> = ${Math.round(WAR.bounty * 100)}% van hun waarde, bovenop de gewone buit.
     Ook een verdediger die standhoudt, krijgt die krijgsbuit. Verslagen vijanden en geplunderde grondstoffen leveren gevechtspunten op.</p>
     <h3>4. Bondgenoten</h3>
-    <p>Je wordt automatisch aan een bondgenoot gekoppeld. Stuur elkaar <b>versterking</b> (die verdedigt mee) en <b>karavanen</b> met grondstoffen via de markt. Overleg in de teamchat!</p>
+    <p>Je wordt automatisch aan een bondgenoot gekoppeld. Stuur elkaar <b>versterking</b> (die verdedigt mee) en <b>karavanen</b> met grondstoffen via de markt. Overleg in de clanchat!</p>
+    <ul><li><b>Van clan wisselen</b> (Team-venster): vraag om bij een andere clan te komen, of nodig spelers uit in de jouwe (hooguit ${CLAN.maxMembers} leden).
+    Aanvaard je een uitnodiging, dan wissel je meteen. Je kan je clan ook <b>verlaten</b>: dan sticht je je eigen clan. Na een wissel wacht je ${CLAN.switchMs / 3600000} uur voor de volgende.
+    Troepen bij je oude bondgenoten komen dan naar huis.</li>
+    <li><b>Privéberichten</b>: stuur iedere speler een bericht om te onderhandelen (tabblad Privé in de chat, of 'Bericht' bij zijn stad).</li>
+    <li><b>Verraad</b>: je kan een bondgenoot aanvallen terwijl hij nog in je clan zit. Hij en je clan zien je leger aankomen, en de clan kan je daarna ${CLAN.traitorMs / 86400000} dagen lang uit de clan zetten.</li></ul>
     <h3>Veldslagen: zelf besturen of automatisch</h3>
     <p>Komt je leger aan bij een stad of roverskamp terwijl jij (of de verdediger) online bent, dan kies je: <b>zelf besturen</b> of <b>automatisch</b>.
     Wie niets kiest of offline is, laat de slag automatisch verlopen. Is de verdediger online, dan krijgt hij een melding en mag hij zijn stad zelf verdedigen.</p>
