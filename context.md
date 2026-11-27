@@ -582,6 +582,14 @@ minuut een bot aan de beurt als niemand online is.
 64. **Idee: belegering (een stad uithongeren)**: uitgewerkt in `docs/idee-belegering.md`, **nog niet gebouwd** (gevraagd:
     "werk het idee uit, maar nog niet implementeren"). Wacht op de keuzes van de gebruiker (open vragen onderaan dat bestand).
 
+65. **Olifant en stormram in 3D** (gemeld: "de olifanten zien er grafisch echt niet oké uit, de ram ook niet; werk ze bij zodat
+    ze veel beter zijn vergeleken met de rest"). Ze waren nog oude 2D-tekeningen tussen 3D-troepen. Nu eigen 3D-modellen in dezelfde
+    stijl: oorlogsolifant met gerimpelde huid, kleed en kopkleed in teamkleur met goud, slagtanden met gouden punten, torentje met
+    boogschutter, mahout op de nek; loopt poot per poot, slurf zwaait; aanval = kop omlaag (stoot), dan kop en slurf omhoog.
+    Stormram: overdekt onderstel met spaakwielen die draaien, dak van huiden met touwen, schilden en vaandel in teamkleur, stam aan
+    kettingen met een ijzeren ramskop die naar achter zwaait en toeslaat. In de stad, in de veldslag (ook de oefenslag) en als
+    teken op de wereldkaart. Bekeken in modelbladen (alle 8 beelden) en in het spel. Kameel en strijdwagen zijn nog 2D.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Belegering (uithongeren, uitval in open veld): zie `docs/idee-belegering.md` (voorstel, nog niet gebouwd).

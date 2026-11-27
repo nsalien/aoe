@@ -299,7 +299,14 @@ Daarom:
   anker `glow`). Verhoog `VERSION` in `sprite3d.js`. Ankers die een model teruggeeft moeten altijd `[x, y, z]` zijn (geen
   `undefined`): mislukt een model in de werker, dan valt het spel stil terug op de 2D-tekening (test in `tests/game.test.js`).
   De boerderij is ook 3D (akker met ruggen, graan, hek; de wieken van het molentje
-  tekent `drawOverlay3d` via het anker `blades`). Kameel/strijdwagen/olifant en rammen zijn nog getekend.
+  tekent `drawOverlay3d` via het anker `blades`). Kameel en strijdwagen zijn nog getekend.
+  **Olifant en stormram** zijn 3D-figuren (`figmodels.js`: `elephant` = soort `e`, `ram` = soort `r`; materiaal `hide` in
+  `render3d.js` = olifantenhuid met fijne rimpels). Olifant: kleed en kopkleed in teamkleur met goud, slagtanden, torentje met
+  een boogschutter en een mahout (gewone `person` via `at()` = verschoven scène); lopen = één poot tegelijk, aanval
+  (`E_HEAD_DZ`, `E_TRUNK`, `E_STOMP`). Ram: spaakwielen die draaien, dak van huiden, schilden en vaandel in teamkleur, stam aan
+  kettingen met een ijzeren ramskop die zwaait bij een aanval (`RAM_X`). Tekenen: `FIG.elephant` (schaal `E3D`) en `A.ram(ctx,
+  x, y, s, { team, walking, phase, attack })` → `FIG.ram3d`; zonder opties of als het beeld nog niet klaar is, de oude tekening.
+  Beide staan in `ATK_KINDS` (aanvalsbeweging in de slag). Kaartjes in het menu (`thumb`) blijven getekend, zoals bij alle troepen.
   **Alles scherp bij inzoomen**: gebouwen (`S3.get(..., need)`), muren/torens (`S3.getWall(..., need)`), figuren, spullen en
   bomen gaan via `tiered()` (4 of 6 px per wereldpixel, sleutel `…@6`, geheugen `HI_BUDGET` in pixels, scherpe gebouwen
   en muren met anti-aliasing). Getekende (2D) stukken die als afbeelding bewaard worden, krijgen ook een resolutie volgens
