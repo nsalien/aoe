@@ -19,6 +19,11 @@ Daarom:
   zodat je verder bouwt op wat andere sessies al online zetten.
 - Voer **altijd `npm test` uit vóór je pusht**. Push geen half werk: alles wat op je branch staat, gaat live.
 - Maak kleine, duidelijke commits (één onderwerp per commit). De cherry-pick neemt ze één voor één over.
+- **Nieuwsartikel bij elke volwaardige update** (nieuwe functie, nieuwe regels of balans, zichtbare grafische vernieuwing; niet
+  voor een kleine bugfix): zet bovenaan `UPDATES` in `public/js/updates.js` een artikel voor de spelers (id +1, datum en uur,
+  tag, icoon, titel, korte intro, blokken met tussenkoppen). Schrijf in gewone taal: wat is nieuw, waar vind je het, wat betekent
+  het voor jou. Geen code of bestandsnamen. Spelers zien het via de knop **Nieuws** (rood getal + één melding) en op `/updates`.
+  Een eigen commit ("Nieuws: …"), samen met de update gepusht.
 - Faalt de stap "Overnemen op main" door een conflict? Merge `origin/main` in je branch, los het conflict op, test, push opnieuw.
 - Wijzigingen aan `.github/workflows/` kunnen enkel automatisch naar main als het geheim `GH_PUSH_TOKEN` bestaat.
   Vermijd die wijzigingen tenzij de gebruiker erom vraagt.
@@ -243,6 +248,11 @@ Daarom:
   verrader (binnen `CLAN.traitorMs`) buiten. **Privéberichten**: tabel `dms` (`pair` = 'klein:groot'), `/dm/list`, `/dm?with=`
   (markeert gelezen), `POST /dm`; `/state` geeft `chat.newDm`/`lastDm` en `clan.invites`/`clan.requests`. In de browser: Team-venster
   (`teamHtml`, `clanAskHtml`, `clanListHtml`, tab Privé = `dmListHtml`/`dmConvHtml`), knoppen bij een stad op de wereldkaart.
+- **Nieuws** (`public/js/updates.js`, `public/updates.html`): `UPDATES` = artikels, nieuwste eerst (`updatesHtml`, `unreadUpdates`).
+  In het spel: knop Nieuws in het menu (`#badgeNews`), venster `openModal('updates')`; `main.js` laadt `updates.js` pas 4 s na
+  het opstarten met een dynamische `import()` (`checkNews`: getal + één melding per nieuw artikel; localStorage `rvs-news-seen` en
+  `rvs-news-told`; artikels van vóór de start van de speler tellen niet als nieuw). Los, zonder aanmelden: `/updates` (link op het
+  aanmeldscherm; `/updates#update-3` opent één artikel). `tests/updates.test.js` controleert de artikels.
 - `public/js/dom.js` — `setHTML()` werkt panelen bij zonder ze te vervangen. Gebruik dit (geen `innerHTML`) voor alles
   wat periodiek ververst, anders flitst het en gaan klikken verloren.
 - `functions/lib/routes.js` — alle API-routes; `game.js` — legers, gevechten, rapporten; `auth.js` — sessies.

@@ -180,6 +180,8 @@ minuut een bot aan de beurt als niemand online is.
   cherry-pickt naar `main` en zet alles online (±1–2 min). Controleer met `curl` dat een nieuw stukje code op de site staat.
 - `git merge --no-edit origin/main` geeft vaak conflicten omdat main uit cherry-picks bestaat. Is de inhoud gelijk
   (`git diff HEAD origin/main` leeg), gebruik dan `git merge -s ours --no-edit origin/main`.
+- **Bij elke volwaardige update een nieuwsartikel** in `public/js/updates.js` (gevraagd: "per volwaardige update of verandering
+  een artikel, zodat spelers op de hoogte blijven"). Zie CLAUDE.md › "Zo komt een wijziging online".
 - Geen toegang tot de echte database of Cloudflare vanuit de sessie: bugs reconstrueren met lokale tests.
 - Android SDK (voor de APK) zit niet standaard in de container: zie `CLAUDE.md` › Android-app
   (`commandlinetools` van dl.google.com, `sdkmanager "platforms;android-35" "build-tools;35.0.0"`).
@@ -563,6 +565,13 @@ minuut een bot aan de beurt als niemand online is.
     - Nieuwe spelers worden niet automatisch in een zelf gestichte clan gezet, en komen bij de steden van hun clan terecht.
     - Getest: `tests/clan.test.js` (echte routes, `node:sqlite`) en in Chromium op pc, gsm rechtop (390) en liggend (915).
     - Nog niet: een gsm-melding bij een nieuw privébericht of een uitnodiging (enkel in het spel: rood getal, knop en melding).
+
+62. **Nieuws: een updates-pagina** (gevraagd: "een 'updates' pagina waar per volwaardige update of verandering aan het spel een
+    artikel wordt geschreven over wat er veranderd is, zodat spelers op de hoogte blijven"). Knop **Nieuws** (bazuin van een heraut)
+    in het menu, tussen Ranglijst en Hulp, met een rood getal en één melding per nieuw artikel; het venster toont de artikels
+    (nieuwste open, ongelezen met een gouden rand en 'nieuw'). Ook los op `/updates` (link op het aanmeldscherm en in de hulp).
+    Eerste artikel: clans wisselen, privéberichten en verraad (punt 61). Getest op pc, gsm 390 en 360 breed (8 knoppen passen) en
+    liggend; een nieuwe speler krijgt oudere artikels niet als 'nieuw'.
 
 ## 8. Bekende beperkingen en ideeën
 
