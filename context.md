@@ -47,6 +47,8 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
 - **Niveau N vraagt tijdperk N** (`levelAge`): bijna alle gebouwen gaan tot niveau 5 (vroeger 3). Uitzondering: de Academie
   (`levelAges` [3, 4, 5]). Niveaus 4–5 zijn zichtbaar (vaandels, gouden piek en voetband; huizen een aanbouw en een torentje).
 - **Bouwers**: 2 tegelijk, 3 vanaf het IJzertijdperk, +1 met een bouwloods (`maxBuilds`); de bouwloods bouwt ook 5%/niveau sneller (`buildTime`).
+- **Groottes**: stadscentrum, kazerne, schietbaan, stal, markt, belegwerkplaats, Academie, gildehuis en bouwloods 2x2;
+  monument 4x4; de rest 1x1 (zie 66).
 - **Gebouwen**: stadscentrum, huis, boerderij, houthakkerskamp, steengroeve, goudmijn, opslagplaats, kazerne, stadsmuur
   (tijdperk 1); schietbaan, stal, smidse, markt, wachttoren, **molen** (+5% voedsel/niv.) (2); belegwerkplaats, **Academie** (3);
   monument, **gildehuis** (+3% alles/niv.), **bouwloods** (4); **Adelshof** (edelmannen), **kathedraal** (trouw +1/u per niveau,
@@ -589,6 +591,22 @@ minuut een bot aan de beurt als niemand online is.
     Stormram: overdekt onderstel met spaakwielen die draaien, dak van huiden met touwen, schilden en vaandel in teamkleur, stam aan
     kettingen met een ijzeren ramskop die naar achter zwaait en toeslaat. In de stad, in de veldslag (ook de oefenslag) en als
     teken op de wereldkaart. Bekeken in modelbladen (alle 8 beelden) en in het spel. Kameel en strijdwagen zijn nog 2D.
+
+66. **Grotere gebouwen** (gevraagd: "sommige gebouwen 2x2 of zelfs 4x4 i.p.v. alles 1x1: belegwerkplaats, stal, academie,
+    gildehuis, kazerne, schietbaan, markt, bouwloods 2x2, monument 4x4; correct herontworpen; wie het gebouw al had, krijgt een
+    melding om het te herplaatsen, zonder bouwtijd of kosten"). `size` in `BUILDINGS`; `SIZE_V`/`GREW` in `rules.js`.
+    - Oude steden: `growBuildings` (in `ensureTerritory`, dus op server én browser) zet `s.szv`; elk vergroot gebouw dat op zijn
+      plek niet meer past, krijgt `b.rp` (= opnieuw plaatsen) en de stad `s.szm` (melding). Zo'n gebouw blijft werken (training,
+      bonus, punten), staat niet op de kaart (`isPlaced`, ook niet in `occupied`, slag, replay, aankleding) en kan niet verbeterd
+      worden tot het staat. Plaatsen = de gewone `/move` (`doMove` wist `rp`): gratis en meteen. Bots plaatsen zelf (`placeNear`).
+    - Browser: venster 'Gebouwen zijn groter geworden' (één keer per stad en toestel, `rvs-grew-<stad>`; komt terug na het
+      welkomstvenster), gouden knop `#rpPill` bovenaan de stad, kaart in het stadsoverzicht. Tik = `placeNext` → `startMove`
+      op de dichtste vrije plek; na 'Zet hier' meteen het volgende.
+    - 3D: hetzelfde gebouw (`xf`: geschaald en naar achter geschoven) op een erf (`BIG` in `models3d.js`: kazerne strobaarden
+      en wapenrekken, schietbaan doelen met schutters, stal paarden en drinkbak, markt kraampjes, belegwerkplaats een ram,
+      academie fontein en beelden, gildehuis binnenplaats met hijskraan, bouwloods muur in de steigers; monument een getrapt
+      plein met zuilen, beelden en vuurschalen), per niveau meer. `VERSION` 11. 2D-terugval opgeschaald (`bScale`, `artSize`).
+    - Nieuwsartikel nr. 4. Getest: `tests/sizes.test.js`, bots 14 speldagen (geen overlap), browser op pc, gsm en liggend.
 
 ## 8. Bekende beperkingen en ideeën
 

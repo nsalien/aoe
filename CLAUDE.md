@@ -61,6 +61,14 @@ Daarom:
   `attTech`/`defTech`), in de live slag via `st.tk` en `TK()` (`fieldbattle.js`; schildmuur, vuurpijlen, taxusboog, pijlenregen,
   hoefijzers `reg.sp`, lansen, flankrit, krijgsdrill `moLoss`, strijdkreet, kokende pek `pourPitch` → `g.pt`, torenkruisbogen,
   ijzerbeslag). Hoefijzers versnellen ook marsen (`slowestSpeed(units, tech)`).
+- **Groottes van gebouwen** (`size` in `BUILDINGS`): kazerne, schietbaan, stal, markt, belegwerkplaats, Academie, gildehuis,
+  bouwloods en stadscentrum 2x2, monument 4x4. Ze groeiden in nov. 2026 (`SIZE_V`, `GREW` in `rules.js`): `growBuildings`
+  (in `ensureTerritory`) geeft een oud gebouw dat niet meer past `b.rp` (opnieuw plaatsen) en de stad `s.szm`. Zo'n gebouw werkt
+  gewoon, maar staat niet op de kaart: gebruik `isPlaced(b)` (sim.js) waar het over de kaart gaat (bezette tegels, tekenen,
+  slagveld, replay, aankleding); `toPlace(s)` = de lijst. Plaatsen = `/move` (gratis, `doMove` wist `rp`); verbeteren pas daarna.
+  Bots plaatsen zelf (`placeNear`). Browser: venster `grewHtml`, knop `#rpPill`, `placeNext` in `main.js`.
+  3D: `BIG` in `models3d.js` = het gebouw via `xf` (schaal en verschuiving) op een erf (`barracksYard`, …, `monumentYard`).
+  De 2D-tekeningen zijn voor de oude grootte (`artSize` in `art.js`): `bScale` in `town.js` schaalt ze op.
 - **Havenhuis en vissers** (`harbor` in `BUILDINGS`, `FISH`/`JOBS` in `rules.js`): vanaf tijdperk 2, `shore: true` = enkel op
   vrij land naast water (`shoreTile`: geen bos, niet gereserveerd, tot `FISH.reach` ringen voorbij je bouwgrond; `canPlaceAt`
   gebruikt dat i.p.v. `isBuildable`; `shoreSpots` = alle plekken, `shoreSide` = waar het water ligt = variant van het 3D-model).
@@ -281,7 +289,7 @@ Daarom:
   (vormen: convexe veelvlakken, cilinders, kegels, ellipsoïden, capsules; procedurele materialen; zon, slagschaduw,
   omgevingsschaduw). `models3d.js` = gebouwen (per volk een stijl), muurstukken en poorttorens; `figmodels.js` = mensen en
   ruiters (8 beelden per loop-/werkcyclus). `sprite3d.js` laat ze renderen in Web Workers (`render-worker.js`, die ze ook
-  afwerkt en bewaart, zie "Snelheid" hieronder), in Cache Storage (verhoog `VERSION` als modellen veranderen; nu 10) en geeft `null` tot ze klaar zijn: dan tekent het spel de
+  afwerkt en bewaart, zie "Snelheid" hieronder), in Cache Storage (verhoog `VERSION` als modellen veranderen; nu 11) en geeft `null` tot ze klaar zijn: dan tekent het spel de
   oude versie uit `art.js`/`figures.js`. **Elk niveau ziet er anders (en beter) uit**, met dezelfde opbouw voor alle gebouwen:
   1 hout en riet, klein; 2 groter, pannen, stenen voet; 3 steen, leien, een extra bouwsel (kraan, schachttoren, put, erker…);
   4 een zichtbare aanbouw of tweede gebouw (aan de rechter- of voorkant, niet achteraan: daar zie je het niet) en vaandels
