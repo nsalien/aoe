@@ -2368,14 +2368,21 @@ export class TownView {
     const o = this.groundOrigin;
     const bounds = { x0: o.x, y0: o.y, x1: o.x + this.ground.W, y1: o.y + this.ground.H };
     const ISO = [A.TW / 2, A.TH / 2, -A.TW / 2, A.TH / 2, 0, 0];
-    // tijdens het slepen of knijpen: hooguit één nieuw stuk per 3 beelden (een stuk kost op een gsm al snel 50 ms);
-    // na het loslaten komen de rest snel bij
-    // net na het opstarten (eerste 1,2 s) nog geen: dan is er al genoeg te doen en de gebakken grond staat er al;
-    // zolang er 3D-beelden laden ook maar af en toe één
-    const moving = this.cam.dragging || this.cam.pinch;
+    // Een nieuw stuk tekenen gebeurt aan één stuk door (op een trage gsm tientallen ms): tijdens het slepen of knijpen
+    // voelt dat als haperen. Op een aanraakscherm (GH.SMALL: kleinere stukken) dus geen nieuwe stukken zolang de kaart
+    // beweegt en nog 250 ms erna (dan zie je even de gebakken grond), en geen wissel van resolutie tijdens het knijpen.
+    // Daarna één per beeld. Met een muis: tijdens het slepen één per 3 beelden, anders twee.
+    // Net na het opstarten (eerste 1,2 s) nog geen: dan is er al genoeg te doen en de gebakken grond staat er al;
+    // zolang er 3D-beelden laden ook maar af en toe één.
+    const cam = this.cam;
+    const moving = cam.dragging || cam.pinch;
+    const pn = performance.now();
     this.hdTick = (this.hdTick || 0) + 1;
-    if (!this.hdFrom) this.hdFrom = performance.now() + 1200;
-    const maxNew = performance.now() < this.hdFrom ? 0 : moving || S3.busy() ? (this.hdTick % 3 === 0 ? 1 : 0) : 2;
+    if (!this.hdFrom) this.hdFrom = pn + 1200;
+    let maxNew;
+    if (pn < this.hdFrom) maxNew = 0;
+    else if (GH.SMALL) maxNew = moving || pn - cam.movedAt < 250 ? 0 : S3.busy() ? (this.hdTick % 3 === 0 ? 1 : 0) : 1;
+    else maxNew = moving || S3.busy() ? (this.hdTick % 3 === 0 ? 1 : 0) : 2;
     this.hdPending = this.hdg.draw(ctx, vis, need, bounds, L.key, (g, R, S) => {
       this.paintGround(g, R, S);
       this.paintTreeShadows(g, R, L.len, L.alpha);
@@ -2387,7 +2394,7 @@ export class TownView {
       g.globalCompositeOperation = 'overlay';
       for (const [pat, a] of GH.hdPatterns(g, 'grain', S)) { g.globalAlpha = a; g.fillStyle = pat; g.fillRect(R.x0, R.y0, R.x1 - R.x0, R.y1 - R.y0); }
       g.restore();
-    }, 8, maxNew);
+    }, 8, maxNew, GH.SMALL && !!cam.pinch);
   }
 
   // ligt er in beeld ergens mist? (anders hoeft die laag niet getekend te worden)
@@ -2493,6 +2500,8 @@ export class TownView {
     const light = this.light;
     const night = light.dark;
     const calm = this.calm && !this.battleMode;
+    // gsm: tijdens een gebaar (en 300 ms erna) geen scherpere 3D-beelden laten renderen (zie S3.setHold)
+    if (GH.SMALL) S3.setHold(cam.dragging || !!cam.pinch || performance.now() - cam.movedAt < 300);
     const ta = calm ? 0 : t; // tijd voor sfeerbeweging (water, bomen, vlaggen): stil in een rustige stad
     if (!calm) {
       this.updateWalkers(dt);

@@ -6,12 +6,15 @@
 
 const TAU = Math.PI * 2;
 
-// resolutie (pixels per wereldpixel) en breedte van een stuk in wereldpixels: elk stuk is ±512-576 pixels breed.
+// resolutie (pixels per wereldpixel) en breedte van een stuk in wereldpixels: op een pc is elk stuk ±512-576 pixels breed.
 // Ook op een gsm (klein scherm = weinig stukken) gaan we tot 6; enkel echt trage toestellen (≤ 4 kernen) tot 4,5.
+// Een stuk tekenen kost tijd naar zijn oppervlakte (gemeten: 512 px ±260 ms op een trage gsm, aan één stuk door = een hapering).
+// Op een aanraakscherm (SMALL) zijn de stukken daarom half zo breed (256-288 px, een kwart van het werk per stuk).
 const WEAK = typeof navigator !== 'undefined' && ((navigator.hardwareConcurrency || 8) <= 4 || /Android/i.test(navigator.userAgent || ''));
-export const HD_TIERS = WEAK ? [[2, 256], [3, 192], [4.5, 128]] : [[2, 256], [3, 192], [4.5, 128], [6, 96]];
+export const SMALL = WEAK || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches);
+export const HD_TIERS = WEAK ? [[2, 128], [3, 96], [4.5, 64]] : SMALL ? [[2, 128], [3, 96], [4.5, 64], [6, 48]] : [[2, 256], [3, 192], [4.5, 128], [6, 96]];
 export const HD_FROM = 1.4; // vanaf zoveel schermpixels per wereldpixel (lager: de gebakken grond is scherp genoeg)
-const BUDGET = (WEAK ? 5 : 8) * 1e6; // pixels in het geheugen (± 4 bytes per pixel)
+const BUDGET = (WEAK ? 7 : 8) * 1e6; // pixels in het geheugen (± 4 bytes per pixel)
 const PAD = 2; // overlap tussen stukken (pixels), tegen naden
 
 export function hdTier(need) {
@@ -206,18 +209,22 @@ export class HDGround {
 
   // vis: zichtbare wereldrechthoek; bounds: waar grond ligt; key: verandert als de grond verandert;
   // paint(g, R, S): tekent de grond (g staat al in wereldcoördinaten op schaal S)
-  // maxNew: hoeveel nieuwe stukken dit beeld hooguit (tijdens het slepen minder: dan blijft het vloeiend)
-  draw(ctx, vis, need, bounds, key, paint, budgetMs = 8, maxNew = 2) {
+  // maxNew: hoeveel nieuwe stukken dit beeld hooguit (tijdens het slepen geen: dan blijft het vloeiend)
+  // lock: de resolutie niet wisselen (tijdens het knijpen: de stukken die er zijn, blijven zichtbaar)
+  draw(ctx, vis, need, bounds, key, paint, budgetMs = 8, maxNew = 2, lock = false) {
     let tier = hdTier(need);
     if (!tier) return 0;
     // blijf op dezelfde resolutie zolang die nog goed genoeg is (geen nieuwe stukken bij elke kleine zoom)
     const last = this.tier;
-    if (last && last !== tier && need >= HD_FROM && need > last[0] * 0.65 && need < last[0] * 1.15) tier = last;
+    if (last && last !== tier && (lock || (need >= HD_FROM && need > last[0] * 0.65 && need < last[0] * 1.15))) tier = last;
+    // andere resolutie: de stukken van de vorige blijven als terugval tot de nieuwe er zijn (anders even wazig)
+    if (last && last !== tier) this.prev = last;
     this.tier = tier;
     const [S, CW] = tier;
     this.frame++;
-    const cx0 = Math.floor(Math.max(vis.x0, bounds.x0) / CW); const cx1 = Math.floor(Math.min(vis.x1, bounds.x1) / CW);
-    const cy0 = Math.floor(Math.max(vis.y0, bounds.y0) / CW); const cy1 = Math.floor(Math.min(vis.y1, bounds.y1) / CW);
+    const cells = (W) => [Math.floor(Math.max(vis.x0, bounds.x0) / W), Math.floor(Math.min(vis.x1, bounds.x1) / W),
+      Math.floor(Math.max(vis.y0, bounds.y0) / W), Math.floor(Math.min(vis.y1, bounds.y1) / W)];
+    const [cx0, cx1, cy0, cy1] = cells(CW);
     const t0 = performance.now();
     let made = 0;
     // eerst het midden van het scherm
@@ -246,6 +253,21 @@ export class HDGround {
       this.map.set(id, { cv, key, used: this.frame, S, CW, cx, cy });
       made++;
     }
+    // terugval: nog niet alles op deze resolutie klaar? Eerst de stukken van de vorige resolutie (eronder)
+    const missing = list.some(([cx, cy]) => !this.map.has(`${S}|${cx}|${cy}`));
+    if (missing && this.prev) {
+      const [PS, PW] = this.prev;
+      const [px0, px1, py0, py1] = cells(PW);
+      for (let cy = py0; cy <= py1; cy++) {
+        for (let cx = px0; cx <= px1; cx++) {
+          const c = this.map.get(`${PS}|${cx}|${cy}`);
+          if (!c) continue;
+          c.used = this.frame;
+          const sz = PW * PS;
+          ctx.drawImage(c.cv, PAD - 1, PAD - 1, sz + 2, sz + 2, cx * PW - 1 / PS, cy * PW - 1 / PS, PW + 2 / PS, PW + 2 / PS);
+        }
+      }
+    } else if (!missing) this.prev = null;
     // tekenen: elk stuk met 1 pixel overlap naar de buren (geen naden)
     for (const [cx, cy] of list) {
       const c = this.map.get(`${S}|${cx}|${cy}`);

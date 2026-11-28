@@ -1,4 +1,8 @@
 // Camera met slepen, scrollen en knijp-zoomen voor een canvas.
+// laatste keer dat de speler iets aanraakte of de kaart bewoog (voor werk dat beter even wacht, zoals de wereldkaart bakken)
+let inputAt = 0;
+export const lastInput = () => inputAt;
+
 export class Camera {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
@@ -27,6 +31,7 @@ export class Camera {
     this.enabled = true;
     this.dpr = 1;
     this.quality = 1; // < 1: tekenen op lagere resolutie als het toestel het niet bijhoudt
+    this.movedAt = 0; // laatste keer dat de camera verschoof of zoomde (performance.now)
     this._bind();
   }
 
@@ -63,6 +68,7 @@ export class Camera {
   }
 
   zoomAt(sx, sy, factor) {
+    this.movedAt = inputAt = performance.now();
     const before = this.screenToWorld(sx, sy);
     this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * factor));
     const after = this.screenToWorld(sx, sy);
@@ -94,6 +100,7 @@ export class Camera {
     }, { passive: false });
     c.addEventListener('pointerdown', (e) => {
       if (!this.enabled) return;
+      inputAt = performance.now();
       c.setPointerCapture(e.pointerId);
       const p = this._pos(e);
       this.lastType = e.pointerType;
@@ -141,6 +148,7 @@ export class Camera {
       const pt = this.pointers.get(e.pointerId);
       const dx = p.x - pt.x; const dy = p.y - pt.y;
       pt.x = p.x; pt.y = p.y;
+      inputAt = performance.now();
       if (this.holdDrag) { this.onHoldDrag('move', p.x, p.y); return; }
       if (this.pointers.size === 2 && this.pinch) {
         const [a, b] = [...this.pointers.values()];
@@ -155,6 +163,7 @@ export class Camera {
       if (!this.dragging && Math.hypot(p.x - pt.sx, p.y - pt.sy) > (pt.touch ? 10 : 6)) { this.dragging = true; clearTimeout(this.lpTimer); }
       if (this.dragging) {
         this.x -= dx / this.zoom; this.y -= dy / this.zoom;
+        this.movedAt = inputAt;
         this.clamp();
       }
       if (this.onHover && e.pointerType === 'mouse') this.onHover(p.x, p.y);
