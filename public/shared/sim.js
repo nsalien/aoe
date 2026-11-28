@@ -1811,11 +1811,15 @@ export function doDemolish(s, bid) {
   return refund;
 }
 
-// Troepen ontslaan: enkel soldaten die thuis zijn (niet in je gebied, onderweg of elders). units = { soort: aantal }.
+// Troepen en dorpelingen ontslaan: enkel wie thuis is (niet in je gebied, onderweg, elders of aan het oogsten).
+// units = { soort: aantal } (soldaten), vill = { taak: aantal } met taak 'idle' (zonder werk) of een werkplek uit JOBS.
 // Hun plaats in de bevolking komt vrij en je krijgt DISMISS.refund van hun kosten terug (zoals bij afbreken).
-export function checkDismiss(s, units) {
+export const VILL_JOBS = ['idle', ...JOBS];
+const villSum = (vill) => VILL_JOBS.reduce((a, k) => a + ((vill && vill[k]) || 0), 0);
+export function checkDismiss(s, units, vill = null) {
   const keys = Object.keys(units || {}).filter((k) => units[k]);
-  if (!keys.length) return 'Kies welke troepen je wil ontslaan.';
+  const jobs = Object.keys(vill || {}).filter((k) => vill[k]);
+  if (!keys.length && !jobs.length) return 'Kies wie je wil ontslaan.';
   for (const k of keys) {
     const n = units[k];
     const u = UNITS[k];
@@ -1823,28 +1827,35 @@ export function checkDismiss(s, units) {
     if (!Number.isInteger(n) || n < 0) return 'Ongeldig aantal.';
     if (n > (s.units[k] || 0)) return `Zoveel ${u.name.toLowerCase()}s heb je niet thuis.`;
   }
+  for (const k of jobs) {
+    const n = vill[k];
+    if (!VILL_JOBS.includes(k)) return 'Onbekende taak.';
+    if (!Number.isInteger(n) || n < 0) return 'Ongeldig aantal.';
+    if (n > (s.villagers[k] || 0)) return k === 'idle' ? 'Zoveel dorpelingen zonder werk heb je niet.' : 'Zoveel dorpelingen werken daar niet.';
+  }
+  if (jobs.length && totalVillagers(s) - villSum(vill) < DISMISS.minVillagers) return `Hou minstens ${DISMISS.minVillagers} dorpelingen over.`;
   return null;
 }
 
-export function dismissRefund(units) {
+export function dismissRefund(units, vill = null) {
   const out = {};
-  for (const k of Object.keys(units || {})) {
-    const u = UNITS[k];
-    if (!u || !units[k]) continue;
-    for (const r of RES) if (u.cost[r]) out[r] = (out[r] || 0) + u.cost[r] * units[k] * DISMISS.refund;
-  }
+  const add = (u, n) => { if (u && n) for (const r of RES) if (u.cost[r]) out[r] = (out[r] || 0) + u.cost[r] * n * DISMISS.refund; };
+  for (const k of Object.keys(units || {})) if (k !== 'villager') add(UNITS[k], units[k]);
+  add(UNITS.villager, villSum(vill));
   for (const r of Object.keys(out)) out[r] = Math.floor(out[r]);
   return out;
 }
 
-export function doDismiss(s, units) {
-  const err = checkDismiss(s, units);
+export function doDismiss(s, units, vill = null) {
+  const err = checkDismiss(s, units, vill);
   if (err) throw new GameError(err);
-  const refund = dismissRefund(units);
-  for (const k of Object.keys(units)) {
+  const refund = dismissRefund(units, vill);
+  for (const k of Object.keys(units || {})) {
+    if (!units[k]) continue;
     s.units[k] = (s.units[k] || 0) - units[k];
     if (s.units[k] <= 0) delete s.units[k];
   }
+  for (const k of VILL_JOBS) if (vill && vill[k]) s.villagers[k] -= vill[k];
   addRes(s, refund);
   return refund;
 }
