@@ -7,7 +7,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml, raidReplay } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots, toPlace } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, fmtDuration, JOBS } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -264,7 +264,7 @@ function startGame(data) {
     town.onMoveWalls = moveWalls;
     town.onNotice = (msg, ic) => toast(msg, '', ic || 'move');
     town.onMoveChange = renderMoveHint;
-    town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; };
+    town.onMoveEnd = () => { if (!app.placing && !app.mode) $('#placeHint').hidden = true; renderPlacePill(); };
     town.onHarvest = (node, walker) => harvestNode(node.id, walker ? walker.job : null);
     town.onSelChange = (sel) => {
       const g = sel && (sel.type === 'group' || sel.type === 'unit') ? sel.id : null;
@@ -638,7 +638,40 @@ function renderAll() {
   renderPanel();
   renderViewTitle();
   renderAlert();
+  renderPlacePill();
   updateTimers();
+}
+
+// ---------- gebouwen die groter werden en opnieuw geplaatst moeten worden (gratis) ----------
+// knop bovenaan de stad zolang er nog zijn; de eerste keer (per stad en toestel) ook een venster met uitleg
+function renderPlacePill() {
+  const pill = $('#rpPill');
+  if (!pill || !app.live) return;
+  const list = toPlace(app.live);
+  const show = list.length > 0 && app.view === 'town' && !(town && town.moveB);
+  pill.hidden = !show;
+  if (show) setHTML(pill, `${UI.icon('move')}<span>${list.length === 1 ? `${BUILDINGS[list[0].type].name} opnieuw plaatsen` : `${list.length} gebouwen opnieuw plaatsen`}<span class="where"> (gratis)</span></span>`);
+  const key = `rvs-grew-${app.data.town.id}`;
+  if (list.length && app.live.szm && !app.grewAsked && !app.modal && (!store.get(key) || app.grewAgain)) {
+    app.grewAsked = true;
+    app.grewAgain = store.get(key) ? 0 : 1; // de eerste keer kan het welkomstvenster ervoor komen: dan nog één keer
+    store.set(key, 1);
+    openModal('grew');
+  }
+}
+
+// het volgende gebouw (of het gekozen) opnieuw plaatsen: in de stad, doorschijnend op de dichtstbijzijnde vrije plek
+function placeNext(id = null) {
+  const list = toPlace(app.live);
+  const b = (id && list.find((x) => x.id === id)) || list[0];
+  if (!b || !town) return;
+  if (!app.canAct) { toast('Het spel is nu niet actief.', 'err'); return; }
+  closeModal();
+  if (app.view !== 'town') switchView('town');
+  cancelPlace();
+  if (app.mode) setMode(null);
+  openPanelMobile(false);
+  town.startMove(b);
 }
 
 function renderResBar() {
@@ -906,6 +939,7 @@ const bbTabNow = () => (app.placing || app.mode ? 'build' : app.bbTab);
 
 // naar een gebouw gaan (camera erheen) en het kiezen: het paneel toont dan wat het kost en de knop Verbeteren
 function focusBuilding(b) {
+  if (b.rp) { placeNext(b.id); return; } // staat nog nergens: eerst opnieuw plaatsen
   if (app.view !== 'town') switchView('town');
   town.clearSel();
   if (b.type === 'wall') town.centerOnWalls(); else town.centerOn(b);
@@ -1111,8 +1145,11 @@ async function moveBuilding(id, x, y) {
     computeLive(true);
     renderAll();
   } catch (e) { toast(e.message, 'err'); return; }
-  const r = await act('/move', { id, x, y }, 'Gebouw verplaatst');
+  const was = (base.buildings.find((b) => b.id === id) || {}).rp;
+  const r = await act('/move', { id, x, y }, was ? 'Gebouw geplaatst' : 'Gebouw verplaatst');
   if (!r && app.serverState) { setBaseState(app.serverState); computeLive(true); renderAll(); }
+  // nog meer gebouwen te plaatsen: meteen het volgende
+  if (r && was && toPlace(app.live).length) setTimeout(() => { if (!town.moveB) placeNext(); }, 600);
 }
 
 // balk bovenaan tijdens het verplaatsen: wat je moet doen, 'Zet hier' (enkel als de plek mag) en 'Stoppen'
@@ -1124,9 +1161,11 @@ function renderMoveHint(m) {
   const name = walls ? m.label : b ? BUILDINGS[b.type].name : 'Gebouw';
   const mouse = town.cam.lastType === 'mouse';
   const what = walls ? 'de muur' : 'het gebouw';
-  const how = m.ok ? 'Mag hier staan.' : m.same ? (mouse ? 'Klik op de nieuwe plek.' : `Tik op de nieuwe plek of sleep ${what}.`) : 'Daar kan het niet staan.';
+  const how = m.ok ? (m.rp ? (mouse ? 'Mag hier staan: klik om het neer te zetten, of kies een andere plek.' : 'Mag hier staan. Of tik op een andere plek.') : 'Mag hier staan.')
+    : m.same ? (mouse ? 'Klik op de nieuwe plek.' : `Tik op de nieuwe plek of sleep ${what}.`) : 'Daar kan het niet staan.';
   hint.hidden = false;
-  setHTML(hint, `<span><b>${UI.esc(name)} verplaatsen</b> <span class="muted">${how}</span></span>
+  renderPlacePill();
+  setHTML(hint, `<span><b>${UI.esc(name)} ${m.rp ? `opnieuw plaatsen (${BUILDINGS[b.type].size}x${BUILDINGS[b.type].size}, gratis)` : 'verplaatsen'}</b> <span class="muted">${how}</span></span>
     <button class="btn small primary" data-action="moveHere" ${m.ok ? '' : 'disabled'}>Zet hier</button><button class="btn small" data-action="moveStop">Stoppen</button>`);
 }
 
@@ -1195,6 +1234,7 @@ async function sendAlloc() {
 
 function switchView(v) {
   app.view = v;
+  setTimeout(renderPlacePill, 0);
   for (const b of document.querySelectorAll('.navbtn[data-view]')) b.classList.toggle('active', b.dataset.view === v);
   $('#townCanvas').hidden = v !== 'town';
   $('#worldCanvas').hidden = v !== 'world';
@@ -1263,6 +1303,7 @@ function updateSendSummary() {
 // ---------- vensters ----------
 let chatTimer = null;
 async function openModal(type, arg) {
+  if (app.modal === 'grew' && type !== 'grew') app.grewAsked = false; // de uitleg werd weggedrukt: na dit venster opnieuw
   app.modal = type;
   const body = $('#modalBody');
   $('#modal').hidden = false;
@@ -1278,6 +1319,7 @@ async function openModal(type, arg) {
     } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
   if (type === 'dismiss') body.innerHTML = UI.dismissHtml(app, app.live, arg || null);
+  if (type === 'grew') body.innerHTML = UI.grewHtml(app.live, app.data.team.color);
   if (type === 'send') {
     body.innerHTML = UI.sendHtml(app, app.live, sendCtx.target, sendCtx.kind);
     updateSendSummary();
@@ -1316,6 +1358,7 @@ function closeModal() {
   $('#modal').hidden = true;
   app.modal = null;
   clearInterval(chatTimer);
+  if (!app.grewAsked) setTimeout(renderPlacePill, 400); // wachtte de uitleg over de grotere gebouwen op dit venster?
 }
 
 async function showReport(id) {
@@ -1599,6 +1642,7 @@ const actions = {
     town.startWallMove(tiles, i, j, label);
   },
   moveHere() { if (town) town.dropMove(); },
+  placeNext(el) { placeNext(el && el.dataset.id ? Number(el.dataset.id) : null); },
   moveStop() { if (town) town.cancelMove(); },
   async demolish(el) {
     const stop = el.dataset.stop === '1';

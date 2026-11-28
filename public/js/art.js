@@ -1749,6 +1749,8 @@ function harbor(ctx, L) {
 
 const DRAW = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral, harbor };
 const SIZES = { tc: 2, monument: 2 };
+// voor welke grootte (tegels) de tekening gemaakt is; kan kleiner zijn dan het gebouw nu (dan schaalt town.js ze op)
+export const artSize = (type) => SIZES[type] || 1;
 
 const cache = new Map();
 
@@ -1854,9 +1856,9 @@ export function drawSprite(ctx, spr, x, y, scale = 1, alpha = 1) {
 // steigers voor gebouwen in aanbouw (live getekend omdat de voortgang verandert)
 export function scaffold(ctx, x, y, size, progress) {
   ctx.save(); ctx.translate(x, y);
-  const s = size === 2 ? 0.85 : 0.4;
+  const s = size >= 2 ? size * 0.425 : 0.4;
   ground(ctx, -s - 0.05, -s - 0.05, s + 0.05, s + 0.05, '#b8955c', 'rgba(60,40,20,0.4)');
-  const h = 8 + progress * (size === 2 ? 30 : 18);
+  const h = 8 + progress * (size >= 4 ? 44 : size === 2 ? 30 : 18);
   box(ctx, -s * 0.85, -s * 0.85, s * 0.85, s * 0.85, 0, Math.max(2, h * 0.8), '#cdb48a');
   ctx.strokeStyle = '#7a5129'; ctx.lineWidth = 1.3;
   const corners = [[-s, -s], [s, -s], [s, s], [-s, s]];

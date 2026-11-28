@@ -8,7 +8,7 @@ import { soldierOpts, lookOf } from './troops.js';
 import {
   canPlaceAt, totalVillagers, tcDoor, isPlaced, buildRing, clearedSet, isBuildable, canChop, groupPos, groupVision,
   exploredNow, homeSight, depLeft, boarAlive, campAlive, campSize, raidNow, campGrowth, isVillagerGroup, checkBuyLot, checkPlaceWalls, wallSet, bLevel,
-  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls, shoreSide, shoreSpots, boatsReady,
+  gateAxis, checkPlaceGate, routeTo, gateList, gateSpan, checkMove, checkMoveWalls, shoreSide, shoreSpots, boatsReady, placeNear,
 } from '../shared/sim.js';
 import { territory, ringOf, tileIndex, tileOf, exHas, T_MIN, T_MAX, T_W, TILE, inTerr } from '../shared/territory.js';
 import { ICON } from './ui.js';
@@ -159,8 +159,12 @@ function drawSub(ctx, cv, scale, ox, oy, W, H, v) {
   ctx.drawImage(cv, sx, sy, sw, sh, x0, y0, sw / scale, sh / scale);
 }
 
-// kleine gebouwen iets groter tekenen dan hun tegel, zodat de stad voller en gedetailleerder oogt
-const bScale = (b) => ((BUILDINGS[b.type].size || 1) === 1 ? 1.12 : 1);
+// kleine gebouwen iets groter tekenen dan hun tegel, zodat de stad voller en gedetailleerder oogt. De getekende (2D) terugval
+// van gebouwen die groter werden (1x1 → 2x2, monument 2x2 → 4x4) is gemaakt voor de oude grootte: die schalen we mee op.
+const bScale = (b) => {
+  const z = BUILDINGS[b.type].size || 1; const a = A.artSize(b.type);
+  return z === 1 ? 1.12 : z === a ? 1 : (z / a) * 0.85;
+};
 
 const FOG_SCALE = 0.25;
 // kleur per diepte (f = waarde / 255 * 1,6) voor de scherpe meren: zandrand, schuim, ondiep, diep
@@ -1181,7 +1185,7 @@ export class TownView {
       const c = Math.round(((units[k] || 0) / total) * show) || ((units[k] || 0) > 0 ? 1 : 0);
       for (let i = 0; i < c; i++) list.push(k);
     }
-    const anchor = s.buildings.find((b) => b.type === 'barracks' && b.level > 0) || s.buildings.find((b) => b.type === 'tc');
+    const anchor = s.buildings.find((b) => b.type === 'barracks' && b.level > 0 && isPlaced(b)) || s.buildings.find((b) => b.type === 'tc');
     const size = BUILDINGS[anchor.type].size;
     const ax = anchor.x + size / 2; const ay = anchor.y + size / 2;
     const occ = new Set();
@@ -1851,11 +1855,15 @@ export class TownView {
   // ---------- gebouw verplaatsen (knop Verplaatsen in het gebouwpaneel) ----------
   // Het gebouw staat eerst doorschijnend op zijn eigen plek. Tik (of klik) op de nieuwe plek, of sleep het gebouw zelf;
   // met een muis zet een klik het meteen neer, op een aanraakscherm bevestig je met 'Zet hier' (dropMove).
+  // Een gebouw dat opnieuw geplaatst moet worden (b.rp: het werd groter) begint op de dichtstbijzijnde vrije plek.
   startMove(b) {
-    if (!b || b.type === 'tc' || !isPlaced(b)) return;
+    if (!b || b.type === 'tc' || b.type === 'wall') return;
     this.setSel(null);
     this.selected = b.id;
-    this.moveB = { id: b.id, size: BUILDINGS[b.type].size, x: b.x, y: b.y, ok: false, same: true, gdx: 0, gdy: 0, sx: null, sy: null, dragging: false };
+    const size = BUILDINGS[b.type].size;
+    let x = b.x; let y = b.y;
+    if (b.rp) { const p = placeNear(this.state, b.type, b.x, b.y, b.id); if (p) { x = p.x; y = p.y; } this.centerOnPos(x + size / 2, y + size / 2); }
+    this.moveB = { id: b.id, size, x, y, ok: !!b.rp && !checkMove(this.state, b.id, x, y), same: !b.rp, rp: !!b.rp, gdx: 0, gdy: 0, sx: null, sy: null, dragging: false };
     if (this.onMoveChange) this.onMoveChange(this.moveB);
   }
 
@@ -1889,7 +1897,7 @@ export class TownView {
     } else {
       const b = this.state.buildings.find((q) => q.id === m.id);
       if (!b) { this.cancelMove(); return; }
-      m.same = b.x === x && b.y === y;
+      m.same = !b.rp && b.x === x && b.y === y;
       m.ok = !m.same && !checkMove(this.state, m.id, x, y);
     }
     if (before !== `${m.x},${m.y},${m.ok}` && this.onMoveChange) this.onMoveChange(m);

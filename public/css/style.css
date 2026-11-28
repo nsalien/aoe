@@ -1038,3 +1038,12 @@ body.page-updates { height: auto; min-height: 100%; overflow: visible; backgroun
 .bcard.dismiss-card .ic { width: 26px; height: 26px; }
 .summary .refund { display: inline-flex; align-items: center; gap: 6px; }
 .summary .refund > * { margin: 0; }
+
+/* gebouwen die groter werden: knop om ze opnieuw te plaatsen (onder de knop voor nieuwe berichten) */
+.chat-pill.rp-pill { top: 58px; background: linear-gradient(#e7b54c, #c58a24); color: #2b1a05; border-color: #8d5f16; animation: none; }
+.chat-pill.rp-pill .where { opacity: 0.75; }
+@media (max-width: 900px) { .chat-pill.rp-pill { top: 106px; } }
+@media (orientation: landscape) and (max-height: 540px) { .chat-pill.rp-pill { top: 92px; } }
+.grew-list .row { padding: 6px 0; border-top: 1px dashed #d3bb8a; }
+.grew-list .row:first-child { border-top: 0; }
+.grew-list img { width: 44px; height: 38px; object-fit: contain; }
