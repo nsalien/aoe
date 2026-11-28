@@ -65,7 +65,7 @@ export const BUILDINGS = {
     storage: 4000, protect: 500, desc: '+4000 opslag per niveau en verbergt 500 per niveau voor plunderaars.',
   },
   barracks: {
-    name: 'Kazerne', size: 1, max: 1, maxLevel: 5, age: 1, cost: { wood: 150, stone: 50 }, time: 900,
+    name: 'Kazerne', size: 2, max: 1, maxLevel: 5, age: 1, cost: { wood: 150, stone: 50 }, time: 900,
     trains: true, desc: 'Train voetvolk. Elk niveau traint 15% sneller.',
   },
   wall: {
@@ -73,11 +73,11 @@ export const BUILDINGS = {
     placeable: false, desc: 'Bepaalt hoe sterk je muren zijn. Plaats ze zelf, tegel per tegel. Een volledig gesloten muur verdedigt het best.',
   },
   range: {
-    name: 'Schietbaan', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, gold: 60 }, time: 1500,
+    name: 'Schietbaan', size: 2, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, gold: 60 }, time: 1500,
     trains: true, desc: 'Train boogschutters.',
   },
   stable: {
-    name: 'Stal', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, food: 120, gold: 60 }, time: 1800,
+    name: 'Stal', size: 2, max: 1, maxLevel: 5, age: 2, cost: { wood: 200, food: 120, gold: 60 }, time: 1800,
     trains: true, desc: 'Train verkenners, ruiters en ridders.',
   },
   smithy: {
@@ -85,7 +85,7 @@ export const BUILDINGS = {
     desc: '+5% aanval en verdediging per niveau voor al je troepen.',
   },
   market: {
-    name: 'Markt', size: 1, max: 1, maxLevel: 5, age: 2, cost: { wood: 250, stone: 50 }, time: 1800,
+    name: 'Markt', size: 2, max: 1, maxLevel: 5, age: 2, cost: { wood: 250, stone: 50 }, time: 1800,
     desc: 'Ruil grondstoffen en stuur karavanen naar bondgenoten.',
   },
   tower: {
@@ -93,11 +93,11 @@ export const BUILDINGS = {
     defense: 80, desc: 'Schiet tijdens een veldslag op de dichtstbijzijnde vijand. Elk niveau geeft meer schade en levens. Aanvallers kunnen hem slopen.',
   },
   workshop: {
-    name: 'Belegwerkplaats', size: 1, max: 1, maxLevel: 3, age: 3, cost: { wood: 350, gold: 200, stone: 100 }, time: 3600,
+    name: 'Belegwerkplaats', size: 2, max: 1, maxLevel: 3, age: 3, cost: { wood: 350, gold: 200, stone: 100 }, time: 3600,
     trains: true, desc: 'Bouw stormrammen om muren en monumenten te slopen.',
   },
   monument: {
-    name: 'Monument', size: 2, max: 1, maxLevel: 5, age: 4, cost: { food: 6000, wood: 6000, stone: 8000, gold: 8000 },
+    name: 'Monument', size: 4, max: 1, maxLevel: 5, age: 4, cost: { food: 6000, wood: 6000, stone: 8000, gold: 8000 },
     time: 8 * 3600, growth: 1.35, score: 1500,
     desc: 'Een wereldwonder. Elk niveau levert 1500 extra punten op. Rammen kunnen het beschadigen!',
   },
@@ -110,16 +110,16 @@ export const BUILDINGS = {
     boost: { food: 0.05 }, desc: '+5% voedsel per niveau.',
   },
   academy: {
-    name: 'Academie', size: 1, max: 1, maxLevel: 3, age: 3, cost: { wood: 400, stone: 200, gold: 300 }, time: 3600,
+    name: 'Academie', size: 2, max: 1, maxLevel: 3, age: 3, cost: { wood: 400, stone: 200, gold: 300 }, time: 3600,
     levelAges: [3, 4, 5], research: true,
     desc: 'Onderzoek nieuwe vaardigheden voor je troepen en je stad. Elk niveau opent een nieuwe rij onderzoek.',
   },
   guild: {
-    name: 'Gildehuis', size: 1, max: 1, maxLevel: 5, age: 4, cost: { wood: 2500, stone: 1500, gold: 2000 }, time: 4 * 3600,
+    name: 'Gildehuis', size: 2, max: 1, maxLevel: 5, age: 4, cost: { wood: 2500, stone: 1500, gold: 2000 }, time: 4 * 3600,
     boost: { food: 0.03, wood: 0.03, stone: 0.03, gold: 0.03 }, desc: '+3% productie van alle grondstoffen per niveau.',
   },
   lodge: {
-    name: 'Bouwloods', size: 1, max: 1, maxLevel: 3, age: 4, cost: { wood: 3000, stone: 2000, food: 1000 }, time: 3 * 3600,
+    name: 'Bouwloods', size: 2, max: 1, maxLevel: 3, age: 4, cost: { wood: 3000, stone: 2000, food: 1000 }, time: 3 * 3600,
     builders: 1, buildSpeed: 0.05, desc: 'Eén bouwer extra, en elk niveau bouwt 5% sneller.',
   },
   court: {
@@ -215,6 +215,11 @@ export const WALL_TILE = { cost: [null, { wood: 6 }, { wood: 8 }, { stone: 6, wo
 // Poort: in een recht stuk muur. Is je stad helemaal dicht, dan gaan je troepen enkel via een poort binnen en buiten.
 export const GATE = { cost: { wood: 80, stone: 40 }, max: 4 };
 // Afbreken: dit deel van wat het gebouw kostte, krijg je terug (een lopende bouw krijg je voor de helft terug)
+// Groottes van gebouwen veranderden (nov. 2026: kazerne, schietbaan, stal, markt, belegwerkplaats, academie, gildehuis en
+// bouwloods 2x2, monument 4x4). SIZE_V = versie van de groottes; GREW = wat toen groter werd. Een oude stad met zo'n gebouw dat
+// op zijn plek niet meer past, moet het opnieuw plaatsen (gratis, zie growBuildings in sim.js).
+export const SIZE_V = 2;
+export const GREW = new Set(['barracks', 'range', 'stable', 'market', 'workshop', 'academy', 'guild', 'lodge', 'monument']);
 export const DEMOLISH = { built: 0.25, job: 0.5 };
 // Troepen ontslaan (thuis): hun plaats in de bevolking komt vrij en je krijgt een deel van hun kosten terug
 export const DISMISS = { refund: 0.25 };

@@ -660,7 +660,7 @@ async function startBattle(db, world, b, now) {
       // de stad zoals ze getekend wordt (enkel wat de browser nodig heeft)
       view: {
         seed: town.id, civ: s.civ || null,
-        buildings: s.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+        buildings: s.buildings.filter((q) => !q.rp).map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
         walls: s.walls || [], gates: s.gates || [], cl: (s.terr && s.terr.cl) || [], lots: (s.terr && s.terr.lots) || [],
       },
     };
@@ -753,7 +753,7 @@ export async function startPractice(db, world, player, role, now) {
     practice: true, attInit: PRACTICE.att, defInit: { home: PRACTICE.def }, style: { civ: town.civ, age: bLevel(town, 'tc') }, level: 0,
     view: {
       seed, civ: town.civ || null,
-      buildings: town.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+      buildings: town.buildings.filter((q) => !q.rp).map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
       walls: town.walls || [], gates: town.gates || [], cl: (town.terr && town.terr.cl) || [], lots: (town.terr && town.terr.lots) || [],
     },
     att: role === 'att' ? mine : foe, def: role === 'def' ? mine : foe,
@@ -770,7 +770,7 @@ export async function startPractice(db, world, player, role, now) {
 // ---------- overval van de barbaren: de slag zelf spelen (binnen de 15 minuten dat ze naar je dorp trekken) ----------
 const townView = (s, seed) => ({
   seed, civ: s.civ || null,
-  buildings: s.buildings.map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
+  buildings: s.buildings.filter((q) => !q.rp).map((x) => ({ id: x.id, type: x.type, x: x.x, y: x.y, level: x.level })),
   walls: s.walls || [], gates: s.gates || [], cl: (s.terr && s.terr.cl) || [], lots: (s.terr && s.terr.lots) || [],
 });
 

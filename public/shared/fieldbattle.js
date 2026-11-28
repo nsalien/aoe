@@ -591,7 +591,7 @@ export function replayBattle(rec) {
 }
 
 const replayLook = (s) => ({
-  seed: s.terr.seed, civ: s.civ || null, buildings: s.buildings.map((b) => ({ id: b.id, type: b.type, x: b.x, y: b.y, level: b.level })),
+  seed: s.terr.seed, civ: s.civ || null, buildings: s.buildings.filter((q) => !q.rp).map((b) => ({ id: b.id, type: b.type, x: b.x, y: b.y, level: b.level })),
   walls: s.walls || [], gates: s.gates || [], cl: s.terr.cl || [], lots: s.terr.lots || [],
 });
 
