@@ -1282,15 +1282,19 @@ function readSend() {
 let dismissNeed = null;
 function readDismiss() {
   const units = {};
-  for (const el of document.querySelectorAll('[data-dismiss-unit]')) {
+  const villagers = {};
+  for (const el of document.querySelectorAll('[data-dismiss-unit], [data-dismiss-vill]')) {
     const v = Math.max(0, Math.min(Number(el.max), Math.floor(Number(el.value) || 0)));
-    if (v) units[el.dataset.dismissUnit] = v;
+    if (!v) continue;
+    if (el.dataset.dismissUnit) units[el.dataset.dismissUnit] = v; else villagers[el.dataset.dismissVill] = v;
   }
-  return units;
+  return { units, villagers };
 }
 function updateDismissSummary() {
   const el = $('#dismissSummary');
-  if (el) el.innerHTML = UI.dismissSummaryHtml(app, app.live, readDismiss(), dismissNeed);
+  if (!el) return;
+  const { units, villagers } = readDismiss();
+  el.innerHTML = UI.dismissSummaryHtml(app, app.live, units, dismissNeed, villagers);
 }
 
 function updateSendSummary() {
@@ -1318,7 +1322,7 @@ async function openModal(type, arg) {
       if (top) markNewsSeen(top.id);
     } catch (e) { body.innerHTML = `<p class="req">${UI.esc(e.message)}</p>`; }
   }
-  if (type === 'dismiss') body.innerHTML = UI.dismissHtml(app, app.live, arg || null);
+  if (type === 'dismiss') body.innerHTML = UI.dismissHtml(app, app.live, arg || {});
   if (type === 'grew') body.innerHTML = UI.grewHtml(app.live, app.data.team.color);
   if (type === 'send') {
     body.innerHTML = UI.sendHtml(app, app.live, sendCtx.target, sendCtx.kind);
@@ -1700,20 +1704,26 @@ const actions = {
     const b = app.live.buildings.find((x) => x.id === Number(el.dataset.id));
     act('/upgrade', { id: Number(el.dataset.id) }, b && b.type === 'tc' ? 'Je volk maakt zich klaar voor een nieuw tijdperk!' : 'Verbetering gestart');
   },
-  // troepen ontslaan (plaats maken in de bevolking, bv. voor een ram)
-  dismissOpen(el) { dismissNeed = (el && el.dataset.need) || null; openModal('dismiss', dismissNeed); },
+  // troepen en dorpelingen ontslaan (plaats maken in de bevolking, bv. voor een ram)
+  async dismissOpen(el) {
+    dismissNeed = (el && el.dataset.need) || null;
+    // een verdeling van de dorpelingen die nog moet vertrekken, eerst versturen (anders kloppen de aantallen niet)
+    if (app.pendingAlloc) { clearTimeout(allocTimer); await sendAlloc(); }
+    openModal('dismiss', { need: dismissNeed, first: el && el.dataset.first });
+  },
   dismissAll(el) {
-    const i = document.querySelector(`[data-dismiss-unit="${el.dataset.unit}"]`);
+    const i = document.querySelector(el.dataset.vill ? `[data-dismiss-vill="${el.dataset.vill}"]` : `[data-dismiss-unit="${el.dataset.unit}"]`);
     if (i) { i.value = el.dataset.n; updateDismissSummary(); }
   },
   async dodismiss(el) {
-    const units = readDismiss();
+    const { units, villagers } = readDismiss();
     const n = Object.values(units).reduce((a, b) => a + b, 0);
-    if (!n) { toast('Kies hoeveel soldaten je wil ontslaan.', 'err'); return; }
-    const word = n > 1 ? 'soldaten' : 'soldaat';
-    if (!confirm(`${n} ${word} ontslaan? Dat kan je niet ongedaan maken.`)) return;
+    const v = Object.values(villagers).reduce((a, b) => a + b, 0);
+    if (!n && !v) { toast('Kies wie je wil ontslaan.', 'err'); return; }
+    const words = [n && `${n} ${n > 1 ? 'soldaten' : 'soldaat'}`, v && `${v} ${v > 1 ? 'dorpelingen' : 'dorpeling'}`].filter(Boolean).join(' en ');
+    if (!confirm(`${words} ontslaan? Dat kan je niet ongedaan maken.`)) return;
     el.disabled = true;
-    const r = await act('/dismiss', { units }, `${n} ${word} ontslagen: er is weer plaats in je bevolking.`);
+    const r = await act('/dismiss', { units, villagers }, `${words} ontslagen: er is weer plaats in je bevolking.`);
     if (r) closeModal(); else el.disabled = false;
   },
   setmax(el) { const i = document.getElementById(`tn-${el.dataset.unit}`); if (i) i.value = Math.max(1, Number(el.dataset.max)); },
@@ -1927,7 +1937,7 @@ document.addEventListener('change', (e) => {
 
 document.addEventListener('input', (e) => {
   if (e.target.matches('[data-send-unit], [data-send-res]')) updateSendSummary();
-  if (e.target.matches('[data-dismiss-unit]')) updateDismissSummary();
+  if (e.target.matches('[data-dismiss-unit], [data-dismiss-vill]')) updateDismissSummary();
 });
 
 document.addEventListener('keydown', (e) => {

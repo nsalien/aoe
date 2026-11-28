@@ -13,7 +13,7 @@ import {
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed, campGrowth, raidChance, raidNow,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
   isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
-  maxBoats, boatsReady, checkBoat, fishMult, dismissRefund, toPlace,
+  maxBoats, boatsReady, checkBoat, fishMult, dismissRefund, toPlace, VILL_JOBS,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -294,7 +294,7 @@ export function armyBarHtml(app, live) {
       <b class="bnum">${fmt(r.total)}</b>
       <span class="where">${short || 'in opleiding'}</span>
     </div>`;
-  }).join('') + (rows.some((r) => r.home) ? `<button class="bcard dismiss-card" data-action="dismissOpen" title="Troepen die thuis zijn ontslaan: plaats in je bevolking">
+  }).join('') + (rows.some((r) => r.home) || villDismissable(live) ? `<button class="bcard dismiss-card" data-action="dismissOpen" title="Troepen of dorpelingen die thuis zijn ontslaan: plaats in je bevolking">
       ${icon('minus')}<span class="bn">Ontslaan</span><span class="where">plaats maken</span></button>` : '');
 }
 
@@ -467,6 +467,7 @@ export function townOverviewHtml(app, live) {
       ${[['auto', 'Automatisch'], ...jobs.map((k) => [k, k === 'fish' ? 'Vissen' : RES_NAMES[k]])].map(([v, n]) => `<option value="${v}" ${live.rally === v ? 'selected' : ''}>${n}</option>`).join('')}
     </select></div>
     ${idle > 0 ? `<p class="req">${idle} dorpeling(en) doen niets! Bouw werkplaatsen (boerderij, kampen) of verdeel ze.</p>` : ''}
+    ${villDismissable(live) ? `<div class="actions"><button class="btn small" data-action="dismissOpen" data-first="vill" ${canAct ? '' : 'disabled'} title="Plaats maken in je bevolking, bv. voor soldaten">${icon('minus')} Dorpelingen ontslaan</button></div>` : ''}
   </div>`;
 
   html += fieldCardHtml(app, live);
@@ -1107,8 +1108,8 @@ function trainHtml(app, live, b, units, title = null, cls = '') {
         <input class="num" type="number" min="1" max="${Math.max(1, max)}" value="${Math.min(Math.max(1, max), k === 'villager' ? 5 : 10)}" id="tn-${k}">
         <button class="btn small" data-action="setmax" data-unit="${k}" data-max="${max}">max ${max}</button>
         <button class="btn primary small" data-action="train" data-unit="${k}" ${!canAct || max < 1 ? 'disabled' : ''}>Trainen</button>
-      </div>${max < 1 && err ? `<p class="req">${err}</p>` : ''}${max < 1 && popFull(app, live, u) && ARMY_UNITS.some((x) => live.units[x]) ? `<p class="small">
-        <button class="btn small" data-action="dismissOpen" data-need="${k}" ${canAct ? '' : 'disabled'}>${icon('minus')} Troepen ontslaan om plaats te maken</button></p>` : ''}`}
+      </div>${max < 1 && err ? `<p class="req">${err}</p>` : ''}${max < 1 && popFull(app, live, u) && (ARMY_UNITS.some((x) => live.units[x]) || (k !== 'villager' && villDismissable(live))) ? `<p class="small">
+        <button class="btn small" data-action="dismissOpen" data-need="${k}" ${canAct ? '' : 'disabled'}>${icon('minus')} ${k === 'villager' ? 'Troepen' : 'Troepen of dorpelingen'} ontslaan om plaats te maken</button></p>` : ''}`}
       </div></div>`;
   }
   html += '</div>';
@@ -1369,37 +1370,76 @@ export function sendHtml(app, live, target, kind) {
   return html;
 }
 
-// ---------- troepen ontslaan ----------
-// need = de eenheid die je wilde trainen (bv. een ram): toont hoeveel plaats daarvoor nodig is
-export function dismissHtml(app, live, need = null) {
+// ---------- troepen en dorpelingen ontslaan ----------
+// opt.need = de eenheid die je wilde trainen (bv. een ram): toont hoeveel plaats daarvoor nodig is
+// opt.first = 'vill': dorpelingen bovenaan (geopend vanuit de kaart Dorpelingen)
+const VILL_NAMES = { idle: 'Zonder werk', fish: 'Vissers' };
+const villName = (k) => VILL_NAMES[k] || RES_NAMES[k];
+// hoeveel dorpelingen kan je nog ontslaan (je houdt er DISMISS.minVillagers over)
+export const villDismissable = (live) => Math.max(0, Math.min(homeVillagers(live), totalVillagers(live) - DISMISS.minVillagers));
+
+export function dismissHtml(app, live, opt = {}) {
   const d = app.data;
+  const need = opt.need || null;
   const list = ARMY_UNITS.filter((k) => live.units[k] > 0);
   const free = popCap(live) - homePop(live) - (d.awayPop || 0);
   const nu = need && UNITS[need];
-  let html = `<h2>${icon('minus')} Troepen ontslaan</h2>
-    <p class="desc">Soldaten die je ontslaat, gaan naar huis: hun plaats in je bevolking komt meteen vrij en ze geven
-    ${Math.round(DISMISS.refund * 100)}% van hun kosten terug. Enkel troepen die thuis zijn.</p>
+  const canV = need !== 'villager' ? villDismissable(live) : 0;
+  const jobs = VILL_JOBS.filter((k) => live.villagers[k] > 0);
+  let html = `<h2>${icon('minus')} Ontslaan</h2>
+    <p class="desc">Soldaten en dorpelingen die je ontslaat, gaan naar huis: hun plaats in je bevolking komt meteen vrij en ze geven
+    ${Math.round(DISMISS.refund * 100)}% van hun kosten terug. Enkel wie thuis is.</p>
     <p class="small">${icon('people')} Bevolking: <b class="${free < 0 ? 'lost' : ''}">${fmt(popCap(live) - free)}/${fmt(popCap(live))}</b>${nu ? ` · een ${nu.name.toLowerCase()} vraagt <b>${nu.pop}</b> plaats${nu.pop > 1 ? 'en' : ''}` : ''}</p>`;
-  if (!list.length) return html + '<p class="req">Je hebt geen soldaten thuis.</p>';
+  let army = `<h3>${icon('shield')} Soldaten</h3>`;
+  if (!list.length) army += '<p class="small muted">Je hebt geen soldaten thuis.</p>';
   for (const k of list) {
     const u = UNITS[k];
-    html += `<div class="sendrow"><img src="${unitThumb(k, d.team.color)}" alt=""><div><b>${u.name}</b><div class="small muted">${fmt(live.units[k])} thuis${u.pop > 1 ? ` · ${u.pop} plaatsen per stuk` : ''}</div></div>
+    army += `<div class="sendrow"><img src="${unitThumb(k, d.team.color)}" alt=""><div><b>${u.name}</b><div class="small muted">${fmt(live.units[k])} thuis${u.pop > 1 ? ` · ${u.pop} plaatsen per stuk` : ''}</div></div>
       <input class="num" type="number" min="0" max="${live.units[k]}" value="0" data-dismiss-unit="${k}">
       <button class="btn small" data-action="dismissAll" data-unit="${k}" data-n="${live.units[k]}">alle</button></div>`;
   }
+  let vill = '';
+  if (need !== 'villager') {
+    vill = `<h3>${icon('people')} Dorpelingen</h3><p class="small muted">Je houdt er altijd minstens ${DISMISS.minVillagers} over (ook wie in je gebied rondloopt telt mee).</p>`;
+    if (!canV) vill += `<p class="small muted">${homeVillagers(live) ? `Je hebt maar ${fmt(totalVillagers(live))} dorpelingen: die heb je nodig.` : 'Er zijn geen dorpelingen thuis.'}</p>`;
+    else {
+      for (const k of jobs) {
+        const n = Math.min(live.villagers[k], canV);
+        vill += `<div class="sendrow"><img src="${k === 'idle' ? unitThumb('villager', d.team.color) : ICON[k]}" alt=""><div><b>${villName(k)}</b><div class="small muted">${fmt(live.villagers[k])} ${k === 'idle' ? 'doen niets' : 'aan het werk'}</div></div>
+          <input class="num" type="number" min="0" max="${n}" value="0" data-dismiss-vill="${k}">
+          <button class="btn small" data-action="dismissAll" data-vill="${k}" data-n="${n}">alle</button></div>`;
+      }
+    }
+  }
+  html += opt.first === 'vill' || !list.length ? vill + army : army + vill;
   html += `<div id="dismissSummary" class="summary">${dismissSummaryHtml(app, live, {}, need)}</div>
-    <div class="actions"><button class="btn danger big" data-action="dodismiss" ${app.canAct ? '' : 'disabled'}>Ontslaan</button></div>`;
+    <div class="actions"><button class="btn danger big" data-action="dodismiss" ${app.canAct && (list.length || canV) ? '' : 'disabled'}>Ontslaan</button></div>`;
   return html;
 }
 
-export function dismissSummaryHtml(app, live, units, need = null) {
+export function dismissSummaryHtml(app, live, units, need = null, vill = {}) {
   const n = ARMY_UNITS.reduce((a, k) => a + (units[k] || 0), 0);
-  if (!n) return '<span class="muted">Kies hoeveel soldaten je wil ontslaan.</span>';
-  const freed = ARMY_UNITS.reduce((a, k) => a + (units[k] || 0) * UNITS[k].pop, 0);
+  const v = VILL_JOBS.reduce((a, k) => a + (vill[k] || 0), 0);
+  if (!n && !v) return '<span class="muted">Kies wie je wil ontslaan.</span>';
+  const freed = ARMY_UNITS.reduce((a, k) => a + (units[k] || 0) * UNITS[k].pop, 0) + v;
   const free = popCap(live) - homePop(live) - (app.data.awayPop || 0) + freed;
   const nu = need && UNITS[need];
+  // wat je dorp minder opbrengt
+  let lossHtml = '';
+  if (v) {
+    const next = { ...live.villagers };
+    for (const k of VILL_JOBS) next[k] = (next[k] || 0) - (vill[k] || 0);
+    const r0 = rates(live, app.data.world.speed);
+    const r1 = rates({ ...live, villagers: next }, app.data.world.speed);
+    const lost = {};
+    for (const r of RES) if (r0[r] - r1[r] >= 0.5) lost[r] = r0[r] - r1[r];
+    if (Object.keys(lost).length) lossHtml = `<span class="refund">Per uur minder: ${costHtml(lost)}</span>`;
+  }
+  const short = v && totalVillagers(live) - v < DISMISS.minVillagers;
   return `<span>${icon('people')} <b>${fmt(freed)}</b> plaats${freed === 1 ? '' : 'en'} vrij (dan ${fmt(Math.max(0, free))} vrij)</span>
-    <span class="refund">Terug: ${costHtml(dismissRefund(units))}</span>
+    <span class="refund">Terug: ${costHtml(dismissRefund(units, vill))}</span>
+    ${lossHtml}
+    ${short ? `<span class="req">Hou minstens ${DISMISS.minVillagers} dorpelingen over.</span>` : ''}
     ${nu ? `<span class="${free >= nu.pop ? 'ok' : 'req'}">${free >= nu.pop ? `Genoeg plaats voor ${Math.floor(free / nu.pop) > 1 ? `${Math.floor(free / nu.pop)} ${nu.name.toLowerCase()}s` : `een ${nu.name.toLowerCase()}`}` : `Nog ${nu.pop - free} plaats${nu.pop - free > 1 ? 'en' : ''} te weinig voor een ${nu.name.toLowerCase()}`}</span>` : ''}`;
 }
 
