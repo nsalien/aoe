@@ -423,7 +423,8 @@ export const CLAN = {
 export const WORLD_SIZE = 56;
 export const CAMP_EXTRA = 12; // naast de 3 kampen rond elk startgebied
 
-export const MARKET = { rate: 0.6, ratePerLevel: 0.07, shipPerLevel: 1000, merchantSpeed: 12 };
+// tradeGapMs: naar eenzelfde speler hooguit één karavaan per zoveel tijd (echte tijd, ook voor bots)
+export const MARKET = { rate: 0.6, ratePerLevel: 0.07, shipPerLevel: 1000, merchantSpeed: 12, tradeGapMs: 8 * 3600000 };
 
 // ---------- Academie: onderzoek ----------
 // Een raster van 4 soorten x 3 rijen. Rij r vraagt Academie niveau r (= tijdperk r + 2) en het onderzoek ervoor

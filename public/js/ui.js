@@ -13,7 +13,7 @@ import {
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed, campGrowth, raidChance, raidNow,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
   isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
-  maxBoats, boatsReady, checkBoat, fishMult, dismissRefund, toPlace, VILL_JOBS,
+  maxBoats, boatsReady, checkBoat, fishMult, dismissRefund, toPlace, VILL_JOBS, tradeWait,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -1133,7 +1133,7 @@ function marketHtml(app, live) {
     <div class="trainrow"><input class="num" id="tr-amount" type="number" min="10" step="10" value="100">
       <button class="btn primary small" data-action="trade" ${canAct ? '' : 'disabled'}>Ruilen</button></div></div>
     <div class="card"><h3>${icon('cart')} Karavaan naar bondgenoot</h3>
-    <p class="small muted" style="margin:0 0 6px">Max. ${fmt(MARKET.shipPerLevel * L)} grondstoffen per karavaan. Kies je bondgenoot op de wereldkaart of hieronder.</p>
+    <p class="small muted" style="margin:0 0 6px">Max. ${fmt(MARKET.shipPerLevel * L)} grondstoffen per karavaan, naar eenzelfde speler één karavaan per ${MARKET.tradeGapMs / 3600000} uur. Kies je bondgenoot op de wereldkaart of hieronder.</p>
     <div id="allyList" class="small muted">Bondgenoten laden…</div></div>`;
 }
 
@@ -1182,13 +1182,15 @@ export function worldPanelHtml(app, sel) {
   } else if (myVassal || myLord) {
     html += `<p class="desc">${icon('crown')} ${myVassal ? 'Dit is je vazal: je valt hem niet aan, maar je kan hem helpen.' : 'Dit is je heer: je kan hem niet aanvallen. Koop je vrij of laat een clanlid hem verslaan.'}</p>
       <div class="actions"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
-      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>`;
+      <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button></div>
+      ${tradeNoteHtml(app, t)}`;
   } else if (ally) {
     const peace = now < d.me.peaceEnd || now < (t.peaceEnd || 0);
     html += `<p class="desc">${icon('team')} Dit is je bondgenoot. Help elkaar met troepen en grondstoffen!</p>
       <div class="actions wrapbtns"><button class="btn green" data-action="send" data-kind="support" ${app.canAct ? '' : 'disabled'}>${icon('shield')} Troepen sturen</button>
       <button class="btn" data-action="send" data-kind="trade" ${app.canAct ? '' : 'disabled'}>${icon('cart')} Grondstoffen</button>
       <button class="btn" data-action="dmOpen" data-id="${t.playerId}">${icon('chat')} Bericht</button></div>
+      ${tradeNoteHtml(app, t)}
       <details class="betray"><summary>${icon('swords')} Verraad…</summary>
       <p class="small muted">Je kan je bondgenoot ook aanvallen terwijl hij nog in je clan zit. Hij en je clan zien je leger aankomen, en de clan kan je daarna ${CLAN.traitorMs / 86400000} dagen lang buitenzetten.</p>
       <div class="actions wrapbtns"><button class="btn danger" data-action="send" data-kind="attack" data-betray="1" ${!peace && app.canAct ? '' : 'disabled'}>${icon('swords')} Bondgenoot aanvallen</button>
@@ -1238,6 +1240,12 @@ function marchItem(m) {
   return `<div class="qitem"><span class="qicon">${icon(back ? 'home' : ic)}</span>
     <div><div class="nm">${label}${fight}</div><div class="small muted">${marchCargo(m)}</div>
     ${bar(m.departAt, m.arriveAt)}</div>${m.status === 'battle' ? '' : timer(m.arriveAt)}</div>`;
+}
+
+// karavaan naar deze stad: nog even wachten? (één per MARKET.tradeGapMs naar eenzelfde speler)
+function tradeNoteHtml(app, t) {
+  const wait = app.live && t.playerId ? tradeWait(app.live, t.playerId, app.now()) : 0;
+  return wait > 0 ? `<p class="small muted">${icon('cart')} Volgende karavaan naar ${esc(t.player || 'deze speler')} kan ${clockTime(Date.now() + wait)} (nog ${fmtDuration(wait)}).</p>` : '';
 }
 
 // klokuur (en dag als het niet vandaag is), bv. 'om 14:05' of 'ma om 09:30'
@@ -1352,7 +1360,15 @@ export function sendHtml(app, live, target, kind) {
   if (kind === 'trade') {
     const L = bLevel(live, 'market');
     if (!L) return html + '<p class="req">Je hebt een markt nodig om karavanen te sturen.</p>';
-    html += `<p class="small muted">Je markt kan ${fmt(MARKET.shipPerLevel * L)} grondstoffen per karavaan versturen.</p>`;
+    // naar eenzelfde speler hooguit één karavaan per 8 uur (de server controleert het ook)
+    const gap = MARKET.tradeGapMs / 3600000;
+    const wait = target.playerId ? tradeWait(live, target.playerId, app.now()) : 0;
+    if (wait > 0) {
+      return html + `<p class="req">${icon('clock')} Je stuurde ${esc(target.player || 'deze speler')} al een karavaan. Naar dezelfde speler kan je
+        maar één karavaan per ${gap} uur sturen: de volgende kan <b>${clockTime(Date.now() + wait)}</b> (nog ${fmtDuration(wait)}).</p>`;
+    }
+    html += `<p class="small muted">Je markt kan ${fmt(MARKET.shipPerLevel * L)} grondstoffen per karavaan versturen.
+      Naar eenzelfde speler kan maar één karavaan per ${gap} uur.</p>`;
     for (const r of RES) {
       html += `<div class="sendrow"><img src="${ICON[r]}" alt=""><div><b>${RES_NAMES[r]}</b><div class="small muted">${fmt(live.res[r])} beschikbaar</div></div>
         <input class="num" type="number" min="0" value="0" data-send-res="${r}" max="${Math.floor(live.res[r])}"><span></span></div>`;

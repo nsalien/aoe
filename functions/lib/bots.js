@@ -9,6 +9,7 @@
 import { RES, UNITS, ARMY_UNITS, MARKET, CIV_IDS, TEAM_NAMES, TEAM_COLORS, campUnits } from '../../public/shared/rules.js';
 import {
   newTownState, advance, ensureTerritory, bLevel, capacity, protectAmount, effectiveWall, towerDefense, townBaseDef, age, townScore, loyalty,
+  tradeWait, noteTrade,
 } from '../../public/shared/sim.js';
 import { nobleBlock } from './vassal.js';
 import { freeSlot } from './clan.js';
@@ -306,10 +307,11 @@ async function military(db, world, bot, town, now, ctx) {
   const market = bLevel(s, 'market');
   if (market && now >= (mem.nextTrade || 0)) {
     mem.nextTrade = now + 0.5 * H;
-    const allies = (await db.prepare('SELECT t.id, t.x, t.y, t.state FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id = ? AND t.id != ?')
+    const allies = (await db.prepare('SELECT t.id, t.x, t.y, t.state, t.player_id FROM towns t JOIN players p ON p.id = t.player_id WHERE p.team_id = ? AND t.id != ?')
       .bind(bot.team_id, town.id).all()).results;
     const mine = savingFor(s) || {};
     outer: for (const a of allies) {
+      if (tradeWait(s, a.player_id, now) > 0) continue; // ook bots: één karavaan per 8 uur naar eenzelfde speler
       const as = JSON.parse(a.state);
       const need = savingFor(as);
       if (!need) continue;
@@ -319,6 +321,7 @@ async function military(db, world, bot, town, now, ctx) {
         const amount = Math.floor(Math.min(short, spare, MARKET.shipPerLevel * market, capacity(as) - as.res[r]) / 10) * 10;
         if (amount < 300) continue;
         s.res[r] -= amount;
+        noteTrade(s, a.player_id, now);
         out.marches.push({ kind: 'trade', tkind: 'town', target: { id: a.id, x: a.x, y: a.y, team: bot.team_id }, res: { [r]: amount }, dur: travelMs(world, home, a, MARKET.merchantSpeed) });
         out.log.push(`karavaan ${amount} ${r} naar stad ${a.id}`);
         mem.nextTrade = now + 2 * H;
