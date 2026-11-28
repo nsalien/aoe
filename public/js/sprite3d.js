@@ -267,6 +267,13 @@ export function getFig(kind, o, mode, f, need = 0) {
   return null;
 }
 
+// Tijdens een gebaar (knijpen, slepen) op een gsm geen nieuwe scherpe versies aanvragen: bij elke tussenstap van het
+// zoomen zouden de werkers zware beelden beginnen te renderen, en die nemen de snelle kernen in terwijl het spel net vlot
+// moet tekenen. Na het gebaar (hold weer false) vraagt het volgende beeld ze vanzelf aan.
+// (vervalt vanzelf na 400 ms als niemand het nog vraagt, bv. na een wissel naar de wereldkaart midden in een gebaar)
+let holdUntil = 0;
+export function setHold(on) { holdUntil = on ? performance.now() + 400 : 0; }
+
 // de gewone versie, en bij inzoomen een scherpere (de beste die er al is, tot de gevraagde klaar is)
 function tiered(key, job, need) {
   const s = cache.get(key);
@@ -279,7 +286,7 @@ function tiered(key, job, need) {
   const h = cache.get(hk);
   if (h) { hiKeys.delete(hk); hiKeys.add(hk); return h; }
   if (h === false) return s;
-  if (h === undefined) request(hk, job, tier, 1);
+  if (h === undefined && !(holdUntil && performance.now() < holdUntil)) request(hk, job, tier, 1);
   for (let i = HI.indexOf(tier) - 1; i >= 0; i--) { const lo = cache.get(`${key}@${HI[i]}`); if (lo) return lo; }
   return s;
 }
