@@ -71,6 +71,8 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
   Niemand verliest zijn stad (één stad per speler blijft).
 - **Afbreken**: elk gebouw behalve het stadscentrum; een kwart van de kosten terug (de helft van een lopende bouw).
   Niet als er nog getraind wordt. Werkers boven de nieuwe plaatsen worden vrij.
+- **Ontslaan**: soldaten en dorpelingen die thuis zijn; plaats in de bevolking vrij, een kwart van de kosten terug; minstens
+  5 dorpelingen blijven over (zie §7 punt 63 en 67).
 - **Vondsten**: af en toe een schaap/eik/rotsblokken/goud rond je stad; een dorpeling oogst ze (`BONUS`).
 
 **Oorlog moet lonen** (gevraagd: "aanvallen loont niet: 120 dorpelingen brengen veel meer op dan plunderen"; `WAR` in
@@ -607,6 +609,14 @@ minuut een bot aan de beurt als niemand online is.
       academie fontein en beelden, gildehuis binnenplaats met hijskraan, bouwloods muur in de steigers; monument een getrapt
       plein met zuilen, beelden en vuurschalen), per niveau meer. `VERSION` 11. 2D-terugval opgeschaald (`bScale`, `artSize`).
     - Nieuwsartikel nr. 4. Getest: `tests/sizes.test.js`, bots 14 speldagen (geen overlap), browser op pc, gsm en liggend.
+
+67. **Dorpelingen ontslaan** (gevraagd: "zorg dat je ook dorpelingen kan ontslaan om plek vrij te maken voor leger"). Het venster
+    **Ontslaan** (punt 63) toont nu soldaten én dorpelingen, per taak (zonder werk, voedsel, hout, steen, goud, vissers): `doDismiss(s,
+    units, vill)` in `sim.js`, `/dismiss` met `villagers`. Een kwart van de kosten terug, je houdt er altijd `DISMISS.minVillagers` (5)
+    over (alle dorpelingen, ook in je gebied), enkel wie thuis is. Het venster toont hoeveel je dorp per uur minder opbrengt. Knoppen:
+    **Dorpelingen ontslaan** in de kaart Dorpelingen (dorpelingen bovenaan), het kaartje Ontslaan in Mijn leger, en bij een
+    soldaat die niet meer past "Troepen of dorpelingen ontslaan om plaats te maken". Nieuwsartikel nr. 5. Getest: `tests/dismiss.test.js`
+    en in Chromium op pc, gsm en liggend.
 
 ## 8. Bekende beperkingen en ideeën
 
