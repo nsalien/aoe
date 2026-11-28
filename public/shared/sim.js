@@ -4,7 +4,7 @@
 import {
   RES, BUILDINGS, UNITS, START, TOWN_GRID, TC_POS, GATHER_RATE, TC_SLOTS, TC_POP_PER_AGE,
   TC_STORAGE_PER_AGE, BASE_PROTECT, AGE_UP, MARKET, BONUS, FIELD, WILD, COMBAT, ARMY_UNITS, CIVS, CIV_IDS, CASTLE_LEVEL, AGES,
-  LAND, landCost, WALL_TILE, GATE, DEMOLISH, DISMISS, TECHS, TECH_IDS, LOYALTY,
+  LAND, landCost, WALL_TILE, GATE, DEMOLISH, DISMISS, TECHS, TECH_IDS, LOYALTY, SIZE_V, GREW,
   levelCost, levelTime, levelAge, unitTime, costValue, unitValue, JOBS, FISH,
 } from './rules.js';
 import {
@@ -32,12 +32,15 @@ export function newTownState(t, civ = null) {
     queues: {},
     units: {},
     nextId: 3,
+    szv: SIZE_V,
   };
 }
 
 export const age = (s) => s.buildings.find((b) => b.type === 'tc').level;
-// de muur heeft geen plaats op de kaart; alle andere gebouwen wel (ook op negatieve coördinaten)
-export const isPlaced = (b) => b.type !== 'wall';
+// de muur heeft geen plaats op de kaart; alle andere gebouwen wel (ook op negatieve coördinaten), behalve een gebouw dat
+// opnieuw geplaatst moet worden omdat het groter werd (b.rp, zie growBuildings): dat werkt gewoon, maar staat even nergens
+export const isPlaced = (b) => b.type !== 'wall' && !b.rp;
+export const toPlace = (s) => s.buildings.filter((b) => b.rp);
 export const findType = (s, type) => s.buildings.filter((b) => b.type === type);
 export const bLevel = (s, type) => findType(s, type).reduce((m, b) => Math.max(m, b.level), 0);
 // dorpelingen die even een vondst gaan oogsten, tellen nog altijd mee
@@ -466,8 +469,9 @@ export function ensureTerritory(s, seed) {
     }
     for (const g of s.field) if (g.order && g.order.type === 'site') g.order = { type: 'move' };
   }
-  if (s.terr) return;
+  if (s.terr) { growBuildings(s); return; }
   s.terr = { seed, ex: '', rv: -1, cl: [], dep: {}, boar: {}, camp: { down: 0, raids: 0, loss: 0, next: null }, log: [], lid: 0 };
+  growBuildings(s);
 }
 
 // tegels die bouwgrond werden: gekapt bos en gekochte loten (zonder water en de buurt van het barbarendorp)
@@ -1624,6 +1628,42 @@ export function scaleCost(cost, n) {
 
 // ---------- plaatsing ----------
 
+// Gebouwen die groter werden (SIZE_V en GREW in rules.js). Past het grotere grondvlak nog op de oude plek, dan blijft het
+// staan; anders moet de speler het opnieuw plaatsen (b.rp): het blijft gewoon werken (trainen, productie, punten), staat even
+// niet op de kaart en plaatsen is gratis en meteen klaar (doMove). s.szm = wanneer dat gebeurde (voor de melding).
+// Bots plaatsen zelf (placeNear).
+export function growBuildings(s) {
+  if ((s.szv || 1) >= SIZE_V) return;
+  s.szv = SIZE_V;
+  const grown = s.buildings.filter((b) => GREW.has(b.type)).sort((a, c) => a.id - c.id);
+  if (!grown.length) return;
+  for (const b of grown) b.rp = 1;
+  for (const b of grown) if (canPlaceAt(s, b.type, b.x, b.y, b.id)) delete b.rp;
+  s.szm = s.t || 1;
+  if (s.bot) for (const b of grown) if (b.rp) { const p = placeNear(s, b.type, b.x, b.y); if (p) { b.x = p.x; b.y = p.y; delete b.rp; } }
+}
+
+// de dichtstbijzijnde plek (vanaf x0, y0) waar dit gebouw kan staan, of null
+export function placeNear(s, type, x0, y0, ignoreId = null) {
+  const size = BUILDINGS[type].size;
+  const k = ringForAge(age(s)) + 6;
+  const cand = [];
+  for (let y = -k; y < TOWN_GRID + k; y++) for (let x = -k; x < TOWN_GRID + k; x++) cand.push([(x - x0) ** 2 + (y - y0) ** 2 + (x + y) * 1e-6, x, y]);
+  cand.sort((a, b) => a[0] - b[0]);
+  const cl = clearedSet(s); const occ = occupied(s, ignoreId); const walls = wallSet(s);
+  for (const [, x, y] of cand) {
+    let ok = true;
+    for (let dx = 0; dx < size && ok; dx++) {
+      for (let dy = 0; dy < size && ok; dy++) {
+        const i = x + dx; const j = y + dy;
+        if (!isBuildable(s, i, j, cl) || occ.has(`${i},${j}`) || walls.has(tileIndex(i, j))) ok = false;
+      }
+    }
+    if (ok) return { x, y };
+  }
+  return null;
+}
+
 export function occupied(s, ignoreId = null) {
   const grid = new Map();
   for (const b of s.buildings) {
@@ -1683,9 +1723,9 @@ export function checkMove(s, bid, x, y) {
   const b = s.buildings.find((q) => q.id === bid);
   if (!b) return 'Gebouw niet gevonden.';
   if (b.type === 'tc') return 'Je stadscentrum blijft in het midden van je stad.';
-  if (!isPlaced(b)) return 'Muren verplaats je niet: breek ze af en zet ze opnieuw.';
+  if (b.type === 'wall') return 'Muren verplaats je niet: breek ze af en zet ze opnieuw.';
   if (!Number.isInteger(x) || !Number.isInteger(y)) return 'Ongeldige plaats.';
-  if (b.x === x && b.y === y) return 'Het gebouw staat daar al.';
+  if (!b.rp && b.x === x && b.y === y) return 'Het gebouw staat daar al.';
   if (!canPlaceAt(s, b.type, x, y, b.id)) return 'Daar kan het gebouw niet staan.';
   return null;
 }
@@ -1695,6 +1735,7 @@ export function doMove(s, bid, x, y) {
   if (err) throw new GameError(err);
   const b = s.buildings.find((q) => q.id === bid);
   b.x = x; b.y = y;
+  delete b.rp; // opnieuw geplaatst (gratis)
   return b;
 }
 
@@ -1703,6 +1744,7 @@ export function checkUpgrade(s, bid) {
   if (!b) return 'Gebouw niet gevonden.';
   const def = BUILDINGS[b.type];
   if (s.builds.some((j) => j.bid === bid)) return 'Er wordt al aan gewerkt.';
+  if (b.rp) return 'Dit gebouw werd groter: plaats het eerst opnieuw (gratis).';
   if (b.level >= def.maxLevel) return 'Maximaal niveau bereikt.';
   const to = b.level + 1;
   if (age(s) < levelAge(b.type, to)) return needAge(levelAge(b.type, to));
@@ -1960,7 +2002,7 @@ export function settleBuilds(s, t) {
 export function publicSummary(s) {
   return {
     age: age(s),
-    buildings: s.buildings.filter((b) => b.level > 0 && isPlaced(b)).length,
+    buildings: s.buildings.filter((b) => b.level > 0 && b.type !== 'wall').length,
     wall: bLevel(s, 'wall'),
     monument: bLevel(s, 'monument'),
     score: townScore(s),

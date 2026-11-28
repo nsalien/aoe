@@ -266,7 +266,7 @@ const DS = 1.25; // resolutie van de grondafbeelding
 
 export function dressKey(s, extra) {
   const parts = [];
-  for (const b of s.buildings) if (b.type !== 'wall') parts.push(`${b.type}${b.x},${b.y},${b.level}`);
+  for (const b of s.buildings) if (b.type !== 'wall' && !b.rp) parts.push(`${b.type}${b.x},${b.y},${b.level}`);
   return `${parts.join('|')}#${(s.walls || []).length}:${(s.walls || []).reduce((a, w) => (a * 31 + w) | 0, 7)}#${(s.gates || []).join(',')}#${extra}`;
 }
 
@@ -277,7 +277,7 @@ export function buildDress(o) {
   const tc = s.buildings.find((b) => b.type === 'tc');
   const age = tc ? tc.level : 1;
   const ring = ringForAge(age);
-  const placed = s.buildings.filter((b) => b.type !== 'wall');
+  const placed = s.buildings.filter((b) => b.type !== 'wall' && !b.rp);
   const occ = new Map(); // tegel -> gebouw
   for (const b of placed) {
     const size = BUILDINGS[b.type].size || 1;
