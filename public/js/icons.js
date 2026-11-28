@@ -66,6 +66,15 @@ const P = {
   back: `<path d="M14.5 5L7.5 12l7 7" fill="none" stroke="${O}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`,
   play: `<path d="M7 4.5v15l12.5-7.5z" fill="#d9a43a" ${S}/>`,
   pause: `<path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" fill="#d9a43a" ${S}/>`,
+  // beweging in de stad aan (loper met snelheidsstreepjes) en uit (zelfde loper, doorstreept)
+  motion: `<circle cx="14" cy="4.6" r="2.3" fill="#f1c9a0" ${S}/>
+    <path d="M13.2 7.8l-1.6 6 3 2.6 1.2 4.6M11.6 13.8l-2.3 3.4-3.1 1.6M12.8 9.4l3.4 2.2 2.6-.5M12.8 9.4l-3 1.3-1.5 2.7" fill="none" stroke="${O}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M13.2 7.8l-1.6 6 3 2.6 1.2 4.6M11.6 13.8l-2.3 3.4-3.1 1.6M12.8 9.4l3.4 2.2 2.6-.5M12.8 9.4l-3 1.3-1.5 2.7" fill="none" stroke="#a5814f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M2.5 8.5h4.2M1.6 12h4.4M2.8 15.5h3.4" stroke="${O}" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>`,
+  motionoff: `<circle cx="14" cy="4.6" r="2.3" fill="#f1c9a0" ${S}/>
+    <path d="M13.2 7.8l-1.6 6 3 2.6 1.2 4.6M11.6 13.8l-2.3 3.4-3.1 1.6M12.8 9.4l3.4 2.2 2.6-.5M12.8 9.4l-3 1.3-1.5 2.7" fill="none" stroke="${O}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M13.2 7.8l-1.6 6 3 2.6 1.2 4.6M11.6 13.8l-2.3 3.4-3.1 1.6M12.8 9.4l3.4 2.2 2.6-.5M12.8 9.4l-3 1.3-1.5 2.7" fill="none" stroke="#a5814f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M4.5 20.5L20 4" stroke="#fbf2dc" stroke-width="4.4" stroke-linecap="round"/><path d="M4.5 20.5L20 4" stroke="#c0392b" stroke-width="2.2" stroke-linecap="round"/>`,
   next: `<path d="M4 5v14l9-7zM12 5v14l8-7z" fill="#d9a43a" ${S}/><path d="M20.5 5v14" stroke="${O}" stroke-width="1.8" stroke-linecap="round"/>`,
   replay: `<path d="M5 12a7 7 0 1 0 2.1-5" fill="none" stroke="${O}" stroke-width="2" stroke-linecap="round"/><path d="M4 3.5v5h5z" fill="#d9a43a" ${S}/><path d="M10.5 9v6l4.8-3z" fill="#b2372a" ${S}/>`,
   menu: `<path d="M4 7h16M4 12h16M4 17h16" stroke="${O}" stroke-width="2.2" stroke-linecap="round"/>`,

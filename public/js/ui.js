@@ -572,7 +572,10 @@ function fieldCardHtml(app, live) {
   const canAct = app.canAct;
   let html = `<div class="card field-card"><h3>${icon('map')} Op pad in je gebied <span class="right">${groups.length}/${FIELD.maxGroups} groepen</span></h3>`;
   if (!groups.length) {
-    html += `<p class="small muted" style="margin:0 0 6px">Tik op een dorpeling of soldaat in je stad en daarna op de grond om hem te verplaatsen. Waar hij komt, verdwijnt de mist.
+    const calm = app.views && app.views.town && app.views.town.calm; // rustige stad: geen figuren om aan te tikken
+    html += `<p class="small muted" style="margin:0 0 6px">${calm
+      ? 'Rustige stad: dorpelingen en soldaten zijn verborgen. Stel hieronder een groep samen, of houd de kaart ingedrukt om je hele leger te kiezen, en tik dan op de grond.'
+      : 'Tik op een dorpeling of soldaat in je stad en daarna op de grond om hem te verplaatsen.'} Waar hij komt, verdwijnt de mist.
       Dorpelingen kunnen bomen kappen en bronnen ontginnen; soldaten jagen op everzwijnen en vallen barbaren aan.</p>`;
   }
   for (const g of groups) {
@@ -1804,6 +1807,11 @@ export function helpHtml(w, peaceEnd) {
     (de eerste keer vraagt je gsm om installaties uit je browser toe te staan). De app opent het spel volledig scherm;
     updates van het spel krijg je vanzelf. <b>iPhone of iPad:</b> open de site in <b>Safari</b>, tik onderaan op <b>Delen</b> en kies
     <b>Zet op beginscherm</b>. Het spel krijgt dan een eigen icoon en opent volledig scherm, net als een app.</p>
+    <h3>Loopt het spel traag?</h3>
+    <p>Tik rechts in je stad op de knop met het <b>lopende mannetje</b> (${icon('motion')}): dat is de <b>rustige stad</b>. Je ziet dan
+    geen dorpelingen of soldaten meer rondlopen, geen dieren, vlinders of eendjes, geen rook uit de schoorstenen, en wieken en vlaggen
+    staan stil. Vondsten, groepen in je gebied, gevechten en overvallen blijven gewoon. Kies je je leger (kaart ingedrukt houden), dan
+    zie je je soldaten wel. Nog eens tikken zet alles weer aan; je toestel onthoudt je keuze.</p>
     <h3>Punten</h3>
     <p>Gebouwen, onderzoek, dorpelingen en troepen geven opbouwpunten; het <b>Monument</b> levert per niveau 1500 extra punten en de <b>Kathedraal</b> 600.
     Vazallen geven je ${Math.round(VASSAL.scoreShare * 100)}% van hun punten. Verslagen vijanden en rovers geven gevechtspunten.</p></div>`;

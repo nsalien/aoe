@@ -223,6 +223,9 @@ export class TownView {
     this.birds = new FX.Birds(wb);
     this.clouds = new FX.Clouds({ x0: wb.x0 - 200, x1: wb.x1, y0: wb.y0 - 100, y1: wb.y1 - 200 }, FX.LOW_POWER ? 4 : 7);
     this.flutter = null;
+    // rustige stad (knop in het scherm, per toestel): geen dorpelingen, soldaten, dieren, vlinders, eendjes, rook,
+    // draaiende wieken of wapperende vlaggen. Vondsten, groepen in je gebied, gevechten en overvallen blijven gewoon.
+    this.calm = false;
     this.prevLevels = null;
     this.fireworks = [];
     this.emitT = 0;
@@ -1338,8 +1341,8 @@ export class TownView {
 
   drawSheep(ctx, s, t) {
     const p = toWorld(s.gx, s.gy);
-    const moving = s.tx !== null && s.wait <= 0;
-    const graze = !moving && Math.sin(t * 0.002 + s.ph) > 0.2;
+    const moving = !this.calm && s.tx !== null && s.wait <= 0;
+    const graze = !this.calm && !moving && Math.sin(t * 0.002 + s.ph) > 0.2;
     facing(ctx, p.x, s.dir || 1, () => FIG.sheep(ctx, p.x, p.y, { walking: moving, graze, phase: t * 0.012 + s.ph, black: s.black }));
   }
 
@@ -1420,7 +1423,7 @@ export class TownView {
       if (!this.gatePre) this.gatePre = new Set();
       if (!this.gatePre.has(pk)) { this.gatePre.add(pk); for (let k = 0; k <= S3.GATE_STATES; k++) S3.getGate(level, seg.ax, k); }
       const a = g3.anchors && g3.anchors.flag;
-      if (a) A.flag(ctx, w.x + a[0], w.y + a[1], 16, this.team || '#c0392b', performance.now(), 0.7);
+      if (a) A.flag(ctx, w.x + a[0], w.y + a[1], 16, this.team || '#c0392b', this.calm ? 0 : performance.now(), 0.7);
       return;
     }
     const stone = level >= 3;
@@ -1488,7 +1491,7 @@ export class TownView {
     }
     // vlag bovenop
     const top = A.P(cx, cy, hDoor + 8);
-    A.flag(ctx, top[0], top[1], 16, this.team || '#c0392b', performance.now(), 0.7);
+    A.flag(ctx, top[0], top[1], 16, this.team || '#c0392b', this.calm ? 0 : performance.now(), 0.7);
   }
 
   // vaste stukken van een poort (torens, boog) één keer tekenen en daarna als afbeelding hergebruiken
@@ -2181,7 +2184,15 @@ export class TownView {
     return best;
   }
 
+  // soldaten thuis: in een rustige stad enkel zichtbaar (en aan te tikken) als je ze gekozen hebt
+  showSoldiers() {
+    if (!this.calm || this.battleMode) return true;
+    const sl = this.sel;
+    return !!sl && ['soldier', 'soldiers', 'kind', 'army'].includes(sl.type);
+  }
+
   pickSoldier(w) {
+    if (!this.showSoldiers()) return null;
     let best = null; let bd = Infinity;
     const tol = Math.max(9, 12 / this.cam.zoom);
     for (const so of this.soldierSpots()) {
@@ -2445,6 +2456,7 @@ export class TownView {
   }
 
   pickWalker(w) {
+    if (this.calm && !this.battleMode) return null; // rustige stad: geen dorpelingen te zien
     let best = null; let bd = Infinity;
     const tol = Math.max(9, 13 / this.cam.zoom);
     for (const v of this.walkers) {
@@ -2480,11 +2492,15 @@ export class TownView {
     if (Math.floor(t / 1000) !== this.lightSecond) { this.lightSecond = Math.floor(t / 1000); this.light = FX.daylight(); }
     const light = this.light;
     const night = light.dark;
-    this.updateWalkers(dt);
-    this.updateAnimals(dt);
+    const calm = this.calm && !this.battleMode;
+    const ta = calm ? 0 : t; // tijd voor sfeerbeweging (water, bomen, vlaggen): stil in een rustige stad
+    if (!calm) {
+      this.updateWalkers(dt);
+      this.updateAnimals(dt);
+      this.birds.update(dt);
+      this.clouds.update(dt);
+    }
     this.particles.update(dt);
-    this.birds.update(dt);
-    this.clouds.update(dt);
     this.adaptQuality(dt);
     if (this.moveB && this.moveB.dragging) this.moveEdgePan(dt);
     if (!this.battleMode && (now - this.fogAt > 120 || now < this.fogAt)) this.updateFog(now);
@@ -2499,8 +2515,8 @@ export class TownView {
     const dress = this.battleMode ? null : this.townDress(segs, wallLevel, light);
     drawSub(ctx, this.groundLayer(this.light, dress), BAKE, this.groundOrigin.x, this.groundOrigin.y, gnd.W, gnd.H, vis);
     this.drawGroundHD(ctx, vis, dress);
-    this.drawPond(ctx, t);
-    this.drawLakes(ctx, t);
+    this.drawPond(ctx, ta);
+    this.drawLakes(ctx, ta);
 
     const v = this.viewRect();
     const inView = (p) => p.x > v.x0 && p.x < v.x1 && p.y > v.y0 && p.y < v.y1;
@@ -2544,8 +2560,8 @@ export class TownView {
     }
     for (const seg of segs) items.push({ depth: (seg.x0 + seg.x1) / 2 + (seg.y0 + seg.y1) / 2 + 0.2, kind: 'wall', seg });
     if (dress) for (const p of dress.props) if (inView(toWorld(p.gx, p.gy))) items.push({ depth: p.depth, kind: 'prop', p });
-    for (const w of this.walkers) if (w.wait <= 0 || w.phase === 'work' || w.job === 'idle') items.push({ depth: w.gx + w.gy, kind: 'walker', w });
-    for (const sol of this.soldierSpots()) items.push({ depth: sol.gx + sol.gy, kind: 'soldier', sol });
+    if (!calm) for (const w of this.walkers) if (w.wait <= 0 || w.phase === 'work' || w.job === 'idle') items.push({ depth: w.gx + w.gy, kind: 'walker', w });
+    if (this.showSoldiers()) for (const sol of this.soldierSpots()) items.push({ depth: sol.gx + sol.gy, kind: 'soldier', sol });
     for (const sh of this.sheep) items.push({ depth: sh.gx + sh.gy, kind: 'sheep', sh });
     if (s.terr && !this.battleMode) {
       const terr = this.terr;
@@ -2585,7 +2601,7 @@ export class TownView {
     this.drawPressMark(ctx);
     for (const it of items) {
       switch (it.kind) {
-        case 'decor': this.drawDecor(ctx, it.d, t); break;
+        case 'decor': this.drawDecor(ctx, it.d, ta); break;
         case 'prop': drawProp(ctx, it.p); break;
         case 'tree': this.drawTree(ctx, it.tr, t, it.shake); break;
         case 'stump': this.drawStump(ctx, it.st); break;
@@ -2601,11 +2617,11 @@ export class TownView {
         case 'boar': this.drawBoar(ctx, it.b, it.bp, t); break;
         case 'camp': this.drawCamp(ctx, t, now); break;
         case 'raid': this.drawRaid(ctx, it.raid, t); break;
-        case 'boat': this.drawBoat(ctx, it.bt, t); break;
+        case 'boat': this.drawBoat(ctx, it.bt, ta); break;
         case 'group': this.drawGroup(ctx, it.g, it.p, t, now, emit); break;
         case 'fighter': this.drawFighter(ctx, it.u, it.sc, t, now); break;
         case 'x': it.draw(ctx); break;
-        default: { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, t); }
+        default: { const p = toWorld(it.sol.gx, it.sol.gy); this.drawSoldier(ctx, it.sol, p.x, p.y, ta); }
       }
     }
     this.drawSelXray(ctx, t);
@@ -2614,9 +2630,11 @@ export class TownView {
     const pn = performance.now();
     this.fireworks = this.fireworks.filter((f) => { if (pn >= f.at) { this.particles.firework(f.x, f.y); return false; } return true; });
     this.particles.draw(ctx);
-    if (this.flutter && night < 0.5) this.flutter.draw(ctx, t, night);
-    this.clouds.drawShadows(ctx, 0.12 * (1 - night));
-    this.birds.draw(ctx, t, 90);
+    if (!calm) {
+      if (this.flutter && night < 0.5) this.flutter.draw(ctx, t, night);
+      this.clouds.drawShadows(ctx, 0.12 * (1 - night));
+      this.birds.draw(ctx, t, 90);
+    }
     if (!this.battleMode) this.drawFog(ctx, vis);
 
     // licht en donker
@@ -2624,7 +2642,7 @@ export class TownView {
     FX.applyLight(ctx, this.canvas.width, this.canvas.height, light);
     cam.apply(ctx);
     if (night > 0.05) this.drawNightLights(ctx, t, night, segs, wallLevel);
-    if (this.flutter && night >= 0.5) this.flutter.draw(ctx, t, night);
+    if (this.flutter && night >= 0.5 && !calm) this.flutter.draw(ctx, t, night);
 
     if (this.placing === 'harbor') this.drawShoreSpots(ctx, t);
     if (this.placing && this.hoverTile) this.drawGhost(ctx);
@@ -2729,7 +2747,7 @@ export class TownView {
 
   drawTree(ctx, tr, t, shake) {
     const p = toWorld(tr.gx, tr.gy);
-    let sway = Math.sin(t * 0.0012 + tr.gx) * 0.6;
+    let sway = this.calm ? 0 : Math.sin(t * 0.0012 + tr.gx) * 0.6;
     if (shake) sway += Math.sin(t * 0.05) * 1.6;
     // 3D-boom (zelfde stijl als de gebouwen); de schaduw zit al in de grondlaag
     const d3 = S3.getProp('tree', tr.kind ?? tr.v, this.treeNeed);
@@ -3323,8 +3341,8 @@ export class TownView {
       ctx.fillStyle = '#4f9a3c'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 5, 2.4, 0, 0.3, Math.PI * 2 - 0.1); ctx.lineTo(p.x, p.y); ctx.fill();
       if (l.f) { ctx.fillStyle = '#ffd6e6'; ctx.beginPath(); ctx.arc(p.x + 1, p.y - 1.5, 1.6, 0, Math.PI * 2); ctx.fill(); }
     }
-    // eendjes met kielzog
-    for (const d of this.ducks) {
+    // eendjes met kielzog (niet in een rustige stad)
+    for (const d of this.calm ? [] : this.ducks) {
       const gx = pd.x + Math.cos(d.a) * pd.r * d.rr; const gy = pd.y + Math.sin(d.a) * pd.r * 0.8 * d.rr;
       const p = toWorld(gx, gy);
       const ahead = toWorld(pd.x + Math.cos(d.a + 0.1 * d.dir) * pd.r * d.rr, pd.y + Math.sin(d.a + 0.1 * d.dir) * pd.r * 0.8 * d.rr);
@@ -3510,7 +3528,7 @@ export class TownView {
     const out = [];
     const sec = performance.now() / 1000;
     for (let k = 0; k < ready + (building ? 1 : 0); k++) {
-      const sail = k < crewed;
+      const sail = k < crewed && !this.calm; // rustige stad: alle bootjes aan de steiger
       if (!sail) {
         // aan de steiger, om beurten links en rechts
         const off = (k % 2 ? 1 : -1) * (0.32 + Math.floor(k / 2) * 0.22);
@@ -3692,8 +3710,10 @@ export class TownView {
     if (b.level === 0) {
       const p = job ? Math.min(1, Math.max(0, (now - job.start) / (job.end - job.start))) : 0;
       A.scaffold(ctx, c.x, c.y, size, p);
-      facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
-      if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
+      if (!this.calm) {
+        facing(ctx, c.x + 14, -1, () => A.person(ctx, c.x + 14, c.y + 6, { s: 0.9, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer', working: true, phase: t * 0.01 }));
+        if (emit) { this.particles.dust(c.x, c.y + 4, 2); if (Math.random() < 0.5) this.particles.sparks(c.x + 18, c.y - 6, 3); }
+      }
     } else {
       const s3 = S3.get(b.type, b.level, this.state.civ, b.id, this.bVariant(b), this.treeNeed);
       if (s3) A.drawSprite(ctx, s3, c.x, c.y, 1);
@@ -3709,8 +3729,8 @@ export class TownView {
         ctx.beginPath(); ctx.moveTo(c.x - w, c.y); ctx.lineTo(c.x, c.y + hh); ctx.lineTo(c.x + w, c.y); ctx.stroke();
         ctx.restore();
       }
-      if (job && emit) this.particles.dust(c.x, c.y + 6, 1);
-      if (b.type === 'smithy' && emit && Math.random() < 0.6) {
+      if (job && emit && !this.calm) this.particles.dust(c.x, c.y + 6, 1);
+      if (b.type === 'smithy' && emit && !this.calm && Math.random() < 0.6) {
         const [gx, gy] = A.P(0.36, 0.3, 6);
         this.particles.sparks(c.x + gx, c.y + gy, 3);
       }
@@ -3722,7 +3742,7 @@ export class TownView {
     const a = s3.anchors || {};
     if (a.blades) {
       // wieken van het molentje op de boerderij (draaien)
-      ctx.save(); ctx.translate(c.x + a.blades[0], c.y + a.blades[1]); ctx.rotate(t * 0.0015);
+      ctx.save(); ctx.translate(c.x + a.blades[0], c.y + a.blades[1]); ctx.rotate(this.calm ? 0.4 : t * 0.0015);
       ctx.fillStyle = '#efe6cf'; ctx.strokeStyle = '#6b4527'; ctx.lineWidth = 0.6;
       for (let i = 0; i < 4; i++) {
         ctx.rotate(Math.PI / 2);
@@ -3732,8 +3752,8 @@ export class TownView {
       ctx.fillStyle = '#4d4f54'; ctx.beginPath(); ctx.arc(0, 0, 1.4, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
-    if (a.flag) A.flag(ctx, c.x + a.flag[0], c.y + a.flag[1], b.type === 'tower' ? 14 : 17, this.team, t + b.id * 300);
-    if (a.smoke && (b.type !== 'house' || b.level >= 2 || b.id % 2 === 0)) A.smoke(ctx, c.x + a.smoke[0], c.y + a.smoke[1], t, b.id);
+    if (a.flag) A.flag(ctx, c.x + a.flag[0], c.y + a.flag[1], b.type === 'tower' ? 14 : 17, this.team, this.calm ? 0 : t + b.id * 300);
+    if (a.smoke && !this.calm && (b.type !== 'house' || b.level >= 2 || b.id % 2 === 0)) A.smoke(ctx, c.x + a.smoke[0], c.y + a.smoke[1], t, b.id);
     if (a.glow) {
       if (b.type === 'smithy' || b.type === 'tower') { // vuur van de smidse of het vuurbaken op de toren
         const fl = 0.35 + Math.sin(t * 0.02) * 0.1 + Math.sin(t * 0.047) * 0.08;
@@ -3747,6 +3767,8 @@ export class TownView {
 
   drawOverlay(ctx, b, c, t) {
     const L = b.level;
+    const calm = this.calm;
+    const ft = calm ? 0 : t; // vlaggen wapperen niet in een rustige stad
     const k = bScale(b);
     const at = (x, y, z) => { const [px, py] = A.P(x, y, z); return [c.x + px * k, c.y + py * k]; };
     switch (b.type) {
@@ -3755,19 +3777,20 @@ export class TownView {
         // de kastelen van de volkeren hebben hun eigen vlaggen; anders een vlag op het hoogste punt
         const z = st ? [0, 50, { flat: 70, crenel: 74, pagoda: 76, greek: 72, dome: 82 }[st.roof], null, null][L] : [0, 50, 78, 92, 96][L];
         const [x, y] = L === 1 ? at(0.7, 0, 46) : at(0, 0, z || 0);
-        if (L === 1 || z) A.flag(ctx, x, y, 18, this.team, t);
-        if (L === 1) A.smoke(ctx, ...at(-0.3, 0, 46), t, b.id);
+        if (L === 1 || z) A.flag(ctx, x, y, 18, this.team, ft);
+        if (L === 1 && !calm) A.smoke(ctx, ...at(-0.3, 0, 46), t, b.id);
         break;
       }
-      case 'barracks': { const h = 22 + L * 5; A.flag(ctx, ...at(0, 0, h), 16, this.team, t); break; }
-      case 'tower': { const h = 44 + L * 14 + 5 + (L >= 3 ? 16 : 0); A.flag(ctx, ...at(0, 0, h), 14, this.team, t); break; }
+      case 'barracks': { const h = 22 + L * 5; A.flag(ctx, ...at(0, 0, h), 16, this.team, ft); break; }
+      case 'tower': { const h = 44 + L * 14 + 5 + (L >= 3 ? 16 : 0); A.flag(ctx, ...at(0, 0, h), 14, this.team, ft); break; }
       case 'house':
+        if (calm) break;
         if (L === 2) A.smoke(ctx, ...at(0.17, -0.11, 37), t, b.id);
         if (L === 3) A.smoke(ctx, ...at(-0.195, -0.145, 48), t, b.id);
         break;
       case 'smithy': {
         const h = 18 + L * 2;
-        A.smoke(ctx, ...at(0.13, -0.18, h + 25), t, b.id);
+        if (!calm) A.smoke(ctx, ...at(0.13, -0.18, h + 25), t, b.id);
         const [gx, gy] = at(0.302, -0.15, 5);
         const fl = 0.35 + Math.sin(t * 0.02) * 0.1 + Math.sin(t * 0.047) * 0.08;
         ctx.fillStyle = `rgba(255,140,40,${fl})`;
@@ -3777,7 +3800,7 @@ export class TownView {
       case 'farm':
         if (L >= 3) {
           const [mx, my] = at(-0.32, -0.32, 23);
-          ctx.save(); ctx.translate(mx + 4, my); ctx.rotate(t * 0.0015);
+          ctx.save(); ctx.translate(mx + 4, my); ctx.rotate(calm ? 0.4 : t * 0.0015);
           ctx.fillStyle = '#efe6cf'; ctx.strokeStyle = '#6b4527'; ctx.lineWidth = 0.6;
           for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); ctx.fillRect(0, -1.5, 13, 3); ctx.strokeRect(0, -1.5, 13, 3); }
           ctx.restore();
