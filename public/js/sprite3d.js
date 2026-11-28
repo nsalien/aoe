@@ -22,8 +22,8 @@ let failed = false;
 let ready = 0;
 const LOW = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4 || /Android/i.test(navigator.userAgent || ''));
 // eenmaal gerenderde gebouwen bewaren in de browser (Cache Storage), zodat dat maar één keer gebeurt.
-// Verhoog VERSION als de modellen of de renderer veranderen. (10: figuren worden mét hun rand bewaard)
-const VERSION = 10;
+// Verhoog VERSION als de modellen of de renderer veranderen. (10: figuren worden mét hun rand bewaard; 11: grotere gebouwen)
+const VERSION = 11;
 const STORE = 'rvs-3d-v' + VERSION;
 const hasStore = typeof caches !== 'undefined' && typeof window !== 'undefined' && window.isSecureContext;
 const urlOf = (key) => `/__3d/${VERSION}/${SCALE}/${encodeURIComponent(key)}`;
