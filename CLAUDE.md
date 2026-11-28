@@ -69,6 +69,11 @@ Daarom:
   Bots plaatsen zelf (`placeNear`). Browser: venster `grewHtml`, knop `#rpPill`, `placeNext` in `main.js`.
   3D: `BIG` in `models3d.js` = het gebouw via `xf` (schaal en verschuiving) op een erf (`barracksYard`, …, `monumentYard`).
   De 2D-tekeningen zijn voor de oude grootte (`artSize` in `art.js`): `bScale` in `town.js` schaalt ze op.
+- **Karavanen** (`/march` met `kind: 'trade'`, enkel naar bondgenoten/heer/vazal, max. `MARKET.shipPerLevel` × marktniveau):
+  naar eenzelfde **speler** hooguit één per `MARKET.tradeGapMs` (8 uur echte tijd). Bijgehouden in de stad van de verzender:
+  `s.tradeAt = { spelerId: vertrektijd }` (`tradeWait`/`noteTrade` in `sim.js`; `noteTrade` ruimt verlopen tijdstippen op), want
+  een rij in `marches` verdwijnt bij aankomst. Bots volgen dezelfde regel (stap 3 in `military`); schatting (`tribute`) telt niet.
+  Browser: `sendHtml` toont de wachttijd (en geen invulvelden), `tradeNoteHtml` op de wereldkaart, `fillAllyList` in de markt.
 - **Havenhuis en vissers** (`harbor` in `BUILDINGS`, `FISH`/`JOBS` in `rules.js`): vanaf tijdperk 2, `shore: true` = enkel op
   vrij land naast water (`shoreTile`: geen bos, niet gereserveerd, tot `FISH.reach` ringen voorbij je bouwgrond; `canPlaceAt`
   gebruikt dat i.p.v. `isBuildable`; `shoreSpots` = alle plekken, `shoreSide` = waar het water ligt = variant van het 3D-model).

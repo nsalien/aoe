@@ -74,6 +74,8 @@ Alle getallen staan in `public/shared/rules.js`; dit is een samenvatting.
 - **Ontslaan**: soldaten en dorpelingen die thuis zijn; plaats in de bevolking vrij, een kwart van de kosten terug; minstens
   5 dorpelingen blijven over (zie §7 punt 63 en 67).
 - **Vondsten**: af en toe een schaap/eik/rotsblokken/goud rond je stad; een dorpeling oogst ze (`BONUS`).
+- **Karavanen** (markt, naar bondgenoten): max. 1000 per marktniveau, en naar eenzelfde speler **één karavaan per 8 uur**
+  (echte tijd, ook voor bots; zie §7 punt 69).
 
 **Oorlog moet lonen** (gevraagd: "aanvallen loont niet: 120 dorpelingen brengen veel meer op dan plunderen"; `WAR` in
 `rules.js`): troepen dragen meer naarmate het tijdperk van de aanvaller stijgt (`carryMult`: ×2 Vuursteen … ×4 Kroon), wie
@@ -625,6 +627,13 @@ minuut een bot aan de beurt als niemand online is.
     vonken, stof en de bouwvakker. Blijven: vondsten, groepen in je gebied, gevechten, kamp en overvallen; je soldaten zie je als je
     je leger kiest (lang indrukken). Gemeten (kleine stad, 14 dorpelingen, 20 soldaten): JS-tijd per beeld pc 1,3 → 0,9 ms, gsm
     1,1 → 0,5 ms; in een grote stad meer. Nieuwsartikel nr. 6, uitleg in de hulp ('Loopt het spel traag?'). Getest op pc, gsm en liggend.
+
+69. **Karavanen: één per 8 uur naar dezelfde speler** (gevraagd: "stel een limiet in dat een speler maar 1 karavaan naar eenzelfde
+    speler kan sturen om de 8 uur"). `MARKET.tradeGapMs`; per ontvanger (speler-id) in `s.tradeAt` van de verzender, want marsen
+    worden bij aankomst gewist. Server weigert met klokuur van de volgende; een geweigerde karavaan kost niets. Het venster
+    Grondstoffen sturen, de wereldkaart en de markt tonen wanneer het weer kan. Bots volgen de regel: in een proef van 2 dagen
+    stuurde een gulle bot 24 karavanen (om de 2 u) zonder limiet en 6 (om de 8,00 u) met. Echte tijd, zoals `CLAN.switchMs`.
+    Nieuwsartikel nr. 7. Getest: `tests/trade.test.js` (echte routes, nepklok) en in Chromium op pc en gsm.
 
 ## 8. Bekende beperkingen en ideeën
 
