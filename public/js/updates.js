@@ -13,6 +13,32 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 7,
+    at: '2026-11-28T19:00:00+01:00',
+    tag: 'Regels',
+    icon: 'cart',
+    title: 'Karavanen: één per 8 uur naar dezelfde speler',
+    intro: 'Clanleden steunen elkaar met karavanen vol grondstoffen, en dat blijft zo. Maar één speler onbeperkt volstoppen met '
+      + 'de voorraad van zijn bondgenoten maakte het spel scheef. Daarom kan je nu naar eenzelfde speler maar <b>één karavaan per 8 uur</b> sturen.',
+    body: [
+      {
+        h: 'Wat verandert er?', icon: 'clock',
+        ul: [
+          'Na een karavaan naar een speler moet je 8 uur wachten voor je diezelfde speler opnieuw grondstoffen kan sturen.',
+          'Naar een ander clanlid mag wel meteen: de wachttijd geldt per ontvanger.',
+          'Een karavaan kan nog altijd zoveel dragen als je markt toelaat (1.000 per niveau). Kies dus goed wat je meegeeft.',
+          'De schatting van een vazal aan zijn heer telt niet mee.',
+          'De computerspelers volgen dezelfde regel.',
+        ],
+      },
+      {
+        h: 'Waar zie je het?', icon: 'cart',
+        p: 'Bij <b>Grondstoffen sturen</b> staat wanneer de volgende karavaan naar die speler kan (klokuur en hoe lang nog). Je ziet het '
+          + 'ook op de wereldkaart bij de stad van je bondgenoot en in je markt, onder <b>Karavaan naar bondgenoot</b>.',
+      },
+    ],
+  },
+  {
     id: 6,
     at: '2026-11-28T17:00:00+01:00',
     tag: 'Snelheid',
