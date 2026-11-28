@@ -1,7 +1,7 @@
 // Isometrische wereldkaart met terrein, steden, roverskampen en legers onderweg.
 import * as A from './art.js';
 import * as FX from './fx.js';
-import { Camera, isoFns, hashInt } from './iso.js';
+import { Camera, isoFns, hashInt, lastInput } from './iso.js';
 import { generateTerrain } from '../shared/worldgen.js';
 import { bakeWorldGen, WTW, WTH } from './worldmap.js';
 
@@ -98,6 +98,8 @@ export class WorldView {
     const idle = (f) => setTimeout(f, 16);
     const step = () => {
       if (this.job !== job) return; // vervangen of al afgemaakt
+      // de speler schuift of zoomt (in de stad): even wachten, dan blijft dat vlot
+      if (performance.now() - lastInput() < 800) { setTimeout(step, 250); return; }
       const t0 = performance.now();
       while (performance.now() - t0 < 6) {
         const r = job.gen.next();
