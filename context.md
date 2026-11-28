@@ -618,6 +618,14 @@ minuut een bot aan de beurt als niemand online is.
     soldaat die niet meer past "Troepen of dorpelingen ontslaan om plaats te maken". Nieuwsartikel nr. 5. Getest: `tests/dismiss.test.js`
     en in Chromium op pc, gsm en liggend.
 
+68. **Rustige stad** (gevraagd: "een knop om beweging in je stad uit te zetten om het spel soepeler te laten werken: geen
+    dorpelingen die rondlopen, geen troepen, molens bewegen niet, geen vlinders, eendjes, rook of wapperende vlaggen; wel de random
+    events houden; je moet het weer kunnen uitzetten"). Knop met een lopend mannetje rechts in de stad (onder dag/nacht), doorstreept
+    als het aan staat; per toestel onthouden. Ook stil: schapen, vogels, wolkenschaduwen, water, bomen, bootjes (aan de steiger),
+    vonken, stof en de bouwvakker. Blijven: vondsten, groepen in je gebied, gevechten, kamp en overvallen; je soldaten zie je als je
+    je leger kiest (lang indrukken). Gemeten (kleine stad, 14 dorpelingen, 20 soldaten): JS-tijd per beeld pc 1,3 → 0,9 ms, gsm
+    1,1 → 0,5 ms; in een grote stad meer. Nieuwsartikel nr. 6, uitleg in de hulp ('Loopt het spel traag?'). Getest op pc, gsm en liggend.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Belegering (uithongeren, uitval in open veld): zie `docs/idee-belegering.md` (voorstel, nog niet gebouwd).
