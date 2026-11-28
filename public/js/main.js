@@ -7,7 +7,7 @@ import * as UI from './ui.js';
 import * as FX from './fx.js';
 import { setHTML, resetHTML } from './dom.js';
 import { BattleView, askHtml, raidReplay } from './battleview.js';
-import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots, toPlace } from '../shared/sim.js';
+import { advance, groupPos, isVillagerGroup, tcDoor, doFieldSend, doFieldOrder, doFieldSplit, doMove, doMoveWalls, wallRun, gateList, raidNow, slots as townSlots, toPlace, tradeWait } from '../shared/sim.js';
 import { RES, RES_NAMES, BUILDINGS, BONUS, UNITS, fmtDuration, JOBS } from '../shared/rules.js';
 
 const $ = (s) => document.querySelector(s);
@@ -1025,7 +1025,11 @@ async function fillAllyList() {
   const cur = $('#allyList');
   if (!cur) return;
   cur.innerHTML = allies.length
-    ? allies.map((m) => `<div class="row"><span class="grow">${UI.esc(m.player)} — ${UI.esc(m.town)}</span><button class="btn small" data-action="sendTo" data-kind="trade" data-id="${m.townId}">Karavaan</button></div>`).join('')
+    ? allies.map((m) => {
+      // naar eenzelfde speler hooguit één karavaan per 8 uur
+      const wait = app.live ? tradeWait(app.live, m.playerId, app.now()) : 0;
+      return `<div class="row"><span class="grow">${UI.esc(m.player)} — ${UI.esc(m.town)}${wait > 0 ? `<br><span class="muted">volgende karavaan over ${fmtDuration(wait)}</span>` : ''}</span><button class="btn small" data-action="sendTo" data-kind="trade" data-id="${m.townId}">Karavaan</button></div>`;
+    }).join('')
     : 'Je hebt (nog) geen bondgenoot.';
   cur._filled = true;
 }
@@ -1271,7 +1275,7 @@ const sendCtx = { target: null, kind: null };
 
 function townTarget(id) {
   const t = app.map && app.map.towns.find((x) => x.id === id);
-  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y, peaceEnd: t.peaceEnd };
+  return t && { kind: 'town', id: t.id, name: t.name, x: t.x, y: t.y, peaceEnd: t.peaceEnd, playerId: t.playerId, player: t.player };
 }
 
 function openSend(target, kind) {
@@ -1801,7 +1805,7 @@ const actions = {
     const o = sel.obj;
     const target = sel.kind === 'camp'
       ? { kind: 'camp', id: o.id, name: `Roverskamp (niveau ${o.level})`, x: o.x, y: o.y }
-      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd, player: o.player, betray: el.dataset.betray === '1' };
+      : { kind: 'town', id: o.id, name: o.name, x: o.x, y: o.y, peaceEnd: o.peaceEnd, player: o.player, playerId: o.playerId, betray: el.dataset.betray === '1' };
     openSend(target, el.dataset.kind);
   },
   async sendTo(el) {

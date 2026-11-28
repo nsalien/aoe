@@ -1922,6 +1922,20 @@ export function doAssign(s, alloc, rally) {
   if (rally && (rally === 'auto' || JOBS.includes(rally))) s.rally = rally;
 }
 
+// Karavanen: naar eenzelfde speler hooguit één per MARKET.tradeGapMs. s.tradeAt = { spelerId: vertrek van de laatste karavaan }.
+// Geeft hoeveel ms je nog moet wachten (0 = het mag).
+export function tradeWait(s, pid, now) {
+  const at = s.tradeAt && s.tradeAt[pid];
+  return at ? Math.max(0, at + MARKET.tradeGapMs - now) : 0;
+}
+// een karavaan naar speler pid vertrekt nu (oude tijdstippen gaan weg, dan blijft de stad klein)
+export function noteTrade(s, pid, now) {
+  const next = {};
+  for (const [k, at] of Object.entries(s.tradeAt || {})) if (at + MARKET.tradeGapMs > now) next[k] = at;
+  next[pid] = now;
+  s.tradeAt = next;
+}
+
 export function marketRate(s) {
   const L = bLevel(s, 'market');
   return L ? MARKET.rate + MARKET.ratePerLevel * (L - 1) : 0;

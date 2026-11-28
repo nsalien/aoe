@@ -17,11 +17,12 @@ import {
   newTownState, advance, doBuild, doUpgrade, doTrain, doAssign, doTrade, doHarvest, bLevel, publicSummary, doResearch,
   townScore, totalVillagers, unitsPop, ensureTerritory, settleBuilds, doFieldSend, doFieldOrder, doFieldSplit,
   doBuyLot, doPlaceWalls, doRemoveWalls, doPlaceGate, doDemolish, doMove, doMoveWalls, doBoat, doDismiss, VILL_JOBS,
+  tradeWait, noteTrade,
 } from '../../public/shared/sim.js';
 import { slowestSpeed, countUnits } from '../../public/shared/battle.js';
 import { generateTerrain, generateCamps, teamRegion, findSpot } from '../../public/shared/worldgen.js';
 import {
-  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA, JOBS, CLAN,
+  RES, UNITS, ARMY_UNITS, MARKET, CIVS, CIV_IDS, TEAM_NAMES, TEAM_COLORS, MAX_TEAMS, WORLD_SIZE, CAMP_EXTRA, JOBS, CLAN, fmtDuration,
 } from '../../public/shared/rules.js';
 
 const routes = [];
@@ -560,7 +561,7 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
     if (kind !== 'attack' && kind !== 'scout') throw new GameError('Rovers kan je enkel aanvallen of verkennen.');
     target = await db.prepare('SELECT id, x, y FROM camps WHERE id = ?').bind(int(body.targetId)).first();
   } else {
-    target = await db.prepare('SELECT t.id, t.x, t.y, t.player_id, p.team_id, p.created_at FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
+    target = await db.prepare('SELECT t.id, t.x, t.y, t.player_id, p.team_id, p.created_at, p.name AS pname FROM towns t JOIN players p ON p.id = t.player_id WHERE t.id = ?')
       .bind(int(body.targetId)).first();
     if (target) targetTeam = target.team_id;
   }
@@ -603,7 +604,11 @@ route('POST', '/march', { auth: true, active: true }, async (ctx) => {
       const total = Object.values(res).reduce((a, b) => a + b, 0);
       if (total > MARKET.shipPerLevel * L) throw new GameError(`Je markt kan maximaal ${MARKET.shipPerLevel * L} per karavaan sturen.`);
       for (const r of Object.keys(res)) if (s.res[r] < res[r]) throw new GameError('Niet genoeg grondstoffen.');
+      // naar eenzelfde speler hooguit één karavaan per 8 uur
+      const wait = tradeWait(s, target.player_id, now);
+      if (wait > 0) throw new GameError(`Je stuurde ${target.pname || 'deze speler'} al een karavaan. Naar dezelfde speler kan maar één karavaan per ${MARKET.tradeGapMs / 3600000} uur: de volgende kan over ${fmtDuration(wait)}.`);
       for (const r of Object.keys(res)) s.res[r] -= res[r];
+      noteTrade(s, target.player_id, now);
     } else {
       for (const k of Object.keys(units)) if ((s.units[k] || 0) < units[k]) throw new GameError(`Niet genoeg ${UNITS[k].name.toLowerCase()}s thuis.`);
       for (const k of Object.keys(units)) {
