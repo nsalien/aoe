@@ -13,6 +13,40 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 6,
+    at: '2026-11-28T17:00:00+01:00',
+    tag: 'Snelheid',
+    icon: 'motionoff',
+    title: 'Rustige stad: één knop voor een soepeler spel',
+    intro: 'Loopt het spel wat stroef op je gsm of oudere computer? Met de nieuwe knop <b>rustige stad</b> zet je alle beweging in je '
+      + 'stad stil die niets met het spel zelf te maken heeft. Er hoeft dan veel minder getekend te worden.',
+    body: [
+      {
+        h: 'Waar vind je het?', icon: 'motion',
+        p: 'In je stad, rechts in de rij knoppen onder dag en nacht: de knop met het <b>lopende mannetje</b>. Tik erop en het mannetje '
+          + 'wordt doorstreept. Nog eens tikken zet alles weer aan. Je toestel onthoudt je keuze, ook na het herladen.',
+      },
+      {
+        h: 'Wat staat er dan stil?', icon: 'pause',
+        ul: [
+          'Geen dorpelingen die heen en weer lopen, en geen soldaten bij je kazerne.',
+          'Geen schapen die rondlopen, geen vlinders, vuurvliegjes, eendjes of vogels.',
+          'Geen rook uit de schoorstenen; de wieken van de molentjes en alle vlaggen staan stil.',
+          'Het water, de bomen en de vissersbootjes (aan de steiger) bewegen niet meer.',
+        ],
+      },
+      {
+        h: 'Wat blijft er gewoon?', icon: 'star',
+        ul: [
+          'Vondsten rond je stad en de dorpeling die ze gaat halen.',
+          'Groepen in je gebied, gevechten, het barbarenkamp en overvallen.',
+          'Kies je je leger (kaart ingedrukt houden), dan zie je je soldaten wel, zodat je weet wie je stuurt.',
+          'Groepen stel je ook samen in het stadsoverzicht, bij <b>Op pad in je gebied</b>.',
+        ],
+      },
+    ],
+  },
+  {
     id: 5,
     at: '2026-11-28T15:00:00+01:00',
     tag: 'Leger',
