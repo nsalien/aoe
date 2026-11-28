@@ -286,7 +286,9 @@ function startGame(data) {
       clearTimeout(celebrateTimer);
       celebrateTimer = setTimeout(flushCelebrate, 250);
     };
+    town.calm = !!store.get('rvs-calm');
     renderLightBtn();
+    renderCalmBtn();
     world.onSelect = () => { renderPanel(); openPanelMobile(!!world.selected); };
     app.views = { town, world };
   }
@@ -1036,6 +1038,17 @@ function renderLightBtn() {
   b.title = { auto: 'Dag en nacht volgen je klok', day: 'Altijd dag', night: 'Altijd nacht' }[m];
 }
 
+// rustige stad: geen sfeerbeweging (dorpelingen, soldaten, dieren, rook, vlaggen...), onthouden per toestel
+function renderCalmBtn() {
+  const b = $('#calmBtn');
+  if (!b) return;
+  const on = !!(town && town.calm);
+  b.innerHTML = UI.icon(on ? 'motionoff' : 'motion');
+  b.classList.toggle('on', on);
+  b.title = on ? 'Rustige stad: beweging staat uit (tik om weer aan te zetten)' : 'Beweging in de stad uitzetten (het spel loopt soepeler)';
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
 // is het zijpaneel een schuifpaneel? (gsm rechtop of liggend; zie de CSS)
 const sheetPanel = () => window.innerWidth <= 900 || matchMedia('(orientation: landscape) and (max-height: 540px)').matches;
 
@@ -1238,6 +1251,8 @@ function switchView(v) {
   for (const b of document.querySelectorAll('.navbtn[data-view]')) b.classList.toggle('active', b.dataset.view === v);
   $('#townCanvas').hidden = v !== 'town';
   $('#worldCanvas').hidden = v !== 'world';
+  const calmBtn = $('#calmBtn');
+  if (calmBtn) calmBtn.hidden = v !== 'town'; // enkel voor de stad
   if (v === 'world') {
     cancelPlace();
     // de eerste keer: op je eigen stad (ook als de kaart al op de achtergrond geladen werd)
@@ -1566,6 +1581,17 @@ const actions = {
     if (!confirm('Wil je afmelden?')) return;
     await post('/logout').catch(() => {});
     location.reload();
+  },
+  calmMode() {
+    if (!town) return;
+    town.calm = !town.calm;
+    store.set('rvs-calm', town.calm);
+    // wie je net koos (een dorpeling of één soldaat) is niet meer te zien: loslaten
+    if (town.calm && town.sel && ['walker', 'villagers', 'soldier'].includes(town.sel.type)) town.setSel(null);
+    renderCalmBtn();
+    renderPanel(true);
+    toast(town.calm ? 'Rustige stad: geen dorpelingen, troepen, dieren, rook of wapperende vlaggen meer. Vondsten en gevechten blijven.'
+      : 'Beweging in de stad staat weer aan', 'ok', town.calm ? 'motionoff' : 'motion');
   },
   lightMode() {
     const order = ['auto', 'day', 'night'];

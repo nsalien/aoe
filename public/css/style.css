@@ -605,6 +605,7 @@ body.in-battle .chat-pill { display: none; }
 .bcard img { filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.25)); }
 .hudbtn { background: var(--noise), linear-gradient(#fbf2dc, #e6d0a2); transition: transform 0.12s; }
 .hudbtn:hover { transform: scale(1.06); }
+.hudbtn.on { background: var(--noise), linear-gradient(#f6e3ae, #d9b867); box-shadow: var(--shadow), inset 0 0 0 2px var(--gold); }
 
 /* vensters en meldingen */
 .modal { backdrop-filter: blur(3px); animation: fadein 0.18s ease-out; }
