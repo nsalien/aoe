@@ -5,8 +5,9 @@ import * as FIG from './figures.js';
 import { TownView } from './town.js';
 import { isoFns } from './iso.js';
 import { UNITS } from '../shared/rules.js';
+import { soldierOpts, lookOf } from './troops.js';
 import { tileOf } from '../shared/territory.js';
-import { FB, nav, inZone, cellOf, isRangedK, mobile } from '../shared/fieldbattle.js';
+import { FB, nav, inZone, cellOf, isRangedK, mobile, role, aliveN } from '../shared/fieldbattle.js';
 
 const { toWorld, toGrid } = isoFns(A.TW, A.TH);
 const TAU = Math.PI * 2;
@@ -193,25 +194,32 @@ export class SiegeView extends TownView {
       ctx.beginPath(); ctx.ellipse(P.x, P.y, rx + 4, ry + 2, 0, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, st.cap / FB.capMs)); ctx.stroke();
     }
     ctx.restore();
-    // looplijnen van de gekozen troepen
-    if (bv.sel.size) {
-      ctx.save(); ctx.setLineDash([4, 5]); ctx.lineWidth = 1.3; ctx.strokeStyle = 'rgba(255,240,180,0.55)';
-      const goals = new Map();
+    // gekozen regimenten op weg: hun route, de plaatsen waar ze komen te staan en hun richting (zoals in Rome: Total War)
+    if (bv.sel.size && st.regs) {
+      ctx.save();
       for (const id of bv.sel) {
-        const u = bv.unit(id);
-        if (!u || u.hp <= 0 || !u.path || !u.path.length) continue;
-        const p = bv.pos(u); const a = toWorld(p.x, p.y);
+        const r = st.regs[id - 1];
+        if (!r || r.st !== 'move' || r.gx == null) continue;
+        const list = st.units.filter((u) => u.sq === id && u.hp > 0);
+        if (!list.length) continue;
+        ctx.setLineDash([4, 5]); ctx.lineWidth = 1.3; ctx.strokeStyle = 'rgba(255,240,180,0.55)';
+        const a = toWorld(r.x, r.y);
         ctx.beginPath(); ctx.moveTo(a.x, a.y);
-        for (const q of u.path) { const b = toWorld(q[0], q[1]); ctx.lineTo(b.x, b.y); }
-        ctx.stroke();
-        const end = u.path[u.path.length - 1];
-        goals.set(`${Math.round(end[0] * 2)},${Math.round(end[1] * 2)}`, end);
+        for (const q of r.path || []) { const b = toWorld(q[0], q[1]); ctx.lineTo(b.x, b.y); }
+        ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(150,240,120,0.42)'; ctx.strokeStyle = 'rgba(40,90,20,0.5)'; ctx.lineWidth = 0.8;
+        for (const u of list) { const h = toWorld(u.hx, u.hy); ctx.beginPath(); ctx.ellipse(h.x, h.y, 4.5, 2.2, 0, 0, TAU); ctx.fill(); ctx.stroke(); }
+        this.arrow(ctx, r.gx, r.gy, r.fx, r.fy, 1.6, 'rgba(150,240,120,0.85)');
       }
-      ctx.setLineDash([]);
-      for (const g of goals.values()) {
-        const b = toWorld(g[0], g[1]);
-        ctx.fillStyle = 'rgba(150,240,120,0.5)'; ctx.beginPath(); ctx.ellipse(b.x, b.y, 4, 2, 0, 0, TAU); ctx.fill();
-      }
+      ctx.restore();
+    }
+    // de lijn die je nu trekt: waar de formatie komt en waar ze naartoe kijkt
+    const dg = bv.drag;
+    if (dg) {
+      const a = toWorld(dg.ax, dg.ay); const b = toWorld(dg.bx, dg.by);
+      ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,225,110,0.9)'; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      this.arrow(ctx, (dg.ax + dg.bx) / 2, (dg.ay + dg.by) / 2, dg.fx, dg.fy, 2, 'rgba(255,225,110,0.95)');
       ctx.restore();
     }
     // waar je net een bevel gaf
@@ -222,6 +230,15 @@ export class SiegeView extends TownView {
       ctx.strokeStyle = m.attack ? `rgba(230,60,40,${1 - f})` : m.warn ? `rgba(255,170,40,${1 - f})` : `rgba(150,240,120,${1 - f})`;
       ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(p.x, p.y, 8 + f * 18, 4 + f * 9, 0, 0, TAU); ctx.stroke();
     }
+  }
+
+  // een pijl op de grond vanaf tegel (x, y) in richting (fx, fy)
+  arrow(ctx, x, y, fx, fy, len, color) {
+    const a = toWorld(x, y); const b = toWorld(x + fx * len, y + fy * len);
+    const dx = b.x - a.x; const dy = b.y - a.y; const d = Math.hypot(dx, dy) || 1; const ux = dx / d; const uy = dy / d;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x - ux * 6, b.y - uy * 6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - ux * 10 - uy * 6, b.y - uy * 10 + ux * 6); ctx.lineTo(b.x - ux * 10 + uy * 6, b.y - uy * 10 - ux * 6); ctx.closePath(); ctx.fill();
   }
 
   // ---------- de troepen tussen de gebouwen ----------
@@ -282,9 +299,11 @@ export class SiegeView extends TownView {
     const moving = u.hp > 0 && lw && Math.abs(lw.x - w.x) + Math.abs(lw.y - w.y) > 0.12;
     let dir = this.dirs.get(u.id) || (u.s ? -1 : 1);
     const tg = u.tg != null ? bv.unit(u.tg) : null;
+    const reg = u.sq && bv.state.regs ? bv.state.regs[u.sq - 1] : null;
     if (moving && Math.abs(lw.x - w.x) > 0.06) dir = w.x > lw.x ? 1 : -1;
     else if (tg) dir = toWorld(tg.x, tg.y).x >= w.x ? 1 : -1;
-    else if (u.tw >= 0 && bv.state.walls[u.tw]) dir = toWorld(bv.state.walls[u.tw].i + 0.5, bv.state.walls[u.tw].j + 0.5).x >= w.x ? 1 : -1;
+    else if (reg && reg.st === 'wall' && bv.state.walls[reg.tw]) dir = toWorld(bv.state.walls[reg.tw].i + 0.5, bv.state.walls[reg.tw].j + 0.5).x >= w.x ? 1 : -1;
+    else if (reg && Math.abs(reg.fx - reg.fy) > 0.15) dir = reg.fx - reg.fy > 0 ? 1 : -1;
     this.dirs.set(u.id, dir);
     if (u.hp <= 0) {
       const a = Math.min(1, (bt - u.died) / 6000);
@@ -299,12 +318,20 @@ export class SiegeView extends TownView {
     ctx.fillStyle = color; ctx.globalAlpha = 0.38;
     ctx.beginPath(); ctx.ellipse(x, y + 0.5, cav ? 10 : 7, cav ? 4.6 : 3.4, 0, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
-    if (bv.sel.has(u.id)) { ctx.strokeStyle = 'rgba(255,228,90,0.95)'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.ellipse(x, y + 0.5, cav ? 12 : 9, cav ? 5.6 : 4.4, 0, 0, TAU); ctx.stroke(); }
+    if (bv.sel.has(u.sq)) { ctx.strokeStyle = 'rgba(255,228,90,0.95)'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.ellipse(x, y + 0.5, cav ? 12 : 9, cav ? 5.6 : 4.4, 0, 0, TAU); ctx.stroke(); }
     if (bv.hoverU === u || bv.targets.has(u.id)) { ctx.strokeStyle = 'rgba(235,60,40,0.95)'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.ellipse(x, y + 0.5, 11, 5, 0, 0, TAU); ctx.stroke(); }
     const age = bt - (u.at ?? -1e9);
     const swing = u.at >= 0 && age >= 0 && age < 340 && !isRangedK(u.k) ? Math.sin((age / 340) * Math.PI) : 0;
     const lx = swing ? dir * swing * 3 : 0;
-    this.figure(ctx, u, x + lx, y, t, moving || swing > 0, dir, color);
+    // aanvalsbeweging: fase in de cyclus tussen twee slagen (0 = de slag of het schot); wacht hij nog, dan in de aanslag
+    let atk = null;
+    if (!moving && FIG.hasAttackAnim(u.k)) {
+      const tk = bv.state.tk && bv.state.tk[u.s];
+      const R = ((UNITS[u.k] && UNITS[u.k].rate) || 1500) * (isRangedK(u.k) && tk && tk.volley ? 0.85 : 1);
+      if (u.at != null && u.at >= 0 && age >= 0 && age < R) atk = age / R;
+      else if (u.tg != null || (reg && reg.eng)) atk = FIG.attackReady(u.k);
+    }
+    this.figure(ctx, u, x + lx, y, t, moving || (swing > 0 && atk == null), dir, color, atk);
     // levens en aantal
     const max = u.hp0 * (u.n || 1);
     const tall = u.k === 'elephant' ? 54 : cav ? 40 : u.k === 'ram' || u.k === 'stonethrower' ? 28 : 32;
@@ -317,23 +344,38 @@ export class SiegeView extends TownView {
     }
   }
 
-  figure(ctx, u, x, y, t, moving, dir, team) {
+  // uitzicht van de troepen van een kant: smidse (st.ma / st.md) en onderzoek (st.tk)
+  sideLook(side) {
+    const st = this.bv.state;
+    if (!this._looks || this._looksOf !== st.t0) {
+      this._looksOf = st.t0;
+      const sm = (m) => Math.round(((m || 1) - 1) / 0.05);
+      this._looks = [lookOf(sm(st.ma), st.tk && st.tk[0]), lookOf(sm(st.md), st.tk && st.tk[1])];
+    }
+    return this._looks[side];
+  }
+
+  figure(ctx, u, x, y, t, moving, dir, team, atk = null) {
     const k = u.k;
-    const o = { s: 1.05, team, phase: t * 0.012 + u.id, walking: moving };
+    const o = { s: 1.05, team, phase: t * 0.012 + u.id, walking: moving, attack: atk };
     const flip = dir < 0;
     if (flip) { ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0); }
     if (k === 'stonethrower') A.stoneThrower(ctx, x, y, 0.8, t);
     else if (k === 'barbarian') A.person(ctx, x, y, { ...o, body: u.id % 2 ? '#4f3a2a' : '#5b4636', weapon: u.id % 3 === 2 ? 'spear' : 'sword', barb: true, skin: 1 + (u.id % 3), team: null });
     else if (k === 'villager') A.person(ctx, x, y, { ...o, s: 0.95, body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'axe' });
     else if (!FIG.uniqueUnit(ctx, k, x, y, o)) {
-      switch (k) {
-        case 'spear': A.person(ctx, x, y, { ...o, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' }); break;
-        case 'sword': A.person(ctx, x, y, { ...o, body: '#5b6b85', helmet: '#aab1bb', armor: true, weapon: 'sword' }); break;
-        case 'archer': A.person(ctx, x, y, { ...o, body: '#4f7a3a', hat: '#3f5a2a', weapon: 'bow' }); break;
-        case 'scout': A.horseman(ctx, x, y, { s: 0.8, team, body: '#8a6a43', horse: '#a0703c', hat: '#6b4a2b', walking: moving, phase: o.phase }); break;
-        case 'rider': A.horseman(ctx, x, y, { s: 0.85, team, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear', horse: '#7b4f2c', walking: moving, phase: o.phase }); break;
-        case 'knight': A.horseman(ctx, x, y, { s: 0.9, team, body: '#9aa1ab', helmet: '#c9ced6', armor: true, weapon: 'spear', horse: '#3d3530', walking: moving, phase: o.phase }); break;
-        case 'ram': A.ram(ctx, x, y, 0.9); break;
+      const look = soldierOpts(k, this.sideLook(u.s));
+      if (look && look.fig === 'h') A.horseman(ctx, x, y, { ...look, team, walking: moving, phase: o.phase, attack: atk });
+      else if (look) A.person(ctx, x, y, { ...o, ...look });
+      else switch (k) {
+        case 'ram': {
+          if (A.ram(ctx, x, y, 1.35, { team, walking: moving, phase: o.phase, attack: atk })) break; // 3D: vaandel in teamkleur zit erop
+          // vlaggetje in de kleur van zijn kant op het dak
+          const fx = x - 1.35; const fy = y - 19 * 1.35;
+          ctx.strokeStyle = '#3e2a18'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 9); ctx.stroke();
+          ctx.fillStyle = team; ctx.beginPath(); ctx.moveTo(fx, fy - 9); ctx.lineTo(fx + 7, fy - 7); ctx.lineTo(fx, fy - 5); ctx.closePath(); ctx.fill();
+          break;
+        }
         default: A.person(ctx, x, y, o);
       }
     }
@@ -358,13 +400,9 @@ export class SiegeView extends TownView {
           const arc = Math.min(50, Math.hypot(b.x - a.x, by - ay) * 0.25);
           const x = a.x + (b.x - a.x) * f; const y = ay + (by - ay) * f - Math.sin(f * Math.PI) * arc;
           const ang = Math.atan2((by - ay) - Math.cos(f * Math.PI) * arc * Math.PI, b.x - a.x);
-          ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
-          if (u.k === 'stonethrower') { ctx.fillStyle = '#8f887c'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill(); }
-          else {
-            ctx.strokeStyle = '#5a3a1e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
-            ctx.fillStyle = '#d5dbe2'; ctx.beginPath(); ctx.moveTo(6.5, 0); ctx.lineTo(4.2, -1.4); ctx.lineTo(4.2, 1.4); ctx.fill();
-          }
-          ctx.restore();
+          // vuurpijl: brandende punt met een spoor. Bij uitzoomen (gsm) groter, zodat je de pijlen blijft zien.
+          const kind = u.k === 'stonethrower' ? 'stone' : u.k !== 'tower' && st.tk && st.tk[u.s] && st.tk[u.s].firearrows ? 'fire' : 'arrow';
+          A.shot(ctx, x, y, ang, Math.max(1, 1 / this.cam.zoom), kind);
         }
       }
       // torens: levensbalk
@@ -375,6 +413,18 @@ export class SiegeView extends TownView {
         ctx.fillStyle = bv.side === 1 ? '#62d44c' : '#e2452f'; ctx.fillRect(c.x - bw / 2, c.y - 107, bw * frac, 3);
         if (frac < 0.5) A.smoke(ctx, c.x + 4, c.y - 80, t, u.id, 0.8);
       }
+    }
+    // kokende pek: net gegoten over wie aan de poort staat
+    for (const w of st.walls) {
+      if (!w.g || !w.pt || w.hp <= 0) continue;
+      const age = bt - w.pt;
+      if (age < 0 || age > 1400) continue;
+      const c = toWorld(w.i + 0.5, w.j + 0.5); const top = c.y - this.wallZ() - 14;
+      const f = age / 1400;
+      ctx.fillStyle = `rgba(40,28,16,${0.75 * (1 - f)})`;
+      for (let k = 0; k < 4; k++) { const dx = (k - 1.5) * 4; ctx.beginPath(); ctx.ellipse(c.x + dx, top + 6 + f * 26 + k * 2, 2.2, 3.4, 0, 0, TAU); ctx.fill(); }
+      ctx.fillStyle = `rgba(255,150,50,${0.5 * (1 - f)})`; ctx.beginPath(); ctx.ellipse(c.x, c.y + 4, 16 * (0.6 + f), 6 * (0.6 + f), 0, 0, TAU); ctx.fill();
+      A.smoke(ctx, c.x, top, t, w.i * 31 + w.j, 0.7);
     }
     // beschadigde muren en poorten
     for (const w of st.walls) {
@@ -387,6 +437,7 @@ export class SiegeView extends TownView {
       if (prev != null && w.hp < prev) this.particles.dust(c.x, c.y - 8, 3);
     }
     this.wallHp = new Map(st.walls.map((w) => [w, w.hp]));
+    this.drawBanners(ctx, st);
     // gekozen muurstuk om aan te vallen
     if (bv.hoverWall != null && st.walls[bv.hoverWall]) {
       const w = st.walls[bv.hoverWall];
@@ -394,6 +445,87 @@ export class SiegeView extends TownView {
       ctx.strokeStyle = 'rgba(235,60,40,0.9)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(d.x, d.y); ctx.lineTo(e.x, e.y); ctx.closePath(); ctx.stroke();
     }
+  }
+
+  // een vaandel boven elk regiment: kleur van de kant, soort, aantal en levens. Gekozen = gouden rand.
+  // In schermpunten getekend (altijd even groot) en bewaard in this.banners zodat je erop kan tikken.
+  drawBanners(ctx, st) {
+    const bv = this.bv; const cam = this.cam;
+    this.banners = [];
+    if (!st.regs) return;
+    const groups = new Map();
+    for (const u of st.units) {
+      if (u.hp <= 0 || !u.sq) continue;
+      let g = groups.get(u.sq);
+      if (!g) { g = { n: 0, hp: 0, hp0: 0, x: 0, y: 0, c: 0, top: Infinity }; groups.set(u.sq, g); }
+      const p = bv.pos(u); const w = toWorld(p.x, p.y); const sp = cam.worldToScreen(w.x, w.y - this.zOf(u, p));
+      g.x += sp.x; g.y += sp.y; g.c++; g.top = Math.min(g.top, sp.y - (isCav(u.k) ? 40 : 32) * cam.zoom);
+      g.n += aliveN(u); g.hp += u.hp; g.hp0 += u.hp0 * (u.n || 1);
+    }
+    ctx.save();
+    ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);
+    ctx.font = '700 11px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const bw = 34; const bh = 17;
+    const items = [];
+    for (const [id, g] of groups) {
+      const r = st.regs[id - 1];
+      if (!r) continue;
+      const x = g.x / g.c; const yb = g.top - 6;
+      if (x < -40 || x > cam.w + 40 || yb < -40 || yb > cam.h + 40) continue;
+      items.push({ id, g, r, x, yb, by: yb - bh - 8 });
+    }
+    // vaandels die elkaar zouden bedekken, schuiven naar boven
+    items.sort((a, b) => b.by - a.by || a.id - b.id);
+    for (let i = 0; i < items.length; i++) {
+      for (let pass = 0; pass < 4; pass++) {
+        let moved = false;
+        for (let j = 0; j < i; j++) {
+          const A = items[i]; const B = items[j];
+          if (Math.abs(A.x - B.x) < bw + 2 && Math.abs(A.by - B.by) < bh + 6) { A.by = B.by - bh - 7; moved = true; }
+        }
+        if (!moved) break;
+      }
+    }
+    for (const { id, g, r, x, yb, by } of items) {
+      const mine = r.s === bv.side; const sel = bv.sel.has(id);
+      // stok en vlag
+      ctx.strokeStyle = 'rgba(40,25,10,0.8)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x - bw / 2 + 1, by); ctx.lineTo(x - bw / 2 + 1, Math.max(by + bh, yb + 4)); ctx.stroke();
+      ctx.fillStyle = this.colors[r.s]; ctx.globalAlpha = mine ? 0.95 : 0.8;
+      ctx.beginPath(); ctx.roundRect(x - bw / 2 + 2, by, bw, bh, 3); ctx.fill();
+      ctx.globalAlpha = 1;
+      if (sel) { ctx.strokeStyle = '#ffe45a'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.roundRect(x - bw / 2 + 1, by - 1, bw + 2, bh + 2, 4); ctx.stroke(); }
+      else { ctx.strokeStyle = 'rgba(20,12,6,0.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x - bw / 2 + 2, by, bw, bh, 3); ctx.stroke(); }
+      // vluchtend: een witte vlag
+      if (r.st === 'rout') { ctx.fillStyle = 'rgba(245,245,240,0.92)'; ctx.beginPath(); ctx.roundRect(x - bw / 2 + 2, by, bw, bh, 3); ctx.fill(); ctx.fillStyle = '#5a4a3a'; }
+      // soort: zwaard, boog, hoefijzer of ram
+      this.glyph(ctx, role(r.k), x - bw / 2 + 10, by + bh / 2, r.st === 'rout' ? '#5a4a3a' : '#fff');
+      ctx.fillStyle = r.st === 'rout' ? '#5a4a3a' : '#fff'; ctx.fillText(String(g.n), x + 7, by + bh / 2 + 0.5);
+      // levens
+      const f = Math.max(0, Math.min(1, g.hp / (g.hp0 || 1)));
+      ctx.fillStyle = 'rgba(20,12,6,0.75)'; ctx.fillRect(x - bw / 2 + 2, by + bh + 1, bw, 3);
+      ctx.fillStyle = mine ? (f > 0.5 ? '#62d44c' : f > 0.25 ? '#f2c230' : '#e2452f') : '#e2452f';
+      ctx.fillRect(x - bw / 2 + 2, by + bh + 1, bw * f, 3);
+      // moed van je eigen regimenten (goud)
+      if (mine) { const mo = Math.max(0, Math.min(1, (r.mo ?? 100) / 100)); ctx.fillStyle = 'rgba(20,12,6,0.75)'; ctx.fillRect(x - bw / 2 + 2, by + bh + 4, bw, 2); ctx.fillStyle = mo > 0.4 ? '#f2c95a' : '#e2452f'; ctx.fillRect(x - bw / 2 + 2, by + bh + 4, bw * mo, 2); }
+      // in gevecht: twee gekruiste streepjes boven de vlag
+      if (r.eng || (r.st === 'wall')) {
+        ctx.strokeStyle = '#fff3c4'; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x - 5, by - 9); ctx.lineTo(x + 5, by - 1); ctx.moveTo(x + 5, by - 9); ctx.lineTo(x - 5, by - 1); ctx.stroke();
+      }
+      this.banners.push({ id, s: r.s, x: x + 1, y: by, w: bw + 2, h: bh + 4 });
+    }
+    ctx.restore();
+  }
+
+  glyph(ctx, ro, x, y, col = '#fff') {
+    ctx.save(); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (ro === 'rng') { ctx.arc(x - 2, y, 5, -1.2, 1.2); ctx.moveTo(x - 2 + 5 * Math.cos(-1.2), y + 5 * Math.sin(-1.2)); ctx.lineTo(x - 2 + 5 * Math.cos(1.2), y + 5 * Math.sin(1.2)); }
+    else if (ro === 'cav') { ctx.arc(x, y - 1, 4, Math.PI * 0.05, Math.PI * 0.95, true); }
+    else if (ro === 'siege') { ctx.rect(x - 5, y - 2.5, 10, 5); }
+    else { ctx.moveTo(x - 4, y + 4); ctx.lineTo(x + 4, y - 4); ctx.moveTo(x - 4, y - 1); ctx.lineTo(x - 1, y + 4); }
+    ctx.stroke(); ctx.restore();
   }
 
   // schermpunt → tegel (ook als je op de voorkant van een muur tikt)

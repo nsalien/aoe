@@ -1,7 +1,39 @@
 // Sfeer en effecten: dag/nacht, lichtgloed, deeltjes, vogels, wolken, vlinders en vuurvliegjes.
 // Alles in wereldcoördinaten tenzij anders vermeld.
 
-export const LOW_POWER = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4);
+// Android-gsm's melden 8 kernen en hebben vaak een scherm van 90/120 Hz, maar zijn per kern veel trager dan een iPhone:
+// ze krijgen altijd de lichte instellingen (ook liggend, ook op een groot scherm).
+export const ANDROID = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
+export const LOW_POWER = typeof window !== 'undefined' && (window.innerWidth < 800 || (navigator.hardwareConcurrency || 8) <= 4 || ANDROID);
+
+// ---------- beeldsnelheid ----------
+// Hooguit ±60 beelden per seconde. Chrome op een Android-gsm met een scherm van 90/120/144 Hz roept
+// requestAnimationFrame zo vaak op: dat is 1,5-2,4x zoveel werk (warm, haperen, lege batterij). Safari op een iPhone
+// begrenst dat zelf al. Pacer meet het ritme van het scherm en tekent dan elk 2e (of 3e) tikje.
+// frameMs = de tijd tussen twee getekende beelden als alles vlot loopt (voor adaptQuality).
+export let frameMs = 1000 / 60;
+export class Pacer {
+  constructor() { this.raw = 0; this.d = []; this.n = 1; this.k = 0; }
+  // true = dit tikje tekenen
+  ok(t) {
+    if (this.raw) {
+      const d = t - this.raw;
+      if (d > 2 && d < 60) {
+        this.d.push(d);
+        if (this.d.length >= 40) {
+          this.d.sort((a, b) => a - b);
+          const med = this.d[20];
+          this.n = Math.max(1, Math.ceil(15.5 / med - 0.15));
+          frameMs = med * this.n;
+          this.d.length = 0;
+        }
+      }
+    }
+    this.raw = t;
+    this.k = (this.k + 1) % this.n;
+    return this.k === 0;
+  }
+}
 
 // ---------- dag en nacht ----------
 

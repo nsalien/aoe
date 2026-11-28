@@ -3,7 +3,7 @@ import * as A from './art.js';
 import * as FX from './fx.js';
 import { Camera, isoFns, hashInt } from './iso.js';
 import { generateTerrain } from '../shared/worldgen.js';
-import { bakeWorld, WTW, WTH } from './worldmap.js';
+import { bakeWorldGen, WTW, WTH } from './worldmap.js';
 
 export { WTW, WTH };
 const { toWorld } = isoFns(WTW, WTH);
@@ -11,7 +11,7 @@ const { toWorld } = isoFns(WTW, WTH);
 export class WorldView {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false }); // ondoorzichtig: elk beeld begint met een volle achtergrond
     this.cam = new Camera(canvas, { zoom: 1.2, minZoom: 0.35, maxZoom: 3 });
     this.towns = [];
     this.camps = [];
@@ -48,6 +48,8 @@ export class WorldView {
     this.clouds = new FX.Clouds({ x0: l.x - 300, x1: r.x, y0: -100, y1: b.y - 100 }, FX.LOW_POWER ? 6 : 11);
     this.dustT = 0;
     this.bakedKey = null;
+    this.job = null; // een voorbereiding voor een andere kaart stoppen
+    this.bakeInfo = null;
   }
 
   // hoogte van het landschap op een punt (tegelcoördinaten)
@@ -55,14 +57,15 @@ export class WorldView {
     return this.bakeInfo ? this.bakeInfo.hAt(gx, gy) : 0;
   }
 
-  setData(data, myTownId, myTeamId) {
+  // background: de kaart op de achtergrond in stukjes voorbereiden (niet meteen alles: dan hapert het spel even)
+  setData(data, myTownId, myTeamId, background = false) {
     this.towns = data.towns;
     this.camps = data.camps;
     this.teams = new Map(data.teams.map((t) => [t.id, t]));
     this.myTownId = myTownId;
     this.myTeamId = myTeamId;
     const key = [...data.towns.map((t) => `${t.x},${t.y}`), ...data.camps.map((c) => `${c.x},${c.y}`)].join('|');
-    if (key !== this.bakedKey) { this.bakedKey = key; this.bake(); }
+    if (key !== this.bakedKey) { this.bakedKey = key; if (background) this.bakeLater(); else this.bake(); }
     if (this.selected) {
       const s = this.selected;
       const list = s.kind === 'town' ? this.towns : this.camps;
@@ -73,12 +76,39 @@ export class WorldView {
 
   setMarches(marches) { this.marches = marches || []; }
 
-  bake() {
+  bakeGen() {
     const small = window.innerWidth < 800;
-    const res = bakeWorld({
+    return bakeWorldGen({
       seed: this.seed, size: this.size, tiles: this.terrain.tiles, towns: this.towns, camps: this.camps,
       scale: small ? 1 : 1.5, R: small ? 6 : FX.LOW_POWER ? 7 : 9,
     });
+  }
+
+  // nu meteen (en een voorbereiding die nog bezig is meteen afmaken)
+  bake() {
+    const job = this.job || { gen: this.bakeGen() };
+    this.job = null;
+    for (;;) { const r = job.gen.next(); if (r.done) { this.applyBake(r.value); return; } }
+  }
+
+  // op de achtergrond: telkens ±6 ms, met telkens wat tijd ertussen voor het spel zelf
+  bakeLater() {
+    const job = { gen: this.bakeGen() };
+    this.job = job;
+    const idle = (f) => setTimeout(f, 16);
+    const step = () => {
+      if (this.job !== job) return; // vervangen of al afgemaakt
+      const t0 = performance.now();
+      while (performance.now() - t0 < 6) {
+        const r = job.gen.next();
+        if (r.done) { this.job = null; this.applyBake(r.value); return; }
+      }
+      idle(step);
+    };
+    idle(step);
+  }
+
+  applyBake(res) {
     this.bakeInfo = res;
     this.shore = res.shore;
     const nWaves = FX.LOW_POWER ? 260 : 520;
@@ -122,6 +152,7 @@ export class WorldView {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#245a8e';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.job) this.bake(); // de kaart wordt getoond: de voorbereiding nu afmaken
     if (!this.bakeInfo) return;
     dt = Math.min(dt, 100);
     if (Math.floor(t / 1000) !== this.lightSecond) { this.lightSecond = Math.floor(t / 1000); this.light = FX.daylight(); }
@@ -191,7 +222,7 @@ export class WorldView {
       const pos = this.marchPos(m, now);
       if (!pos) continue;
       items.push({ d: pos.gx + pos.gy, kind: 'march', o: m, pos });
-      if (emit && m.kind !== 'trade') {
+      if (emit && m.kind !== 'trade' && m.kind !== 'tribute') {
         const w = toWorld(pos.gx, pos.gy);
         this.particles.dust(w.x - pos.dir * 8, w.y - this.hAt(pos.gx, pos.gy) + 1, 1);
       }
@@ -216,7 +247,7 @@ export class WorldView {
 
     // labels in schermruimte
     ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);
-    for (const tw of this.towns) this.drawTownLabel(ctx, tw);
+    for (const tw of this.towns) this.drawTownLabel(ctx, tw, now);
     if (cam.zoom > 0.75) for (const c of this.camps) this.drawCampLabel(ctx, c, now);
   }
 
@@ -280,7 +311,7 @@ export class WorldView {
     ctx.save();
     ctx.translate(w.x, y);
     if (pos.dir < 0) ctx.scale(-1, 1);
-    if (m.kind === 'trade') {
+    if (m.kind === 'trade' || m.kind === 'tribute') {
       ctx.fillStyle = '#7a5129'; ctx.fillRect(-6, -9, 12, 6);
       ctx.fillStyle = '#e6c45a'; ctx.beginPath(); ctx.ellipse(0, -9, 5, 2.5, 0, Math.PI, 0); ctx.fill();
       ctx.fillStyle = '#3a2716'; ctx.beginPath(); ctx.arc(-4, -2.5, 2.4, 0, 7); ctx.arc(4, -2.5, 2.4, 0, 7); ctx.fill();
@@ -290,7 +321,7 @@ export class WorldView {
     } else {
       const units = m.units || {};
       const cav = (units.rider || 0) + (units.knight || 0);
-      if (units.ram) A.ram(ctx, -12, 2, 0.55);
+      if (units.ram) A.ram(ctx, -12, 2, 0.55, { team: col, walking: true, phase: ph });
       A.person(ctx, -6, 1, { s: 0.65, walking: true, phase: ph + 1, team: col, body: '#7b5a3a', helmet: '#8e959f', weapon: 'spear' });
       if (cav) A.horseman(ctx, 5, 3, { s: 0.6, walking: true, phase: ph, team: col, body: '#7a2b2b', helmet: '#8e959f', weapon: 'spear' });
       else A.person(ctx, 5, 3, { s: 0.65, walking: true, phase: ph + 2, team: col, body: '#5b6b85', helmet: '#aab1bb', weapon: 'sword' });
@@ -386,14 +417,15 @@ export class WorldView {
     if (sub) { ctx.font = '500 10.5px "Inter", system-ui, sans-serif'; ctx.fillStyle = '#e4d6b4'; ctx.fillText(sub, x + 3, y - 6); }
   }
 
-  drawTownLabel(ctx, tw) {
+  drawTownLabel(ctx, tw, now) {
     const p = this.townPos(tw);
     const s = this.cam.worldToScreen(p.x, p.y - 44);
     const col = this.teamColor(tw.teamId);
     const mine = tw.id === this.myTownId;
     const sel = this.selected && this.selected.kind === 'town' && this.selected.obj.id === tw.id;
     if (this.cam.zoom < 0.6 && !mine && !sel) return;
-    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player} · ${tw.score} ptn${tw.online ? ' · ●' : ''}` : null;
+    const peace = (now < (tw.peaceEnd || 0) ? ' · vrede' : '') + (tw.vassal && tw.vassal.until > now ? ` · vazal van ${tw.vassal.lname}` : '');
+    const sub = this.cam.zoom > 0.9 || sel ? `${tw.player}${tw.bot ? ` (computer${tw.botTier ? `, ${tw.botTier}` : ''})` : ''} · ${tw.score} ptn${peace}${tw.online ? ' · ●' : ''}` : null;
     this.label(ctx, s.x, s.y, tw.name, sub, col, mine);
   }
 

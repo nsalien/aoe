@@ -22,6 +22,7 @@ const P = {
     <path d="M5 13h14" stroke="#4a3220" stroke-width="1.2"/><circle cx="16.4" cy="15.5" r="1" fill="#f2c230"/><path d="M2.5 21h19" ${S}/>`,
   people: `<circle cx="9" cy="8" r="3" fill="#f1c9a0" ${S}/><path d="M3.5 20c0-4 2.5-6.5 5.5-6.5s5.5 2.5 5.5 6.5z" fill="#8b6a43" ${S}/>
     <circle cx="16.5" cy="9" r="2.5" fill="#f1c9a0" ${S}/><path d="M15 13.5c.5-.3 1-.4 1.6-.4 2.6 0 4.4 2.3 4.4 6.1h-5" fill="#6b8f4a" ${S}/>`,
+  move: `<path d="M12 2.5l3 3.2h-2v4.8h4.8v-2l3.2 3-3.2 3v-2H13v4.8h2l-3 3.2-3-3.2h2v-4.8H6.2v2L3 11.5l3.2-3v2H11V5.7H9z" fill="#e8c46a" ${S}/>`,
   hammer: `<path d="M13.6 9.4L4 19l1.6 1.6 9.6-9.6z" fill="#a8743f" ${S}/><path d="M10.6 6.2L14.5 3l6.5 6.5-3.2 3.9z" fill="#9aa1ab" ${S}/><path d="M13 5.5l5.5 5.5" stroke="#d7dbe0" stroke-width="1"/>`,
   target: `<circle cx="11" cy="13" r="8.5" fill="#f4efe0" ${S}/><circle cx="11" cy="13" r="5.6" fill="#d64545"/><circle cx="11" cy="13" r="2.9" fill="#f4efe0"/><circle cx="11" cy="13" r="1.2" fill="#d64545"/>
     <path d="M11 13l9-9" stroke="#6b4a2b" stroke-width="1.5" stroke-linecap="round"/><path d="M17 3.2l3.2.6.6 3.2" fill="none" stroke="#8a8f99" stroke-width="1.5" stroke-linecap="round"/>`,
@@ -47,6 +48,12 @@ const P = {
   sunmoon: `<path d="M12 3a9 9 0 0 0 0 18z" fill="#ffd23f" ${S}/><path d="M12 3a9 9 0 0 1 0 18c2.6-2 3.7-5.4 3.7-9S14.6 5 12 3z" fill="#41507a" ${S}/><circle cx="16.2" cy="9" r=".8" fill="#f2e6b8"/><circle cx="17.6" cy="14" r=".6" fill="#f2e6b8"/>`,
   hourglass: `<path d="M6 2.5h12M6 21.5h12" ${S}/><path d="M7 2.5c0 5.5 4.2 6.5 4.2 9.5S7 16 7 21.5h10c0-5.5-4.2-6.5-4.2-9.5S17 8 17 2.5z" fill="#efe0bb" ${S}/>
     <path d="M9 19.8c.8-2.2 2.2-3 3-3s2.2.8 3 3zM9.6 6.5h4.8c-.6 1.5-1.6 2.4-2.4 3-.8-.6-1.8-1.5-2.4-3z" fill="#d9a43a"/>`,
+  fish: `<path d="M2.5 12c3-5 9.5-6.5 13.5-3l4.5-3.2v12.4L16 15c-4 3.5-10.5 2-13.5-3z" fill="#7fb0d2" ${S}/><path d="M8 9.3c1.4 1.6 1.4 3.8 0 5.4" stroke="#2f5f86" stroke-width="1" fill="none"/><circle cx="5.6" cy="11" r="1.05" fill="#1d2f3f"/>`,
+  // heraut met bazuin en vaandel: nieuws en updates
+  news: `<path d="M3.2 9.4h8.6" stroke="${O}" stroke-width="3.4" stroke-linecap="round"/><path d="M3.2 9.4h8.6" stroke="#f2c230" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M11.2 8.1L19.6 3.8v11.2l-8.4-4.3z" fill="#f2c230" ${S}/><ellipse cx="19.6" cy="9.4" rx="1.5" ry="5.6" fill="#d9a43a" ${S}/>
+    <path d="M2.4 8v2.8" stroke="${O}" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M4.6 10.6h6.4v8.6l-3.2-2.1-3.2 2.1z" fill="#d64545" ${S}/><path d="M7.8 12.4l.7 1.4 1.5.2-1.1 1 .3 1.5-1.4-.8-1.4.8.3-1.5-1.1-1 1.5-.2z" fill="#f2c230"/>`,
   chat: `<path d="M3 5.5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-5 4v-4H5a2 2 0 0 1-2-2z" fill="#f3e5c3" ${S}/><path d="M7 8.5h10M7 11.8h7" stroke="#8a6a3a" stroke-width="1.3" stroke-linecap="round"/>`,
   heart: `<path d="M12 20.5s-8-4.8-8-10.4A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 8 2.5c0 5.6-8 10.4-8 10.4z" fill="#d9483b" ${S}/><path d="M7.6 9.2a2.2 2.2 0 0 1 2.2-1.6" stroke="#ffd6cc" stroke-width="1.3" stroke-linecap="round" fill="none"/>`,
   star: `<path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z" fill="#f2c230" ${S}/>`,
@@ -57,10 +64,25 @@ const P = {
   minus: `<path d="M5 12h14" stroke="${O}" stroke-width="2.4" stroke-linecap="round"/>`,
   close: `<path d="M6 6l12 12M18 6L6 18" stroke="${O}" stroke-width="2.2" stroke-linecap="round"/>`,
   back: `<path d="M14.5 5L7.5 12l7 7" fill="none" stroke="${O}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`,
+  play: `<path d="M7 4.5v15l12.5-7.5z" fill="#d9a43a" ${S}/>`,
+  pause: `<path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" fill="#d9a43a" ${S}/>`,
+  next: `<path d="M4 5v14l9-7zM12 5v14l8-7z" fill="#d9a43a" ${S}/><path d="M20.5 5v14" stroke="${O}" stroke-width="1.8" stroke-linecap="round"/>`,
+  replay: `<path d="M5 12a7 7 0 1 0 2.1-5" fill="none" stroke="${O}" stroke-width="2" stroke-linecap="round"/><path d="M4 3.5v5h5z" fill="#d9a43a" ${S}/><path d="M10.5 9v6l4.8-3z" fill="#b2372a" ${S}/>`,
   menu: `<path d="M4 7h16M4 12h16M4 17h16" stroke="${O}" stroke-width="2.2" stroke-linecap="round"/>`,
   horse: `<path d="M5 20l1-6c-1.5-1-2-3-1-4.5l3-3.5 1.5-3 1.5 2.5c3 .2 6 2 7.5 5.5l1.5 3.5-2 1-1.8-2.5-1.2 1.6 1 5.4h-2l-1-4.2-3 .7-.8 3.5z" fill="#8b5a2b" ${S}/><circle cx="9" cy="7.2" r=".7" fill="${O}"/>`,
   anvil: `<path d="M3 7h13c0 2.5 2 3.5 5 3.5v1.5H15l-1.5 3.5H17V19H6v-3.5h3.5L8 12H5c-1.5 0-2-1-2-2.5z" fill="#6b717c" ${S}/><path d="M5 8.2h9" stroke="#a9afb8" stroke-width="1" stroke-linecap="round"/>`,
+  // formaties (bovenaanzicht, vooraan = boven)
+  fline: `<path d="M12 2.2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[3.5, 10], [8.2, 10], [12.9, 10], [17.6, 10], [3.5, 15.5], [8.2, 15.5], [12.9, 15.5], [17.6, 15.5]].map(([x, y]) => [x + 1.4, y]))}`,
+  fblock: `<path d="M12 2.2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[8, 8], [12, 8], [16, 8], [8, 12.2], [12, 12.2], [16, 12.2], [8, 16.4], [12, 16.4], [16, 16.4], [8, 20.6], [12, 20.6], [16, 20.6]], 1.5)}`,
+  fwedge: `<path d="M12 2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[12, 8], [9, 12.5], [15, 12.5], [6, 17], [12, 17], [18, 17], [3, 21.2], [9, 21.2], [15, 21.2], [21, 21.2]], 1.45)}`,
+  floose: `<path d="M12 2.2l2.2 2.6h-4.4z" fill="#d9a43a" ${S}/>${dots([[3.5, 10], [12, 10], [20.5, 10], [7.7, 17.5], [16.3, 17.5]])}`,
+  fring: dots([[6, 6], [12, 6], [18, 6], [18, 12], [18, 18], [12, 18], [6, 18], [6, 12]]) + `<path d="M12 9.6v4.8M9.6 12h4.8" stroke="#d9a43a" stroke-width="1.6" stroke-linecap="round"/>`,
 };
+
+// stippen voor de formatie-iconen
+function dots(list, r = 1.9) {
+  return list.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#b2372a" stroke="${O}" stroke-width=".9"/>`).join('');
+}
 
 export function icon(name, cls = '') {
   const body = P[name] || P.star;

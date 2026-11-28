@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="nl" style="background:#2a2015">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2a2015">
+  <title>Nieuws · Rijken van de Vallei</title>
+  <meta name="description" content="Wat is er nieuw in Rijken van de Vallei? Bij elke grote update een artikel over wat er veranderd is.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M10 58V26h8v8h6V26h8v8h0V26h8v8h6v-8h8v32z' fill='%23b9b1a1'/%3E%3Cpath d='M28 58V44a4 4 0 0 1 8 0v14z' fill='%233d2a1a'/%3E%3Cpath d='M32 6v18' stroke='%233b2a18' stroke-width='2'/%3E%3Cpath d='M33 6h14l-4 5 4 5H33z' fill='%23d64545'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="page-updates">
+  <main class="news-page">
+    <header class="news-head">
+      <span class="logo-crest" data-icon="castle"></span>
+      <div><h1>Rijken van de Vallei</h1><p class="tagline">Nieuws uit de vallei</p></div>
+    </header>
+    <div class="modal-card news-card" id="news"><p class="empty">Laden…</p></div>
+    <p class="news-back"><a class="btn primary" href="/">Naar het spel</a></p>
+  </main>
+  <script type="module">
+    import { updatesHtml } from '/js/updates.js';
+    import { icon } from '/js/icons.js';
+    document.getElementById('news').innerHTML = updatesHtml();
+    for (const el of document.querySelectorAll('[data-icon]')) el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon));
+    // een link naar één artikel (/updates#update-3) opent dat artikel
+    const a = location.hash && document.querySelector(location.hash);
+    if (a) { const d = a.querySelector('details'); if (d) d.open = true; a.scrollIntoView(); }
+  </script>
+</body>
+</html>
