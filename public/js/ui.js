@@ -13,7 +13,7 @@ import {
   depositById, depLeft, campAlive, campSize, exploredNow, wallEnclosed, campGrowth, raidChance, raidNow,
   checkDemolish, demolishRefund, checkPlaceGate, buildTime, checkResearch, researchTime, techDone, loyalty, loyaltyRegen,
   isVassal, noblesOwned, noblesMax, boost, townScore, townBaseDef, towerDefense, effectiveWall, wallRun, tooBig,
-  maxBoats, boatsReady, checkBoat, fishMult, dismissRefund,
+  maxBoats, boatsReady, checkBoat, fishMult, dismissRefund, toPlace,
 } from '../shared/sim.js';
 import { wallHp } from '../shared/fieldbattle.js';
 import { territory, exHas } from '../shared/territory.js';
@@ -111,7 +111,7 @@ export function buildingThumb(type, level = 1, team = '#c0392b', civ = myCiv) {
   return lazyThumb(`${type}:${level}:${team}:${civ || ''}`, () => {
     const t = type === 'wall' ? 'tower' : type;
     const spr = A.buildingSprite(t, Math.max(1, level), team, civ);
-    const big = BUILDINGS[t]?.size === 2;
+    const big = A.artSize(t) === 2;
     const sc = big ? 1.05 : t === 'tower' ? 1.15 : 1.85;
     const cv = document.createElement('canvas');
     cv.width = 160; cv.height = 140;
@@ -398,6 +398,28 @@ export function adviceBarHtml(app, live) {
 }
 
 // ---------- stadsoverzicht ----------
+// gebouwen die groter werden en opnieuw geplaatst moeten worden (gratis, meteen klaar)
+function placeListHtml(live, team) {
+  const list = toPlace(live);
+  return list.map((b) => {
+    const z = BUILDINGS[b.type].size;
+    return `<div class="row"><img src="${buildingThumb(b.type, Math.max(1, b.level), team, live.civ)}" alt=""><span class="grow"><b>${BUILDINGS[b.type].name}</b> (niveau ${b.level})<br>
+      <span class="small muted">nu ${z}x${z} tegels</span></span><button class="btn small primary" data-action="placeNext" data-id="${b.id}">${icon('move')} Plaatsen</button></div>`;
+  }).join('');
+}
+
+export function grewHtml(live, team) {
+  const list = toPlace(live);
+  return `<h2>${icon('move')} Gebouwen zijn groter geworden</h2>
+    <p class="desc">De kazerne, schietbaan, stal, markt, belegwerkplaats, academie, het gildehuis en de bouwloods nemen nu
+    <b>2x2 tegels</b> in, het monument <b>4x4</b>. Ze zijn ook opnieuw ontworpen.</p>
+    ${list.length ? `<p>${list.length === 1 ? 'Dit gebouw past' : 'Deze gebouwen passen'} niet meer op ${list.length === 1 ? 'zijn' : 'hun'} plek. Zet ${list.length === 1 ? 'het' : 'ze'}
+    opnieuw neer: dat is <b>gratis en meteen klaar</b>, zonder bouwtijd. Tot dan ${list.length === 1 ? 'werkt het' : 'werken ze'} gewoon verder.</p>
+    <div class="card grew-list">${placeListHtml(live, team)}</div>
+    <div class="actions"><button class="btn primary big" data-action="placeNext">${icon('move')} Nu plaatsen</button><button class="btn" data-action="closeModal">Later</button></div>`
+    : '<p>Al je gebouwen passen nog op hun plek.</p>'}`;
+}
+
 export function townOverviewHtml(app, live) {
   const d = app.data;
   const sl = slots(live);
@@ -417,6 +439,11 @@ export function townOverviewHtml(app, live) {
     <div><h2>${esc(d.town.name)}</h2><div class="lvl">${AGES[a].name}${live.civ ? ` · <span class="civ-tag">${civEmblem(live.civ, 14)} ${civName(live.civ)}</span>` : ''}</div>
     <div class="small muted">Positie (${d.town.x}, ${d.town.y}) · <span class="pill" style="background:${d.team.color}">${esc(d.team.name)}</span></div></div></div>`;
 
+  if (toPlace(live).length) {
+    html += `<div class="card clan-ask grew-list"><h3>${icon('move')} Opnieuw plaatsen (gratis)</h3>
+      <p class="small muted" style="margin:0 0 4px">Deze gebouwen werden groter en passen niet meer op hun plek. Ze werken gewoon verder tot je ze neerzet.</p>
+      ${placeListHtml(live, d.team.color)}</div>`;
+  }
   html += loyaltyCardHtml(app, live);
   html += bonusCardHtml(app, live);
   html += `<div class="card"><h3>${icon('people')} Dorpelingen <span class="right">${total + away} totaal · ${idle} vrij${away ? ` · ${away} op pad` : ''}</span></h3>`;
