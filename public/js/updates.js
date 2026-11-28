@@ -13,6 +13,41 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 8,
+    at: '2026-11-28T21:00:00+01:00',
+    tag: 'Snelheid',
+    icon: 'move',
+    title: 'Vlotter schuiven en zoomen op je gsm',
+    intro: 'Schuiven en in- of uitzoomen in je stad haperde op sommige gsm\'s, vooral op Android. We zochten uit waarom en '
+      + 'pakten de grootste oorzaken aan.',
+    body: [
+      {
+        h: 'Wat was de oorzaak?', icon: 'magnifier',
+        p: [
+          'Als je inzoomt, tekent het spel de grond opnieuw in scherpe stukken: kasseien, gras, bloemen, het water. Eén zo\'n stuk '
+          + 'tekenen duurde op een gsm soms een tiende van een seconde, aan één stuk door. Gebeurde dat terwijl je schoof of '
+          + 'knijpte, dan bleef het beeld even hangen.',
+          'Daarnaast begon het spel bij elke tussenstap van het zoomen scherpere versies van de gebouwen te maken, en bakte het '
+          + 'in de eerste minuut de wereldkaart klaar op de achtergrond. Ook dat nam rekenkracht weg op het verkeerde moment.',
+        ],
+      },
+      {
+        h: 'Wat is er veranderd?', icon: 'star',
+        ul: [
+          'Op een gsm of tablet zijn de scherpe grondstukken vier keer kleiner, dus elk stuk is veel sneller klaar.',
+          'Zolang je vinger beweegt, maakt het spel geen nieuwe stukken. Je ziet dan even de gewone grond; een fractie van een seconde na het loslaten wordt alles weer scherp.',
+          'Tijdens het knijpen blijft de grond die al scherp was ook scherp (geen wazige flits meer).',
+          'Scherpere gebouwen worden pas gemaakt als je klaar bent met zoomen.',
+          'De wereldkaart wacht met bakken zolang je je stad aanraakt, en doet het in kleinere stappen.',
+        ],
+      },
+      {
+        h: 'Nog steeds traag?', icon: 'motion',
+        p: 'Zet dan ook de <b>rustige stad</b> aan (de knop met het lopende mannetje rechts in je stad), en laat ons weten op welk toestel je speelt.',
+      },
+    ],
+  },
+  {
     id: 7,
     at: '2026-11-28T19:00:00+01:00',
     tag: 'Regels',
