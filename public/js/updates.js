@@ -13,6 +13,48 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 4,
+    at: '2026-11-28T12:00:00+01:00',
+    tag: 'Bouwen',
+    icon: 'move',
+    title: 'Grotere gebouwen: kazerne, markt, stal… en een reusachtig monument',
+    intro: 'Een kazerne was even klein als een huisje. Dat klopte niet. Acht gebouwen nemen nu <b>2x2 tegels</b> in en het monument '
+      + 'zelfs <b>4x4</b>. Ze zijn ook helemaal opnieuw ontworpen, met een eigen erf vol leven.',
+    body: [
+      {
+        h: 'Welke gebouwen?', icon: 'castle',
+        ul: [
+          '<b>2x2</b>: kazerne, schietbaan, stal, markt, belegwerkplaats, academie, gildehuis en bouwloods.',
+          '<b>4x4</b>: het monument, een echt wereldwonder midden in je stad.',
+          'Alle andere gebouwen (huizen, boerderijen, smidse, torens…) blijven even groot.',
+        ],
+      },
+      {
+        h: 'Nieuw uitzicht', icon: 'crown',
+        p: [
+          'Elk vergroot gebouw staat nu op een eigen erf. Bij de kazerne oefenen soldaten op strobaarden, op de schietbaan schieten '
+          + 'boogschutters op doelen, in de stal staan paarden aan de drinkbak, op de markt kraampjes met luifels en kopers. Bij de '
+          + 'belegwerkplaats staat een stormram op het erf, de academie heeft een plein met een fontein en beelden, het gildehuis '
+          + 'een binnenplaats vol kisten, tonnen en een hijskraan, en bij de bouwloods staat een stuk muur in de steigers.',
+          'Zoals altijd ziet elk niveau er beter uit en heeft elk volk zijn eigen bouwstijl. Het monument groeit van een getrapt '
+          + 'plein tot een groot wonder met zuilen, beelden en goud.',
+        ],
+      },
+      {
+        h: 'Had je al zo\'n gebouw?', icon: 'move',
+        p: [
+          'Past het nog op zijn plek, dan verandert er niets: het is gewoon groter geworden. Past het er niet meer, bijvoorbeeld '
+          + 'omdat er een huis naast staat, dan krijg je een melding en staat er bovenaan je stad een gouden knop '
+          + '<b>Opnieuw plaatsen</b>. Ook in het overzicht van je stad (Details) staat de lijst.',
+          'Tik op de knop: het gebouw verschijnt doorschijnend op de dichtste vrije plek. Kies een andere plek of tik op '
+          + '<b>Zet hier</b>. Dat is <b>gratis en meteen klaar</b>, zonder bouwtijd. Heb je er meer, dan komt meteen het volgende.',
+          'Tot je het neerzet, blijft het gewoon werken: je kazerne traint verder en de bonus van je gildehuis blijft. Enkel '
+          + 'verbeteren kan pas als het weer op de kaart staat.',
+        ],
+      },
+    ],
+  },
+  {
     id: 3,
     at: '2026-11-27T15:00:00+01:00',
     tag: 'Grafisch',
