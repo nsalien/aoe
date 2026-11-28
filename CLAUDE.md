@@ -394,6 +394,16 @@ Daarom:
   `adaptQuality` verlaagt op een aanraakscherm de resolutie al onder ±33 beelden/s (daar remt meestal de GPU).
 - **Geen `backdrop-filter`** op iets dat altijd boven de spelkaart ligt (de kaart verandert elk beeld). Achter een open
   venster tekent de stad 5 keer per seconde.
+- **Schuiven en zoomen op een gsm** (gemeten met een video van de gebruiker op Android: ±40 bps met haperingen van 150-270 ms;
+  oorzaak = nieuwe scherpe grondstukken, aan één stuk 200-360 ms op een 4x vertraagde proef-gsm): op een aanraakscherm
+  (`GH.SMALL`) zijn de stukken half zo breed (`HD_TIERS`, kost evenredig met de oppervlakte), maakt `drawGroundHD` geen nieuwe
+  stukken zolang de kaart beweegt en tot 250 ms erna (`cam.movedAt` in `iso.js`), daarna één per beeld; tijdens het knijpen
+  wisselt de resolutie niet (`lock` in `HDGround.draw`), en bij een wissel blijven de stukken van de vorige resolutie zichtbaar
+  tot de nieuwe klaar zijn (`prev`). Scherpere 3D-versies worden tijdens een gebaar niet aangevraagd (`S3.setHold`, vervalt na
+  400 ms). De wereldkaart bakt niet zolang de speler iets aanraakt (`lastInput()` in `iso.js`) en heeft meer pauzes (ook
+  `putImageData` in stroken). Meten: zie `context.md` › Testen (Pixel 7-emulatie, CPU 4x, aanraakgebaren via CDP
+  `Input.dispatchTouchEvent`). Let op: in de container (geen GPU) kost het vullen van pixels ±100 ms per beeld; kijk naar de
+  JS-tijd (`town.workMs`) en de tijd per grondstuk, niet naar de beeldsnelheid.
 - **Werk bij het opstarten uitstellen**: miniaturen (`lazyThumb` in `ui.js`: eerst een leeg plaatje, de tekening volgt op de
   achtergrond en vervangt alle `<img>` met dat adres), 2D-bomen pas als terugval (`treeSpr`), scherpe grondstukken pas na
   1,2 s en tijdens slepen hooguit één per 3 beelden (`maxNew`). De wereldkaart wordt 6 s na de start op de achtergrond
