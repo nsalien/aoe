@@ -13,6 +13,36 @@ import { icon } from './icons.js';
 
 export const UPDATES = [
   {
+    id: 5,
+    at: '2026-11-28T15:00:00+01:00',
+    tag: 'Leger',
+    icon: 'people',
+    title: 'Dorpelingen ontslaan: plaats maken voor je leger',
+    intro: 'Zit je bevolking vol met dorpelingen en wil je meer soldaten? Je kan nu ook dorpelingen ontslaan. Hun plaats komt '
+      + 'meteen vrij voor je leger en je krijgt een kwart van hun kosten terug.',
+    body: [
+      {
+        h: 'Waar vind je het?', icon: 'minus',
+        p: [
+          'In je stad, bij <b>Dorpelingen</b>: de knop <b>Dorpelingen ontslaan</b>. Het venster <b>Ontslaan</b> (ook via '
+          + '<b>Leger thuis</b> en het kaartje <b>Ontslaan</b> in <b>Mijn leger</b>) toont nu soldaten én dorpelingen.',
+          'Wil je in de kazerne, de schietbaan of de stal iets trainen en is er geen plaats meer? Dan staat er een knop '
+          + '<b>Troepen of dorpelingen ontslaan om plaats te maken</b>, en het venster rekent uit of er genoeg plaats vrijkomt.',
+        ],
+      },
+      {
+        h: 'Hoe werkt het?', icon: 'people',
+        ul: [
+          'Je kiest per taak wie er weg mag: dorpelingen zonder werk, of wie op voedsel, hout, steen, goud of de bootjes werkt.',
+          'Het venster toont meteen hoeveel minder grondstoffen je dorp per uur opbrengt.',
+          'Je krijgt <b>25%</b> van hun kosten terug.',
+          'Je houdt altijd minstens <b>5 dorpelingen</b> over, zodat je stad nooit stilvalt.',
+          'Enkel wie thuis is: niet wie in je gebied rondloopt of een vondst oogst. Wordt je stad net aangevallen, dan kan het pas na de slag.',
+        ],
+      },
+    ],
+  },
+  {
     id: 4,
     at: '2026-11-28T12:00:00+01:00',
     tag: 'Bouwen',
