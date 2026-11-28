@@ -109,7 +109,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   const E = new Float32Array(N * N);
   const M = new Float32Array(N * N);
   for (let v = 0; v < N; v++) {
-    if ((v & 7) === 7) yield;
+    if ((v & 3) === 3) yield;
     for (let u = 0; u < N; u++) {
       const gx = (u + 0.5) / R; const gy = (v + 0.5) / R;
       const [e, m] = fieldAt(seed, size, regions, gx - 0.5, gy - 0.5);
@@ -121,7 +121,9 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
     ...camps.map((c) => ({ x: c.x + 0.5, y: c.y + 0.5, r0: 0.55, r1: 1.2, town: false, id: c.id })),
   ];
   // steden en kampen staan altijd op droog land
+  let pk = 0;
   for (const p of places) {
+    if ((++pk & 7) === 0) yield;
     const r = p.r1 * R;
     for (let v = Math.max(0, Math.floor(p.y * R - r)); v < Math.min(N, Math.ceil(p.y * R + r)); v++) {
       for (let u = Math.max(0, Math.floor(p.x * R - r)); u < Math.min(N, Math.ceil(p.x * R + r)); u++) {
@@ -137,6 +139,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   // open plekken rond steden en kampen (geen bos, geen bomen)
   const CLR = new Float32Array(N * N).fill(1);
   for (const p of places) {
+    if ((++pk & 7) === 0) yield;
     const r1 = p.town ? 2.9 : 1.4; const r0 = p.town ? 1.9 : 0.8;
     for (let v = Math.max(0, Math.floor((p.y - r1) * R)); v < Math.min(N, Math.ceil((p.y + r1) * R)); v++) {
       for (let u = Math.max(0, Math.floor((p.x - r1) * R)); u < Math.min(N, Math.ceil((p.x + r1) * R)); u++) {
@@ -166,6 +169,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   }
   // vlakke plek onder steden en kampen
   for (const p of places) {
+    if ((++pk & 7) === 0) yield;
     const r = p.r1 * R;
     const cu = Math.min(N - 1, Math.floor(p.x * R)); const cv = Math.min(N - 1, Math.floor(p.y * R));
     const hc = Math.max(1.5, H[cv * N + cu]);
@@ -190,6 +194,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   const fields = [];
   for (const p of places) {
     if (!p.town) continue;
+    if ((++pk & 3) === 0) yield;
     const cell = 0.5;
     for (let j = -6; j < 6; j++) {
       for (let i = -6; i < 6; i++) {
@@ -217,6 +222,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   const pairs = new Set();
   const roads = [];
   for (const a of towns) {
+    yield; // een weg zoeken (A*) kost wat
     const near = towns.filter((b) => b !== a).sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y)).slice(0, 2);
     for (const b of near) {
       const key = a.id < b.id ? `${a.id}-${b.id}` : `${b.id}-${a.id}`;
@@ -238,6 +244,7 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
     gr.addColorStop(0, `rgba(${c},0.92)`); gr.addColorStop(0.65, `rgba(${c},0.7)`); gr.addColorStop(1, `rgba(${c},0)`);
     oc.fillStyle = gr; oc.beginPath(); oc.arc(p.x, p.y, rr, 0, Math.PI * 2); oc.fill();
   }
+  yield;
   const ovd = oc.getImageData(0, 0, N, N).data;
 
   // kleuren en licht per texel
@@ -395,10 +402,13 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
       pr = sr; pg = sg; pb = sb;
     }
   }
-  ctx.putImageData(img, 0, 0);
+  // in stroken (met pauzes): één groot putImageData kost op een trage gsm ±150 ms aan één stuk
+  const STRIPS = 160;
+  for (let y = 0; y < oh; y += STRIPS) { yield; ctx.putImageData(img, 0, 0, 0, y, ow, Math.min(STRIPS, oh - y)); }
   const landCv = document.createElement('canvas');
   landCv.width = ow; landCv.height = oh;
-  landCv.getContext('2d').putImageData(landImg, 0, 0);
+  const lc = landCv.getContext('2d');
+  for (let y = 0; y < oh; y += STRIPS) { yield; lc.putImageData(landImg, 0, 0, 0, y, ow, Math.min(STRIPS, oh - y)); }
   const t2 = performance.now();
 
   // hoogte op een punt (pixels), voor steden, legers en bomen
@@ -545,7 +555,12 @@ export function* bakeWorldGen({ seed, size, tiles, towns, camps, scale, R }) {
   yield;
   const TS = trees();
   yield;
-  const vis = deco.filter((d) => !(d.h > 3 && hidden(d.gx, d.gy, d.h)));
+  const vis = [];
+  for (let k = 0; k < deco.length; k++) {
+    if ((k & 255) === 255) yield;
+    const d = deco[k];
+    if (!(d.h > 3 && hidden(d.gx, d.gy, d.h))) vis.push(d);
+  }
   yield;
   // eerst alle schaduwen van de bomen in één keer, dan de bomen van achter naar voor
   ctx.fillStyle = 'rgba(12,28,8,0.26)';
