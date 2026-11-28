@@ -4,6 +4,7 @@
 // (rook, vlag, gloed) die het spel gebruikt voor bewegende stukjes.
 import { Scene, rgb } from './render3d.js';
 import { rockShape } from './propmodels.js';
+import { person as figPerson, horse as figHorse, ram as figRam } from './figmodels.js';
 
 const mat = {
   stone: (c = '#bdb5a6') => ({ k: 'stone', c: rgb(c) }),
@@ -1867,9 +1868,301 @@ export function gateScene(p) {
   return s;
 }
 
+// ---------- grote gebouwen (2x2; het monument 4x4) ----------
+// Het hoofdgebouw is het ontwerp van 1x1 (met al zijn details per niveau en volk), groter (k) achteraan op het erf gezet; op de
+// rest van het grondvlak komt een erf dat bij het gebouw hoort (oefenterrein, schietbanen, wei, marktplein, ...).
+// Achteraan = -x en -y; de kijker ziet de voorkant (+x en +y). Grondvlak van 2x2: -1..1, van 4x4: -2..2.
+
+// dezelfde scène, geschaald (k) en verschoven (dx, dy), ook de materialen die een plaats kennen
+function xf(s, k, dx = 0, dy = 0) {
+  const M = (m) => {
+    if (!m || typeof m !== 'object') return m;
+    if (m.k === 'plaster' && (m.z0 !== undefined || m.z1 !== undefined)) return { ...m, z0: (m.z0 || 0) * k, z1: (m.z1 ?? 1) * k };
+    if (m.k === 'glaze') return { ...m, cx: (m.cx || 0) * k + dx, cy: (m.cy || 0) * k + dy };
+    if (m.k === 'target') return { ...m, cy: (m.cy || 0) * k + dy, cz: (m.cz || 0) * k, r: (m.r || 0.1) * k };
+    return m;
+  };
+  const P = (a) => [a[0] * k + dx, a[1] * k + dy, a[2] * k];
+  return {
+    lights: s.lights,
+    get prims() { return s.prims; },
+    box: (x0, y0, z0, x1, y1, z1, m) => s.box(x0 * k + dx, y0 * k + dy, z0 * k, x1 * k + dx, y1 * k + dy, z1 * k, M(m)),
+    poly: (planes, bb, m) => s.poly(planes.map(([a, b, c, d]) => [a, b, c, k * d + a * dx + b * dy]),
+      [bb[0] * k + dx, bb[1] * k + dy, bb[2] * k, bb[3] * k + dx, bb[4] * k + dy, bb[5] * k], M(m)),
+    gable: (x0, y0, x1, y1, z0, h, along, m, oh = 0.05) => s.gable(x0 * k + dx, y0 * k + dy, x1 * k + dx, y1 * k + dy, z0 * k, h * k, along, M(m), oh * k),
+    hip: (x0, y0, x1, y1, z0, h, m, oh = 0.05) => s.hip(x0 * k + dx, y0 * k + dy, x1 * k + dx, y1 * k + dy, z0 * k, h * k, M(m), oh * k),
+    hcyl: (ax, c1, cz, r, a0, a1, m) => (ax === 'x' ? s.hcyl('x', c1 * k + dy, cz * k, r * k, a0 * k + dx, a1 * k + dx, M(m)) : s.hcyl('y', c1 * k + dx, cz * k, r * k, a0 * k + dy, a1 * k + dy, M(m))),
+    cap: (a, b, r, m) => s.cap(P(a), P(b), r * k, M(m)),
+    cyl: (cx, cy, r, z0, z1, m) => s.cyl(cx * k + dx, cy * k + dy, r * k, z0 * k, z1 * k, M(m)),
+    cone: (cx, cy, r, z0, z1, m) => s.cone(cx * k + dx, cy * k + dy, r * k, z0 * k, z1 * k, M(m)),
+    ell: (cx, cy, cz, rx, ry, rz, m, zmin = -1e9) => s.ell(cx * k + dx, cy * k + dy, cz * k, rx * k, ry * k, rz * k, M(m), zmin * k),
+    win: (face, c, a0, a1, z0, z1, m = 'win', d = 0.012) => (face === 'y'
+      ? s.win('y', c * k + dy, a0 * k + dx, a1 * k + dx, z0 * k, z1 * k, M(m), d * k)
+      : s.win('x', c * k + dx, a0 * k + dy, a1 * k + dy, z0 * k, z1 * k, M(m), d * k)),
+  };
+}
+const xfPoint = (a, B) => (Array.isArray(a) ? [a[0] * B.k + B.dx, a[1] * B.k + B.dy, a[2] * B.k] : a);
+
+// grond: aangestampt zand, kasseien of een plein van platen
+const groundM = (c) => ({ k: 'dirt', c: rgb(c) });
+function ground(s, x0, y0, x1, y1, c = '#c2a271') { s.box(x0, y0, 0, x1, y1, 0.01, groundM(c)); }
+function paving(s, x0, y0, x1, y1, c = '#bdb4a2', z = 0.016) { s.box(x0, y0, 0, x1, y1, z, { k: 'stone', c: rgb(c), row: 0.07, bw: 0.1 }); }
+// een figuur op het erf (zelfde 3D-mensen als in het spel, iets groter zodat ze even groot lijken als de lopende figuren)
+const FK = 1.15;
+function fig(s, x, y, L, mode = 'idle', f = 0) { figPerson(xf(s, FK, x, y), L, mode, f); }
+function trainingDummy(s, x, y) {
+  s.cyl(x, y, 0.012, 0, 0.36, mat.wood('#6b4523'));
+  s.ell(x, y, 0.3, 0.05, 0.05, 0.08, mat.hay());
+  s.box(x - 0.006, y - 0.08, 0.3, x + 0.006, y + 0.08, 0.32, mat.wood('#6b4523'));
+  s.ell(x, y, 0.4, 0.035, 0.035, 0.035, mat.hay());
+}
+function weaponRack(s, x, y, w = 0.22) {
+  s.box(x - 0.01, y - w / 2, 0, x + 0.01, y - w / 2 + 0.02, 0.32, mat.wood('#5a3a1e'));
+  s.box(x - 0.01, y + w / 2 - 0.02, 0, x + 0.01, y + w / 2, 0.32, mat.wood('#5a3a1e'));
+  s.box(x - 0.012, y - w / 2, 0.27, x + 0.012, y + w / 2, 0.29, mat.wood('#5a3a1e'));
+  for (let k = 0; k < 4; k++) { const yy = y - w / 2 + 0.04 + k * ((w - 0.08) / 3); s.cap([x + 0.015, yy, 0.02], [x + 0.005, yy, 0.42], 0.006, mat.wood('#7a4a24')); s.cone(x + 0.005, yy, 0.01, 0.42, 0.47, mat.metal('#dfe5ec')); }
+}
+function target(s, x, y, gold = false, z = 0.26, r = 0.09) {
+  s.box(x - 0.01, y - 0.06, 0, x + 0.01, y - 0.04, z + 0.02, mat.wood('#6b4523'));
+  s.box(x - 0.01, y + 0.04, 0, x + 0.01, y + 0.06, z + 0.02, mat.wood('#6b4523'));
+  s.hcyl('x', y, z, r, x - 0.015, x + 0.015, gold ? mat.gold() : { k: 'target', cy: y, cz: z, r });
+  s.box(x + 0.02, y - 0.1, 0, x + 0.12, y + 0.1, 0.12, mat.hay()); // stro achter de schijf
+}
+function trough(s, x, y, along = 'x', stone = false) {
+  const [w, d] = along === 'x' ? [0.13, 0.05] : [0.05, 0.13];
+  s.box(x - w, y - d, 0, x + w, y + d, 0.08, stone ? mat.stone('#a39b8c') : mat.wood('#7a5129'));
+  s.box(x - w + 0.012, y - d + 0.012, 0.066, x + w - 0.012, y + d - 0.012, 0.07, mat.plain('#4f86b8', true));
+}
+function stallAt(s, x, y, k, sc = 1) {
+  const cols = [['#c0392b', '#efe6cf'], ['#2e7d4f', '#efe6cf'], ['#2c5fae', '#efe6cf'], ['#d9a441', '#7a2b2b']];
+  for (const [dx, dy] of [[-0.13, -0.1], [0.13, -0.1], [-0.13, 0.1], [0.13, 0.1]]) s.box(x + dx * sc - 0.01, y + dy * sc - 0.01, 0, x + dx * sc + 0.01, y + dy * sc + 0.01, 0.32, mat.wood('#6b4523'));
+  s.box(x - 0.13 * sc, y - 0.1 * sc, 0.12, x + 0.13 * sc, y + 0.1 * sc, 0.15, mat.wood('#8a5f33'));
+  const [c1, c2] = cols[k % cols.length];
+  s.gable(x - 0.14 * sc, y - 0.11 * sc, x + 0.14 * sc, y + 0.11 * sc, 0.32, 0.08, 'x', mat.cloth(c1, c2, false), 0.03);
+  const goods = [['#d9483b', '#e9b93a', '#6ba33a'], ['#e8d9b0', '#c49a62', '#8a5a30'], ['#7a3a8a', '#2c5fae', '#e8e0cc'], ['#f2c230', '#d9483b', '#efe6d2']][k % 4];
+  goods.forEach((c, i) => s.ell(x + (i - 1) * 0.06 * sc, y + (i === 1 ? 0.03 : -0.02) * sc, 0.17, 0.03, 0.03, 0.025, mat.plain(c)));
+}
+function cart(s, x, y, load = 'crates') {
+  s.box(x - 0.14, y - 0.08, 0.07, x + 0.14, y + 0.08, 0.1, mat.wood('#7a5129'));
+  for (const [ex, ey] of [[x - 0.14, y - 0.08], [x + 0.14, y - 0.08], [x - 0.14, y + 0.08], [x + 0.14, y + 0.08]]) s.box(ex - 0.008, ey - 0.008, 0.1, ex + 0.008, ey + 0.008, 0.16, mat.wood('#5a3a1e'));
+  for (const wy of [y - 0.095, y + 0.095]) s.hcyl('y', x - 0.04, 0.065, 0.065, wy - 0.012, wy + 0.012, mat.wood('#5a3a1e'));
+  s.cap([x + 0.14, y - 0.04, 0.09], [x + 0.34, y - 0.03, 0.05], 0.008, mat.wood('#6b4523'));
+  s.cap([x + 0.14, y + 0.04, 0.09], [x + 0.34, y + 0.03, 0.05], 0.008, mat.wood('#6b4523'));
+  if (load === 'crates') { s.box(x - 0.12, y - 0.07, 0.1, x - 0.02, y + 0.01, 0.18, mat.wood('#a8743f')); s.box(x, y - 0.06, 0.1, x + 0.11, y + 0.06, 0.2, mat.wood('#b8854a')); }
+  else if (load === 'stone') { s.box(x - 0.11, y - 0.06, 0.1, x + 0.0, y + 0.06, 0.18, mat.stone('#d3cbb8')); s.box(x + 0.01, y - 0.06, 0.1, x + 0.11, y + 0.05, 0.17, mat.stone('#c9c0ab')); }
+  else for (const [dx, dy, dz] of [[-0.07, -0.02, 0], [0.0, 0.02, 0], [0.07, -0.01, 0], [-0.03, 0, 0.05], [0.04, 0.01, 0.05]]) s.ell(x + dx, y + dy, 0.14 + dz, 0.04, 0.035, 0.04, mat.plain('#cdb88c'));
+}
+function fountain(s, x, y, r = 0.16, gold = false) {
+  s.cyl(x, y, r, 0, 0.08, mat.stone('#cfc6b4'));
+  s.cyl(x, y, r - 0.025, 0.06, 0.075, mat.plain('#4f86b8', true));
+  s.cyl(x, y, 0.03, 0.07, 0.24, mat.stone('#d8d0bf'));
+  s.cyl(x, y, 0.07, 0.22, 0.25, mat.stone('#d8d0bf'));
+  s.ell(x, y, 0.29, 0.025, 0.025, 0.04, gold ? mat.gold() : mat.plain('#bfe0f2', true));
+}
+function statue(s, x, y, gold = false, h = 0.3) {
+  s.box(x - 0.06, y - 0.06, 0, x + 0.06, y + 0.06, 0.12, mat.stone('#a39a89'));
+  const m = gold ? mat.gold() : mat.stone('#ded6c5');
+  s.cap([x, y, 0.14], [x, y, 0.12 + h * 0.6], 0.035, m);
+  s.ell(x, y, 0.12 + h * 0.7, 0.028, 0.028, 0.032, m);
+  s.cap([x, y + 0.03, 0.12 + h * 0.5], [x + 0.04, y + 0.06, 0.12 + h * 0.85], 0.012, m);
+}
+function bush(s, x, y, r = 0.07) { s.ell(x, y, r * 0.8, r, r, r * 0.9, { k: 'leaf', c: rgb('#4f7a34') }); }
+function brazier(s, x, y) {
+  s.cyl(x, y, 0.025, 0, 0.26, mat.metal('#3a3c40'));
+  s.cyl(x, y, 0.06, 0.26, 0.31, mat.gold());
+  s.ell(x, y, 0.35, 0.045, 0.045, 0.07, mat.plain('#ff9d2e', true));
+}
+function columnRow(s, x0, y0, x1, y1, n, h, st) {
+  for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 0; const x = x0 + (x1 - x0) * t; const y = y0 + (y1 - y0) * t; s.cyl(x, y, 0.03, 0, h, mat.plaster('#f1ebde', 0, h)); s.box(x - 0.04, y - 0.04, h, x + 0.04, y + 0.04, h + 0.03, mat.plaster('#efe7d6', 0, h)); }
+  s.box(Math.min(x0, x1) - 0.04, Math.min(y0, y1) - 0.04, h + 0.03, Math.max(x0, x1) + 0.04, Math.max(y0, y1) + 0.04, h + 0.07, mat.plaster('#efe7d6', 0, h));
+}
+// lage omheining van het erf (de voorkant, met een opening): hout, palissade of steen volgens het niveau
+function yardFence(s, st, L, x0, y0, x1, y1, gapA = -0.18, gapB = 0.18) {
+  const kind = L >= 5 ? 'stone' : L >= 3 ? 'palisade' : 'fence';
+  const seg = (ax, ay, bx, by) => {
+    if (Math.hypot(bx - ax, by - ay) < 0.05) return;
+    if (kind === 'fence') { fenceLine(s, ax, ay, bx, by, 0.16); return; }
+    if (kind === 'stone') { s.box(Math.min(ax, bx) - 0.025, Math.min(ay, by) - 0.025, 0, Math.max(ax, bx) + 0.025, Math.max(ay, by) + 0.025, 0.16, mat.stone(st.base)); return; }
+    const n = Math.max(2, Math.round(Math.hypot(bx - ax, by - ay) / 0.045));
+    for (let k = 0; k <= n; k++) { const x = ax + ((bx - ax) * k) / n; const y = ay + ((by - ay) * k) / n; s.cyl(x, y, 0.022, 0, 0.24 + (k % 2) * 0.02, mat.logs('#7a5129')); s.cone(x, y, 0.022, 0.24 + (k % 2) * 0.02, 0.29 + (k % 2) * 0.02, mat.wood('#5a3a1e')); }
+  };
+  // voorkant (y = y1) met een opening in het midden, en de rechterkant (x = x1)
+  seg(x0, y1, gapA, y1); seg(gapB, y1, x1, y1); seg(x1, y0, x1, y1);
+  if (kind !== 'fence') for (const gx of [gapA, gapB]) { s.cyl(gx, y1, 0.035, 0, 0.36, kind === 'stone' ? mat.stone(st.base) : mat.logs('#6b4826')); s.ell(gx, y1, 0.38, 0.03, 0.03, 0.03, L >= 4 ? mat.gold() : mat.wood('#5a3a1e')); }
+}
+function yardBanners(s, st, L, spots) {
+  if (L < 4) return;
+  const c = st.trim || '#7a2b2b';
+  for (const [x, y, face] of spots) bannerCloth(s, x, y, 0.3, 0.26, c, face);
+}
+
+// Kazerne: oefenterrein met strooien poppen en soldaten die oefenen; meer soldaten, een wapenrek, een schijf en
+// omheining (hek → palissade → stenen muur) met elk niveau.
+function barracksYard(s, st, L) {
+  ground(s, -0.98, 0.26, 0.98, 0.98); ground(s, 0.28, -0.96, 0.98, 0.3);
+  yardFence(s, st, L, -0.95, -0.95, 0.95, 0.95);
+  const drill = [[0.05, 0.6, 0.25, 0.6], [0.05, 0.4, 0.25, 0.4], [-0.55, 0.62, -0.35, 0.62], [-0.55, 0.42, -0.35, 0.42]].slice(0, L >= 4 ? 4 : L >= 2 ? 3 : 2);
+  drill.forEach(([sx, sy, dx, dy], i) => {
+    trainingDummy(s, dx, dy);
+    const L2 = { body: ['#7b5a3a', '#5b6b85', '#7a2b2b', '#4f5a3a'][i % 4], helmet: '#8e959f', weapon: i % 2 ? 'spear' : 'sword', armor: L >= 3, plate: L >= 5, team: st.trim || '#7a2b2b' };
+    fig(s, sx, sy, L2, 'atk', [1, 5, 2, 6][i % 4]);
+  });
+  weaponRack(s, 0.66, -0.55);
+  if (L >= 2) weaponRack(s, 0.66, -0.2);
+  if (L >= 3) { target(s, 0.82, 0.55); barrel(s, 0.6, 0.1); }
+  if (L >= 4) { crate(s, 0.85, -0.8, 0.05); sacks(s, -0.85, 0.85); }
+  yardBanners(s, st, L, [[0.92, -0.45, 'x'], [-0.65, 0.92, 'y']]);
+  return {};
+}
+
+// Schietbaan: schietlanen met schijven en boogschutters die mikken; elk niveau een laan en een schutter meer.
+function rangeYard(s, st, L) {
+  ground(s, -0.98, 0.24, 0.98, 0.98, '#b9a06e'); ground(s, 0.3, -0.96, 0.98, 0.3, '#b9a06e');
+  const lanes = [0.82, 0.58, 0.36].slice(0, L >= 3 ? 3 : L >= 2 ? 2 : 1);
+  lanes.forEach((y, i) => {
+    s.box(-0.75, y - 0.11, 0.01, 0.75, y - 0.1, 0.03, mat.plain('#d8c9a0')); // lijn op de grond
+    target(s, 0.85, y, L >= 5 && i === 0);
+    fig(s, -0.62, y, { body: ['#4f7a3a', '#3f5a2a', '#5a6e3a'][i], hat: '#3f5a2a', weapon: 'bow', kit: L >= 4 ? 'L' : '' }, 'atk', [6, 3, 7][i]);
+  });
+  if (L >= 2) { target(s, 0.82, -0.5); target(s, 0.82, -0.15); }
+  if (L >= 3) { s.box(-0.95, 0.2, 0, -0.75, 0.32, 0.12, mat.hay()); barrel(s, -0.85, 0.95); }
+  if (L >= 4) for (const x of [-0.4, 0.2]) s.box(x - 0.012, 0.95, 0, x + 0.012, 0.97, 0.3, mat.wood('#5a3a1e'));
+  yardBanners(s, st, L, [[0.95, -0.85, 'x'], [-0.9, 0.95, 'y']]);
+  return {};
+}
+
+// Stal: een wei met paarden, een drinkbak en hooi; elk niveau meer paarden, op niveau 5 een ruiter.
+function stableYard(s, st, L) {
+  ground(s, -0.98, 0.26, 0.98, 0.98, '#9c8a5a'); ground(s, 0.28, -0.96, 0.98, 0.3, '#9c8a5a');
+  const fx0 = -0.9; const fx1 = 0.92; const fy0 = 0.3; const fy1 = 0.94;
+  fenceLine(s, fx0, fy1, 0.92, fy1, 0.2); fenceLine(s, fx1, -0.9, fx1, fy1, 0.2); fenceLine(s, fx0, fy0, fx0, fy1, 0.2);
+  const coats = ['#7b4f2c', '#3d3530', '#c9b48a', '#8a5a3a'];
+  const horses = [[-0.35, 0.62, 'idle', 0], [0.35, 0.7, 'walk', 3], [0.55, -0.35, 'idle', 0], [-0.2, 0.42, 'walk', 6]].slice(0, Math.min(4, L));
+  horses.forEach(([x, y, m, f], i) => figHorse(xf(s, FK, x, y), { horse: coats[i % coats.length], noRider: true }, m, f));
+  trough(s, 0.7, 0.85, 'x', L >= 3);
+  s.box(-0.85, 0.82, 0, -0.65, 0.92, 0.1, mat.hay()); s.box(-0.84, 0.83, 0.1, -0.68, 0.91, 0.17, mat.hay());
+  if (L >= 2) s.box(0.78, -0.85, 0, 0.92, -0.65, 0.12, mat.hay());
+  if (L >= 3) fig(s, 0.1, 0.9, { body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hoe' }, 'idle', 0);
+  if (L >= 5) figHorse(xf(s, FK, -0.05, 0.6), { horse: '#efe6d6', team: st.trim || '#7a2b2b', body: '#9aa1ab', helmet: '#c9ced6', armor: true, plate: true, weapon: 'lance' }, 'idle', 0);
+  yardBanners(s, st, L, [[0.95, -0.95, 'x'], [-0.95, 0.96, 'y']]);
+  return {};
+}
+
+// Markt: een plein met kasseien, meer kraampjes, kopers, een put (2), een kar met waren (3) en een fontein (4-5).
+function marketYard(s, st, L) {
+  paving(s, -0.98, 0.22, 0.98, 0.98); paving(s, 0.22, -0.98, 0.98, 0.3);
+  const stalls = [[0.55, 0.72], [0.62, -0.6], [-0.15, 0.72], [0.62, -0.05]].slice(0, Math.min(4, L + 1));
+  stalls.forEach(([x, y], k) => stallAt(s, x, y, k + 1, 1));
+  fig(s, 0.3, 0.45, { body: '#8a5a8a', hat: '#e8d9b0' });
+  if (L >= 2) fig(s, -0.4, 0.5, { body: '#2e6a6a', skin: 2 });
+  if (L >= 2) { const wx = -0.7; const wy = 0.75; s.cyl(wx, wy, 0.1, 0, 0.13, mat.stone('#a39b8c')); s.cyl(wx, wy, 0.08, 0.11, 0.13, mat.plain('#3d6f9a', true)); for (const x of [wx - 0.08, wx + 0.08]) s.box(x - 0.01, wy - 0.01, 0.13, x + 0.01, wy + 0.01, 0.36, mat.wood('#5a3a1e')); s.gable(wx - 0.12, wy - 0.1, wx + 0.12, wy + 0.1, 0.36, 0.08, 'x', mat.tiles('#9a4630'), 0.01); }
+  if (L >= 3) cart(s, 0.3, 0.12, 'sacks');
+  if (L >= 4) fountain(s, 0.15, 0.48, 0.14, L >= 5);
+  for (const [x, y] of [[0.88, 0.3], [-0.9, 0.35]]) barrel(s, x, y);
+  crate(s, 0.9, -0.9, 0.05);
+  if (L >= 3) lampPost(s, 0.92, 0.92);
+  return {};
+}
+
+// Belegwerkplaats: een bouwplaats met een ram, hout en steen, en een hijskraan (2); op 3 nog een werker.
+function workshopYard(s, st, L) {
+  ground(s, -0.98, 0.24, 0.98, 0.98, '#a88e62'); ground(s, 0.3, -0.96, 0.98, 0.3, '#a88e62');
+  figRam(xf(s, 1.05, 0.25, 0.62), { team: st.trim || '#7a2b2b' }, 'idle', 0);
+  logPile(s, -0.55, 0.75, 3);
+  planks(s, 0.7, -0.55, 4);
+  if (L >= 2) { blocks(s, 0.62, -0.1, 5); hoist(s, 0.9, -0.82, 0.9, 'crate', -1); }
+  if (L >= 3) { fig(s, -0.2, 0.45, { body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'hammer' }, 'work', 2); cart(s, -0.55, 0.42, 'stone'); }
+  yardFence(s, st, Math.min(L, 2), -0.95, -0.95, 0.95, 0.95);
+  return {};
+}
+
+// Academie: een binnenplein met tuinen, een fontein (2) en een beeld met zuilen (3); geleerden in gesprek.
+function academyYard(s, st, L) {
+  paving(s, -0.98, 0.24, 0.98, 0.98, '#cfc5b0'); paving(s, 0.24, -0.98, 0.98, 0.3, '#cfc5b0');
+  for (const [x0, y0, x1, y1] of [[-0.9, 0.7, -0.45, 0.92], [0.45, 0.7, 0.92, 0.92], [0.7, -0.9, 0.92, -0.45]]) {
+    s.box(x0, y0, 0, x1, y1, 0.05, mat.stone('#a39b8c'));
+    s.box(x0 + 0.02, y0 + 0.02, 0.04, x1 - 0.02, y1 - 0.02, 0.055, groundM('#5a4630'));
+    for (let x = x0 + 0.08; x < x1 - 0.04; x += 0.12) for (let y = y0 + 0.08; y < y1 - 0.04; y += 0.12) bush(s, x, y, 0.05);
+  }
+  fig(s, 0.0, 0.55, { body: '#5b2a7a', look: 'noble' });
+  fig(s, 0.35, 0.45, { body: '#2c4f7a', hat: '#e8dcc0' });
+  if (L >= 2) fountain(s, 0.55, 0.1, 0.15);
+  if (L >= 3) { statue(s, -0.25, 0.85, false); columnRow(s, 0.9, -0.3, 0.9, 0.45, 4, 0.42, st); }
+  return {};
+}
+
+// Gildehuis: een binnenplaats vol handelswaar (kisten, zakken, vaten), een kar en een pakhuis; meer met elk niveau.
+function guildYard(s, st, L) {
+  paving(s, -0.98, 0.24, 0.98, 0.98, '#b9ae99'); paving(s, 0.24, -0.98, 0.98, 0.3, '#b9ae99');
+  hut(s, st, 0.5, -0.9, 0.92, -0.45, 0.32, Math.max(2, L), 'y');
+  cart(s, 0.35, 0.55, 'crates');
+  for (const [x, y] of [[-0.7, 0.8], [-0.55, 0.8], [0.8, 0.0]]) barrel(s, x, y);
+  crate(s, -0.85, 0.55, 0.06); crate(s, -0.85, 0.55, 0.05, 0.1); sacks(s, 0.7, 0.3);
+  fig(s, -0.2, 0.55, { body: '#7a5a2b', hat: '#3a2a1c' });
+  if (L >= 2) { hoist(s, 0.55, -0.35, 0.6, 'sack', 1); blocks(s, 0.7, 0.75, 3, '#c9b48a'); }
+  if (L >= 3) fig(s, 0.65, 0.65, { body: '#2c5fae', skin: 1, carry: 'gold' });
+  if (L >= 4) { crate(s, 0.85, 0.85, 0.06); lampPost(s, -0.92, 0.25); }
+  yardBanners(s, st, L, [[0.95, 0.1, 'x'], [-0.4, 0.96, 'y']]);
+  return {};
+}
+
+// Bouwloods: steenblokken, gezaagd hout, een grote hijskraan en een stuk muur in de steigers.
+function lodgeYard(s, st, L) {
+  ground(s, -0.98, 0.24, 0.98, 0.98, '#b0976a'); ground(s, 0.3, -0.96, 0.98, 0.3, '#b0976a');
+  blocks(s, -0.7, 0.55, 6); blocks(s, -0.45, 0.8, 4, '#e0d6c0');
+  planks(s, 0.65, -0.7, 5); logPile(s, 0.7, -0.25, 3);
+  // stuk muur in de steigers
+  s.box(0.0, 0.62, 0, 0.55, 0.78, 0.22 + L * 0.06, mat.stone('#d3cbb8'));
+  for (const x of [-0.02, 0.27, 0.57]) for (const y of [0.58, 0.82]) s.box(x - 0.01, y - 0.01, 0, x + 0.01, y + 0.01, 0.5 + L * 0.06, mat.wood('#6b4523'));
+  s.box(-0.03, 0.56, 0.28 + L * 0.06, 0.58, 0.84, 0.3 + L * 0.06, mat.wood('#8a5f33'));
+  hoist(s, 0.88, 0.2, 0.95 + L * 0.1, 'crate', -1);
+  fig(s, 0.2, 0.42, { body: '#8b6a43', hat: '#d8ae52', weapon: 'tool', tool: 'pick' }, 'work', 3);
+  if (L >= 2) { fig(s, -0.3, 0.4, { body: '#6f7f4a', weapon: 'tool', tool: 'hammer' }, 'work', 6); cart(s, 0.5, 0.25, 'stone'); }
+  if (L >= 3) for (const [x, y] of [[0.92, 0.92], [-0.92, 0.3]]) bannerCloth(s, x, y, 0.3, 0.26, st.trim || '#7a2b2b', 'y');
+  return {};
+}
+
+// Monument (4x4): een groot plein met het monument in het midden; beelden en bloembakken (2), vijvers en een balustrade (3),
+// een zuilengang en obelisken (4), vuurschalen en gouden beelden (5).
+function monumentYard(s, st, L) {
+  paving(s, -1.98, -1.98, 1.98, 1.98, '#d6cdb9', 0.02);
+  // brede trap naar het plein aan de voorkant
+  for (let k = 0; k < 3; k++) s.box(-0.5 - k * 0.04, 1.6 + k * 0.12, 0, 0.5 + k * 0.04, 1.98, 0.08 - k * 0.025, mat.stone(k % 2 ? '#e6dfcf' : '#d3cbb8'));
+  const corners = [[-1.65, 1.65], [1.65, 1.65], [1.65, -1.65], [-1.65, -1.65]];
+  if (L >= 2) for (const [x, y] of corners) statue(s, x, y, L >= 5, 0.42);
+  if (L >= 2) for (const [x, y] of [[-1.2, 1.75], [1.2, 1.75], [1.75, 1.2], [1.75, -1.2]]) { s.box(x - 0.12, y - 0.12, 0, x + 0.12, y + 0.12, 0.1, mat.stone('#a39b8c')); bush(s, x, y, 0.1); }
+  if (L >= 3) {
+    for (const [x0, y0, x1, y1] of [[0.7, 1.45, 1.4, 1.85], [1.45, 0.7, 1.85, 1.4], [-1.4, 1.45, -0.7, 1.85]]) {
+      s.box(x0, y0, 0, x1, y1, 0.08, mat.stone('#bdb5a6'));
+      s.box(x0 + 0.03, y0 + 0.03, 0.06, x1 - 0.03, y1 - 0.03, 0.07, { k: 'water' });
+    }
+    for (const [ax, ay, bx, by] of [[-1.95, 1.95, -0.55, 1.95], [0.55, 1.95, 1.95, 1.95], [1.95, -1.95, 1.95, 1.95]]) {
+      s.box(Math.min(ax, bx) - 0.03, Math.min(ay, by) - 0.03, 0, Math.max(ax, bx) + 0.03, Math.max(ay, by) + 0.03, 0.18, mat.plaster('#efe7d6', 0, 0.2));
+    }
+  }
+  if (L >= 4) {
+    columnRow(s, -1.55, 1.3, -1.55, -1.3, 6, 0.6, st); columnRow(s, 1.3, -1.55, -1.3, -1.55, 6, 0.6, st);
+    for (const [x, y] of [[1.55, 0.0], [0.0, 1.55]]) { s.box(x - 0.07, y - 0.07, 0, x + 0.07, y + 0.07, 0.95, mat.stone('#e2cc96')); s.hip(x - 0.07, y - 0.07, x + 0.07, y + 0.07, 0.95, 0.14, mat.gold(), 0); }
+  }
+  if (L >= 5) for (const [x, y] of [[-0.75, 1.75], [0.75, 1.75], [1.75, 0.75], [1.75, -0.75]]) brazier(s, x, y);
+  return {};
+}
+
+const BIG = {
+  barracks: { k: 1.3, dx: -0.38, dy: -0.42, yard: barracksYard },
+  range: { k: 1.3, dx: -0.36, dy: -0.4, yard: rangeYard },
+  stable: { k: 1.3, dx: -0.38, dy: -0.44, yard: stableYard },
+  market: { k: 1.25, dx: -0.42, dy: -0.42, yard: marketYard },
+  workshop: { k: 1.3, dx: -0.36, dy: -0.4, yard: workshopYard },
+  academy: { k: 1.3, dx: -0.38, dy: -0.42, yard: academyYard },
+  guild: { k: 1.3, dx: -0.38, dy: -0.4, yard: guildYard },
+  lodge: { k: 1.3, dx: -0.4, dy: -0.4, yard: lodgeYard },
+  monument: { k: 1.55, dx: -0.1, dy: -0.1, yard: monumentYard },
+};
+
 const BUILD = { house, farm, lumber, quarry, goldmine, storage, barracks, range, stable, smithy, market, tower, workshop, monument, tc, mill, academy, guild, lodge, court, cathedral, harbor };
 export const HAS_3D = new Set(Object.keys(BUILD));
-const SIZE = { tc: 2, monument: 2 };
+const SIZE = { tc: 2, monument: 4, barracks: 2, range: 2, stable: 2, market: 2, workshop: 2, academy: 2, guild: 2, lodge: 2 };
 
 // stijl + kleine variatie per huis (muur- en dakkleur), zodat een straat niet eentonig is
 export function build(type, level, civ = null, variant = 0) {
@@ -1879,10 +2172,21 @@ export function build(type, level, civ = null, variant = 0) {
   if (variant && type === 'house') { st.plaster = tint(st.plaster, variant === 1 ? -0.06 : 0.04); if (st.roofC) st.roofC = tint(st.roofC, variant === 1 ? 0.12 : -0.12); }
   const s = new Scene();
   const L = Math.max(1, level);
-  const anchors = (BUILD[type] || house)(s, st, L, civ, variant) || {};
-  dressHigh(s, st, L, type);
+  const B = BIG[type];
+  let anchors;
+  if (B) {
+    // groot gebouw: het hoofdgebouw (ontwerp van 1x1) groter achteraan, daarrond het erf
+    const a = (BUILD[type] || house)(xf(s, B.k, B.dx, B.dy), st, L, civ, variant) || {};
+    anchors = {};
+    for (const k of Object.keys(a)) anchors[k] = xfPoint(a[k], B);
+    Object.assign(anchors, B.yard(s, st, L, civ, variant) || {});
+  } else {
+    anchors = (BUILD[type] || house)(s, st, L, civ, variant) || {};
+    dressHigh(s, st, L, type);
+  }
   s.anchors = anchors;
-  s.apron = (SIZE[type] || 1) === 2 ? 1.05 : type === 'quarry' || type === 'goldmine' ? 0.55 : 0.52;
+  const z = SIZE[type] || 1;
+  s.apron = z === 4 ? 2.05 : z === 2 ? 1.05 : type === 'quarry' || type === 'goldmine' ? 0.55 : 0.52;
   return s;
 }
 

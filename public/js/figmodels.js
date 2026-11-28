@@ -461,8 +461,8 @@ export function horse(s, L, mode, f) {
     s.cap([-0.005, side * 0.072, bz + 0.07], [0.04, side * 0.083, bz - 0.11], 0.0028, lth);
     s.ell(0.04, side * 0.083, bz - 0.115, 0.012, 0.006, 0.006, metal('#8e959f'));
   }
-  // ruiter
-  person(s, { ...L, horse: undefined }, mode === 'atk' ? 'atk' : 'idle', mode === 'atk' ? f : 0, bz + 0.05);
+  // ruiter (niet bij een paard in de wei)
+  if (!L.noRider) person(s, { ...L, horse: undefined }, mode === 'atk' ? 'atk' : 'idle', mode === 'atk' ? f : 0, bz + 0.05);
 }
 
 // schaap: wollen lijf uit plukjes, donkere kop, dunne poten; graast met de kop omlaag
