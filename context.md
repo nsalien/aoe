@@ -635,6 +635,17 @@ minuut een bot aan de beurt als niemand online is.
     stuurde een gulle bot 24 karavanen (om de 2 u) zonder limiet en 6 (om de 8,00 u) met. Echte tijd, zoals `CLAN.switchMs`.
     Nieuwsartikel nr. 7. Getest: `tests/trade.test.js` (echte routes, nepklok) en in Chromium op pc en gsm.
 
+70. **Haperen bij schuiven en zoomen op gsm** (gemeld met een video: "behoorlijk laggy, ook met alle beweging uit; inzoomen,
+    uitzoomen en bewegen voelt niet vlot"). Video (Android, 60 Hz opname): tijdens het bewegen ±40 bps, maar 24 haperingen > 40 ms
+    in 11 s, tot 270 ms. Oorzaken (gemeten met een uitgebouwde stad, Pixel 7-emulatie, CPU 4x, echte aanraakgebaren via CDP):
+    nieuwe scherpe grondstukken (200-360 ms per stuk van 512 px), scherpere 3D-versies die bij elke zoomstap aangevraagd werden
+    (werkers bezetten de snelle kernen), en het bakken van de wereldkaart in de eerste minuut (stappen tot 187 ms). Aangepakt:
+    kleinere stukken op aanraakschermen, geen nieuwe stukken tijdens een gebaar (daarna één per beeld), resolutie vast tijdens het
+    knijpen, terugval op de vorige resolutie, geen scherpe 3D-aanvragen tijdens een gebaar, wereldkaart pauzeert bij aanraken en
+    heeft kleinere stappen (max ±100 ms). Langste hapering tijdens het gebaar: schuiven 696 → 157 ms, inzoomen 417 → 123 ms,
+    uitzoomen 275 → 90 ms (proef-gsm 4x vertraagd, zonder GPU). Nieuwsartikel nr. 8. Nog niet op een echt Android-toestel
+    nagemeten: vraag de gebruiker om een nieuwe video. Zie CLAUDE.md › Snelheid.
+
 ## 8. Bekende beperkingen en ideeën
 
 - Belegering (uithongeren, uitval in open veld): zie `docs/idee-belegering.md` (voorstel, nog niet gebouwd).
